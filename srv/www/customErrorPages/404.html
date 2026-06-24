@@ -1,0 +1,78 @@
+<!-- DOCTYPE：声明这是 HTML 文件
+html：整个网页
+head：网页说明区
+meta：编码
+title：浏览器标签页标题
+style：CSS 样式
+body：网页可见内容
+div.card：居中的白色卡片
+h1：错误码大标题
+p：解释文字
+a：返回首页链接
+
+最终浏览器效果是：
+
+整个浏览器窗口中间
+  一个白色圆角卡片
+    404 — Not Found
+    We can’t find the page you’re looking for.
+    Go back home -->
+    
+    <!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <title>404 Not Found</title>
+  <style>
+    html,
+    body {
+      height: 100%;
+      margin: 0
+    }
+
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center
+    }
+
+    .card {
+      max-width: 520px;
+      padding: 24px;
+      border: 1px solid #ddd;
+      border-radius: 12px;
+      font: 16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: #fff;
+      color: #111;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 32px
+    }
+
+    p {
+      margin: 8px 0
+    }
+
+    a {
+      color: #0645AD;
+      text-decoration: none
+    }
+
+    a:hover {
+      text-decoration: underline
+    }
+  </style>
+</head>
+
+<body>
+  <div class="card">
+    <h1>404 — Not Found</h1>
+    <p>We can't find the page you're looking for.</p>
+    <p><a href="/">Go back home</a></p>
+  </div>
+</body>
+
+</html>
