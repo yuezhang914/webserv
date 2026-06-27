@@ -1,0 +1,103 @@
+/*
+文件：srcs/Config/Config.cpp
+配置对象基础工具实现。这个文件负责 Config 构造、析构、字符串 trim/split 等底层辅助逻辑；真正的配置语法解析在 ConfigParser.cpp；server/location 指令含义分别在 ServerConfig.cpp、LocationConfig.cpp。
+*/
+#include "Config.hpp"
+
+/*
+函数：Config::Config
+用途：启动时读取配置文件并建立内存中的配置对象。
+参数来源：path 来自 main()，通常是命令行 ./webserv default.conf 的 argv[1]；如果用户没传，main 会用 "default.conf"。
+变量解释：
+    - path：main 传入的配置文件路径，例如 default.conf。
+    - error：Config 成员变量，记录配置是否有错误；0 表示正常，1 表示错误。
+    - servers：parseFile 成功后填充的 server 配置列表。
+实现逻辑：
+    1. 先把 error 设为 0，表示暂时没有错误。
+    2. 调用 parseFile(path)，读取并解析配置文件，把结果放进 servers。
+    3. 如果 parseFile 返回 ERROR，说明文件打不开、语法错误或指令非法，打印错误并设置 error=1。
+    4. 如果解析成功，再调用 serversHaveRoot()，确认每个 server 都有 root。
+    5. 如果缺少 root，也设置 error=1，因为后面无法把 URI 映射到真实文件路径。
+后续影响：main() 会检查 config.error；只有没有错误才会继续 setupSockets() 和 serverLoop()。
+*/
+Config::Config(const std::string& path) {
+	this->error = 0;
+	if (parseFile(path) == ERROR)
+	{
+		std::cerr << "Error: Failed to parse config file" << std::endl;
+		this->error = 1;
+	}
+	else if (serversHaveRoot() == ERROR)
+	{
+		std::cerr << "Error: At least one server must have a root directive" << std::endl;
+		this->error = 1;
+	}
+}
+
+/*
+函数：Config::~Config
+用途：销毁 Config 对象。
+变量解释：
+    - servers：Config 成员，会由 vector 自动析构。
+    - error：普通 bool/int 标志，不需要额外释放。
+实现逻辑：
+    1. Config 自己没有手动 new 的内存，也没有自己打开的 fd。
+    2. vector/string/map/set 会自动析构。
+    3. ServerConfig 的析构函数会负责关闭自己的 socketFd。
+*/
+Config::~Config() {}
+
+/*
+函数：Config::trim
+用途：清理字符串两端的空白字符和分号。
+参数来源：split() 或旧辅助场景传入的文本；健壮版配置 parser 主要由 tokenizeConfig 处理 ;。
+变量解释：
+    - str：待清理的输入字符串。
+    - first：第一个有效字符的位置。
+    - last：最后一个有效字符的位置。
+    - 返回值：str 去掉首尾空白和分号后的结果。
+实现逻辑：
+    1. find_first_not_of 找到第一个不是空格、tab、换行、分号的位置。
+    2. 如果整段都没有有效字符，返回空字符串。
+    3. find_last_not_of 找到最后一个不是空白/分号的位置。
+    4. substr 截取有效内容。
+例子："  root srv/www;  " 经过 trim 后变成 "root srv/www"。
+*/
+std::string Config::trim(const std::string& str) const {
+	size_t first = str.find_first_not_of(" \t\n;");
+	if (first == std::string::npos) return "";
+	size_t last = str.find_last_not_of(" \t\n;");
+	return str.substr(first, last - first + 1);
+}
+
+/*
+函数：Config::split
+用途：按指定分隔符拆分字符串。
+参数来源：listen 指令中判断 IP 是否像 IPv4 时会用 split(value, '.')；配置主 parser 已改由 tokenizeConfig 负责。
+变量解释：
+    - str：待拆分的字符串，例如 127.0.0.1。
+    - delimiter：分隔符，例如 .。
+    - tokens：返回用的数组，保存拆分出的非空片段。
+    - ss：包装 str 的 stringstream。
+    - token：getline 每次读出的一个片段，trim 后再放入 tokens。
+实现逻辑：
+    1. 用 stringstream 包装输入字符串。
+    2. 用 getline 按 delimiter 读取每一段。
+    3. 每一段先 trim，去掉空白和末尾分号。
+    4. 如果 token 非空，就 push_back 到 tokens。
+    5. 返回 tokens 给 parseDirective。
+例子："listen 127.0.0.1:3435;" 会变成 ["listen", "127.0.0.1:3435"]。
+*/
+std::vector<std::string> Config::split(const std::string& str, char delimiter) const {
+	std::vector<std::string> tokens;
+	std::stringstream ss(str);
+	std::string token;
+
+	while (std::getline(ss, token, delimiter)) {
+		token = trim(token);
+		if (!token.empty()) {
+			tokens.push_back(token);
+		}
+	}
+	return(tokens);
+}

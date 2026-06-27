@@ -3,7 +3,17 @@ NAME = webserv
 CXX = g++
 CXXFLAGS = -Wall -Wextra -Werror -std=c++98
 
-SRCS = 	
+SRC_DIRS = \
+	srcs \
+	srcs/Config \
+	srcs/Server \
+	srcs/Request \
+	srcs/Response \
+	srcs/Cgi \
+	srcs/Bonus \
+	srcs/Utils
+
+SRCS = $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.cpp))
 		
 OBJS = $(SRCS:.cpp=.o)
 
