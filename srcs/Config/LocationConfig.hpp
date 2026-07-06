@@ -28,7 +28,7 @@ class LocationConfig {
 	/* 是否显式写过 autoindex。设计目的：区分“location 没写 autoindex”和“location 明确写 autoindex off”。 */
 	bool has_autoindex;
 	/* 当前 location 的 index 文件。来源：index 指令；如果为空则使用 server.index 或默认 index.html。 */
-	std::string index;
+	std::vector<std::string> index;
 	/* CGI 后缀到解释器路径的映射。来源：cgi_extension .py /usr/bin/python3;。CGI 判断和 execve 用它。 */
 	std::map<std::string, std::string> cgi_extensions;
 	/* 上传目录。来源：upload_path 指令；POST 保存文件时使用。 */

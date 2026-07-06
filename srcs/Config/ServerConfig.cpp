@@ -50,6 +50,9 @@ static int is_valid_ipv4(const char *ip)
 		int value = std::atoi(part.c_str());
 		if (value < 0 || value > 255)
 			return ERROR;
+		// 如果长度大于 1 且第一个数字是 '0'，说明存在恶意前导零（如 "010"），直接扼杀
+		if (part.size() > 1 && part[0] == '0')
+			return ERROR;
 		count++;
 	}
 	if (count != 4)
