@@ -91,172 +91,214 @@ static int is_valid_ipv4(const char *ip)
 */
 bool Config::parseServerDirective(const std::string &directive, const std::vector<std::string> &values, ServerConfig *srv)
 {
-	if (directive == "allow_methods")
-	{
-		if (values.size() >= 1)
-		{
-			for (size_t i = 0; i < values.size(); ++i)
-				srv->allow_methods.insert(values[i]);
-		}
-		else
-			srv->allow_methods.insert("NONE");
-	}
-	else if (directive == "upload_path")
-	{
-		if (values.size() != 1)
-		{
-			std::cerr << "Error: Invalid upload_path directive - only one value allowed" << std::endl;
-			return ERROR;
-		}
-		srv->upload_path = values[0];
-	}
-	else if (directive == "autoindex" || directive == "directory_listing")
-	{
-		if (values.size() != 1)
-		{
-			std::cerr << "Invalid " << directive << " directive" << std::endl;
-			return ERROR;
-		}
-		if (values[0] == "on")
-			srv->autoindex = true;
-		else if (values[0] == "off")
-			srv->autoindex = false;
-		else
-		{
-			std::cerr << "Invalid " << directive << " directive value: " << values[0] << std::endl;
-			return ERROR;
-		}
-	}
-	else if (directive == "listen")
-	{
-		if (values.size() != 1)
-		{
-			std::cerr << "Invalid listen directive" << std::endl;
-			return ERROR;
-		}
+    if (directive == "allow_methods")
+    {
+        if (values.size() >= 1)
+        {
+            for (size_t i = 0; i < values.size(); ++i)
+            {
+                if (values[i].empty())
+                {
+                    std::cerr << "Error: Empty method token in allow_methods" << std::endl;
+                    return ERROR;
+                }
+                std::string method = values[i];
+                for (size_t j = 0; j < method.size(); ++j)
+                    method[j] = std::toupper(method[j]);
 
-		std::string value = values[0];
-		std::string ip;
-		std::string port_str;
-		size_t colon_pos = value.find(':');
+                if (method != "GET" && method != "POST" && method != "DELETE")
+                {
+                    std::cerr << "Error: Unsupported HTTP method: " << values[i] << std::endl;
+                    return ERROR;
+                }
+                srv->allow_methods.insert(method);
+            }
+        }
+        else
+            srv->allow_methods.insert("NONE");
+    }
+    else if (directive == "upload_path")
+    {
+        if (values.size() != 1)
+        {
+            std::cerr << "Error: Invalid upload_path directive - only one value allowed" << std::endl;
+            return ERROR;
+        }
+        srv->upload_path = values[0];
+    }
+    else if (directive == "autoindex" || directive == "directory_listing")
+    {
+        if (values.size() != 1)
+        {
+            std::cerr << "Invalid " << directive << " directive" << std::endl;
+            return ERROR;
+        }
+        if (values[0] == "on")
+            srv->has_autoindex = true;
+        else if (values[0] == "off")
+            srv->has_autoindex = false;
+        else
+        {
+            std::cerr << "Invalid " << directive << " directive value: " << values[0] << std::endl;
+            return ERROR;
+        }
+    }
+    else if (directive == "listen")
+    {
+        if (values.size() != 1)
+        {
+            std::cerr << "Invalid listen directive" << std::endl;
+            return ERROR;
+        }
 
-		if (colon_pos == std::string::npos)
-		{
-			std::vector<std::string> parts = split(value, '.');
-			if (parts.size() == 4)
-			{
-				ip = value;
-				port_str = DEFAULT_PORT;
-			}
-			else
-			{
-				port_str = value;
-				ip = "";
-			}
-		}
-		else
-		{
-			ip = value.substr(0, colon_pos);
-			port_str = value.substr(colon_pos + 1);
-		}
+        if (srv->countport >= 1)
+        {
+            std::cerr << "Invalid number of port" << std::endl;
+            return ERROR;
+        }
 
-		if (!ip.empty())
-		{
-			if (is_valid_ipv4(ip.c_str()) == ERROR)
-			{
-				std::cerr << "Invalid IP in listen directive: " << ip << std::endl;
-				return ERROR;
-			}
-			else
-			{
-				srv->host = ip;
-			}
-		}
-		else
-		{
-			srv->host = "INADDR_ANY";
-		}
+        std::string value = values[0];
+        std::string ip;
+        std::string port_str;
+        size_t colon_pos = value.find(':');
 
-		char *endptr;
-		srv->port = strtol(port_str.c_str(), &endptr, 10);
-		if (srv->countport >= 1)
-		{
-			std::cerr << "Invalid number of port" << std::endl;
-			return ERROR;
-		}
-		srv->countport++;
-		if (*endptr != '\0' || port_str.empty() || srv->port < 0 || srv->port > 65535)
-		{
-			std::cerr << "Invalid port in listen directive: " << port_str << std::endl;
-			return ERROR;
-		}
-	}
-	else if (directive == "server_name")
-	{
-		for (size_t i = 0; i < values.size(); ++i)
-			srv->server_names.push_back(values[i]);
-	}
-	else if (directive == "root")
-	{
-		if (values.size() != 1)
-		{
-			std::cerr << "Invalid root directive" << std::endl;
-			return ERROR;
-		}
-		if (!srv->root.empty())
-		{
-			std::cerr << "Error: Duplicate root directive in server" << std::endl;
-			return ERROR;
-		}
-		srv->root = values[0];
-		srv->has_root = true;
-	}
-	else if (directive == "error_page")
-	{
-		if (values.size() < 2)
-		{
-			std::cerr << "Invalid error_page directive" << std::endl;
-			return ERROR;
-		}
-		char *endptr;
-		int code = strtol(values[0].c_str(), &endptr, 10);
-		if (*endptr != '\0')
-		{
-			std::cerr << "Error: Invalid error_page directive code" << std::endl;
-			return ERROR;
-		}
-		srv->error_pages[code] = values[1];
-	}
-	else if (directive == "max_body_size")
-	{
-		if (values.size() != 1)
-		{
-			std::cerr << "Invalid client_max_body_size directive" << std::endl;
-			return ERROR;
-		}
-		size_t size = parseSize(values[0]);
-		if (size == (size_t)ERROR_PARSE_SIZE)
-		{
-			std::cerr << "Invalid parse size" << std::endl;
-			return ERROR;
-		}
-		srv->max_body_size = size;
-	}
-	else if (directive == "index")
-	{
-		if (values.size() != 1)
-		{
-			std::cerr << "Error: Invalid index directive - only one value allowed" << std::endl;
-			return ERROR;
-		}
-		srv->index = values[0];
-	}
-	else
-	{
-		std::cerr << "Error: Unknown server directive: " << directive << std::endl;
-		return ERROR;
-	}
-	return 0;
+        if (colon_pos == std::string::npos)
+        {
+            std::vector<std::string> parts = split(value, '.');
+            if (parts.size() == 4)
+            {
+                ip = value;
+                port_str = DEFAULT_PORT;
+            }
+            else
+            {
+                port_str = value;
+                ip = "";
+            }
+        }
+        else
+        {
+            ip = value.substr(0, colon_pos);
+            port_str = value.substr(colon_pos + 1);
+        }
+
+        if (!ip.empty())
+        {
+            if (is_valid_ipv4(ip.c_str()) == ERROR)
+            {
+                std::cerr << "Invalid IP in listen directive: " << ip << std::endl;
+                return ERROR;
+            }
+            srv->host = ip;
+        }
+        else
+        {
+            srv->host = "INADDR_ANY";
+        }
+
+        char *endptr;
+        srv->port = strtol(port_str.c_str(), &endptr, 10);
+        
+        if (*endptr != '\0' || port_str.empty() || srv->port < 0 || srv->port > 65535)
+        {
+            std::cerr << "Invalid port in listen directive: " << port_str << std::endl;
+            return ERROR;
+        }
+        
+        /* 🎯 【修改点 1：调整计数时序，落闸防御状态污染】 */
+        /* 解释：将 srv->countport++ 彻底移到本分支所有格式与值域校验通过的最下行，
+                确保在遭遇非法端口格式投毒（如 999999）直接强退时，不会错误改写、污染全局的状态计数位 */
+        srv->countport++;
+    }
+    else if (directive == "server_name")
+    {
+        /* 【修改点 2：并线域名清空锁，复刻工业覆盖语义】 */
+        /* 解释：在执行 push_back 循环前加入 .clear() 锁，保证在同一个 server 块中
+                如果多次出现 server_name 或者是继承自全局配置时，后写的指令能彻底覆盖、洗牌先写的，对齐 Nginx 官方原厂契约 */
+        srv->server_names.clear();
+        for (size_t i = 0; i < values.size(); ++i)
+            srv->server_names.push_back(values[i]);
+    }
+    else if (directive == "root")
+    {
+        if (values.size() != 1)
+        {
+            std::cerr << "Invalid root directive" << std::endl;
+            return ERROR;
+        }
+        if (!srv->root.empty())
+        {
+            std::cerr << "Error: Duplicate root directive in server" << std::endl;
+            return ERROR;
+        }
+        srv->root = values[0];
+        srv->has_root = true;
+    }
+    else if (directive == "error_page")
+    {
+        if (values.size() < 2)
+        {
+            std::cerr << "Invalid error_page directive" << std::endl;
+            return ERROR;
+        }
+        /* 【修改点 3：锁定尾部路径，完美兼容多错误码一对多映射】 */
+        /* 解释：彻底推翻了“状态码与路径必然单对单成对出现”的旧版误区。物理锁定 values[values.size() - 1] 必然是页面路径，
+                再通过循环把前面由于多码聚合（如 error_page 404 403 /error.html）切出来的全部错误码安全地灌入状态机，封杀了路径错位乱码隐患 */
+        std::string error_path = values[values.size() - 1];
+        if (error_path.empty())
+        {
+            std::cerr << "Error: Empty error page path" << std::endl;
+            return ERROR;
+        }
+        for (size_t i = 0; i < values.size() - 1; ++i)
+        {
+            char *endptr;
+            int code = strtol(values[i].c_str(), &endptr, 10);
+            if (*endptr != '\0' || code < 300 || code > 599)
+            {
+                std::cerr << "Error: Invalid error_page code: " << values[i] << std::endl;
+                return ERROR;
+            }
+            srv->error_pages[code] = error_path;
+        }
+    }
+    else if (directive == "max_body_size")
+    {
+        if (values.size() != 1)
+        {
+            std::cerr << "Invalid client_max_body_size directive" << std::endl;
+            return ERROR;
+        }
+        size_t size = parseSize(values[0]);
+        if (size == (size_t)ERROR_PARSE_SIZE)
+        {
+            std::cerr << "Invalid parse size" << std::endl;
+            return ERROR;
+        }
+        srv->max_body_size = size;
+    }
+    else if (directive == "index")
+    {
+        if (values.size() < 1)
+        {
+            std::cerr << "Error: Invalid index directive" << std::endl;
+            return ERROR;
+        }
+        /* 【修改点 4：并线多首页 vector 全局状态对齐】 */
+        /* 解释：配合你之前在大房间 ServerConfig 数据底座以及 LocationConfig 里将 index 由 string 升级为 vector 的高能重构，
+                此处同步并线了 .clear() 并使用 size_t 规整化循环，打通了全系统一的‘Fallback 变长首页轮询机制’ */
+        srv->index.clear();
+        for (size_t i = 0; i < values.size(); ++i)
+            srv->index.push_back(values[i]);
+    }
+    else
+    {
+        std::cerr << "Error: Unknown server directive: " << directive << std::endl;
+        return ERROR;
+    }
+    /* 🎯 【修改点 5：宏定义状态重塑，消除裸数字隐式穿透】 */
+    /* 解释：废除了原本随手裸写的 return 0; 彻底向主干框架约定的宏定义或枚举值 SUCCESS 进行强约束呼应，保障返回值体系的高度纯净 */
+    return SUCCESS;
 }
 
 /*
@@ -281,13 +323,22 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
 	7. 清空 server_names/error_pages/locations/allow_methods 等容器。
 */
 ServerConfig::ServerConfig()
-	: port(8080), countport(0), host(""), root(""), max_body_size(MAX_BODY_SIZE), socketFd(0), has_root(false), autoindex(false)
+    : port(8080)
+    , countport(0)
+    , host("")
+    , server_names()     // 在初始化列表里显式触发默认空构造
+    , root("")
+    , error_pages()      // 自动初始化为空 map
+    , max_body_size(MAX_BODY_SIZE)
+    , locations()
+    , index()            // 多首页 vector 默认纯净初始化
+    , upload_path("")
+    , allow_methods()
+    , socketFd(-1)       // 必须是 -1
+    , has_root(false)
+    , has_autoindex(false)
 {
-	server_names.clear();
-	error_pages.clear();
-	locations.clear();
-	index = "";
-	allow_methods.clear();
+    // 💡 大括号内保持绝对的纯净空荡，不需要做任何画蛇添足的显式 clear()！
 }
 
 /*
@@ -352,7 +403,7 @@ ServerConfig &ServerConfig::operator=(const ServerConfig &rhs)
 		allow_methods = rhs.allow_methods;
 		socketFd = 0;
 		has_root = rhs.has_root;
-		autoindex = rhs.autoindex;
+		has_autoindex = rhs.has_autoindex;
 	}
 	return *this;
 }

@@ -204,10 +204,22 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
 	4. has_root/has_alias=false，表示还没有显式配置 root 或 alias。
 */
 LocationConfig::LocationConfig()
-	: allow_methods(), root(""), autoindex(false), has_autoindex(false), index(""), cgi_extensions(), upload_path(""), path(""), redirect_status(0), redirect_url(""), alias(""), has_root(false), has_alias(false)
+    : allow_methods()     // 1. 如果你在头文件里最先声明了 set
+    , root("")            // 2. 接着声明了 root
+    , autoindex(false)
+    , has_autoindex(false)
+    , index()            
+    , cgi_extensions()
+    , upload_path("")
+    , path("")
+    , redirect_status(0)
+    , redirect_url("")
+    , alias("")
+    , has_root(false)
+    , has_alias(false)
 {
+    // 大括号内纯净空荡，零摩擦！
 }
-
 /*
 函数：LocationConfig 拷贝构造
 用途：复制一个 location 配置对象。
