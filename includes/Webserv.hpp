@@ -6,6 +6,7 @@
 #define SUCCESS true
 #define ERROR false
 #define ERROR_PARSE_SIZE -1
+#define DEFAULT_PORT "8080"
 
 // 2. 网络底层必用的系统内核头文件（网络核心底座，总控统一引入）
 #include <sys/socket.h>

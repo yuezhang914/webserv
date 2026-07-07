@@ -8,7 +8,8 @@
 #include <fstream>
 #include <sstream>
 
-
+class ServerConfig;
+class LocationConfig;
 /*
 结构体：ConfigToken
 作用：保存配置文件词法分析后的一个 token 以及它来自哪一行。
@@ -41,7 +42,7 @@ private:
     来源：parseServerBlock() 在服务器块解析收工、撞见右大括号 "}" 时，会将当前别墅的端口与域名集送审。
     用法：validateServerNameIsNew() 遍历并检索它，精准绝杀“同端口内域名打架抢夺句柄”的工业级违规配置，同时释放跨端口域名复用的最高虚拟主机（Virtual Hosting）可用性。
     */
-    std::map<int, std::set<std::string>> all_server_names;
+    std::map<int, std::set<std::string> > all_server_names;
     /*
     成员：servers
     含义：配置文件里所有 server { ... } 块解析后的结果列表。
@@ -112,7 +113,7 @@ private:
     输出：创建并填充一个 ServerConfig；函数结束时 index 移到 server block 之后。
     实现逻辑：检查 server 后必须是 {；读取 server 内的 directive 和 location block；遇到 } 时关闭 server。
     */
-    bool Config::parseServerBlock(const std::vector<ConfigToken> &tokens, size_t &index, std::map<int, std::set<std::string>> &all_server_names);
+    bool parseServerBlock(const std::vector<ConfigToken> &tokens, size_t &index, std::map<int, std::set<std::string> > &all_server_names);
 
     /*
     函数：parseLocationBlock
@@ -136,7 +137,7 @@ private:
     输出：server_name 不重复返回 SUCCESS；重复返回 ERROR。
     实现逻辑：server block 关闭时登记它的所有 server_name，防止不同 server 重名。
     */
-    bool Config::validateServerNameIsNew(ServerConfig &server, std::map<int, std::set<std::string>> &all_server_names) const;
+    bool validateServerNameIsNew(ServerConfig &server, std::map<int, std::set<std::string> > &all_server_names) const;
 
     /*
     函数：parseServerDirective

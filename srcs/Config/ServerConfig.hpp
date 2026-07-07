@@ -6,9 +6,14 @@
 #include <vector>
 #include <map>
 #include <set>
+#include <sstream>
+#include <cctype>
+#include <unistd.h>
+
+class LocationConfig;
 
 #define MAX_BODY_SIZE 1048576
-class LocationConfig;
+
 
 /*
 类：ServerConfig

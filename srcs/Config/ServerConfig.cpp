@@ -3,10 +3,8 @@
 server 块解析和 ServerConfig 生命周期实现。这个文件把 listen/root/index/error_page 等 server 级别指令写入 ServerConfig。
 */
 #include "ServerConfig.hpp"
-#include "Config.hpp"
-#include <sstream>
-#include <cctype>
-#include <unistd.h>
+#include "Webserv.hpp"
+
 
 /*
 函数：is_valid_ipv4
@@ -354,7 +352,7 @@ ServerConfig::ServerConfig()
 原因：socket fd 是系统资源，不能让两个 ServerConfig 对象同时认为自己拥有同一个 fd，否则析构时可能重复 close。
 */
 ServerConfig::ServerConfig(const ServerConfig &src)
-	: port(src.port), countport(src.countport), host(src.host), server_names(src.server_names), root(src.root), error_pages(src.error_pages), max_body_size(src.max_body_size), locations(src.locations), index(src.index), allow_methods(src.allow_methods), socketFd(0), has_root(src.has_root), autoindex(src.autoindex)
+	: port(src.port), countport(src.countport), host(src.host), server_names(src.server_names), root(src.root), error_pages(src.error_pages), max_body_size(src.max_body_size), locations(src.locations), index(src.index), allow_methods(src.allow_methods), socketFd(0), has_root(src.has_root), has_autoindex(src.has_autoindex)
 {
 }
 

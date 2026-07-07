@@ -177,7 +177,7 @@ std::vector<ConfigToken> Config::tokenizeConfig(const std::string &content) cons
 */
 
 // 🚀 注意：我们将传入的账本升级为 map<端口, set<域名>> 复合物理索引网关
-bool Config::validateServerNameIsNew(ServerConfig &server, std::map<int, std::set<std::string>> &all_server_names) const
+bool Config::validateServerNameIsNew(ServerConfig &server, std::map<int, std::set<std::string> > &all_server_names) const
 {
     size_t index = 0;
     int current_port = server.port; // 💡 动态提取当前服务器实例所监听的特定物理端口
