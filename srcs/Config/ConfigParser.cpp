@@ -81,10 +81,35 @@ std::vector<ConfigToken> Config::tokenizeConfig(const std::string &content) cons
     size_t line = 1;
     size_t index = 0;
 
+    // 🛠️ 防御 1：并线引号沙盒状态锁
+    bool in_quotes = false;
+    char quote_char = '\0';
+
     while (index < content.size())
     {
         char c = content[index];
-        if (c == '#')
+
+        // 🛠️ 防御 2：引号边界状态切换断言
+        if ((c == '"' || c == '\'') && (index == 0 || content[index - 1] != '\\')) // 考虑了斜杠转义
+        {
+            if (!in_quotes)
+            {
+                // 进入引号沙盒：记录单双引号类型
+                in_quotes = true;
+                quote_char = c;
+            }
+            else if (c == quote_char)
+                in_quotes = false; // 闭合引号，解除沙盒
+
+            if (current.empty())
+                current_line = line;
+            current += c; // 引号本身作为 token 内容的一部分保留
+            index++;
+            continue;
+        }
+
+        // 🛠️ 防御 3：注释熔断防御（只有在引号沙盒外部，# 才能具备注释功能）
+        if (c == '#' && !in_quotes)
         {
             if (!current.empty())
             {
@@ -95,7 +120,9 @@ std::vector<ConfigToken> Config::tokenizeConfig(const std::string &content) cons
                 index++;
             continue;
         }
-        if (std::isspace(static_cast<unsigned char>(c)))
+
+        // 🛠️ 防御 4：空白分割拦截（只有在引号沙盒外部，空格和换行才能切断指令）
+        if (std::isspace(static_cast<unsigned char>(c)) && !in_quotes)
         {
             if (!current.empty())
             {
@@ -107,7 +134,9 @@ std::vector<ConfigToken> Config::tokenizeConfig(const std::string &content) cons
             index++;
             continue;
         }
-        if (c == '{' || c == '}' || c == ';')
+
+        // 🛠️ 防御 5：语法元字符拦截（只有在引号沙盒外部，大括号和分号才能强行作为独立 token 剥离）
+        if ((c == '{' || c == '}' || c == ';') && !in_quotes)
         {
             if (!current.empty())
             {
@@ -118,11 +147,17 @@ std::vector<ConfigToken> Config::tokenizeConfig(const std::string &content) cons
             index++;
             continue;
         }
+
+        // 🟢 处于正常字符流或引号沙盒内部，普通吞噬字符
+        if (c == '\n')
+            line++; // 即使在引号内或被跳过，换行也要精准累加行号，确保抛错行号绝不失真！
+
         if (current.empty())
             current_line = line;
         current += c;
         index++;
     }
+
     if (!current.empty())
         tokens.push_back(ConfigToken(current, current_line));
     return tokens;
@@ -143,19 +178,30 @@ std::vector<ConfigToken> Config::tokenizeConfig(const std::string &content) cons
     3. 否则把名字插入 all_server_names。
 为什么在 server 关闭时做：只有 server block 全部解析完后，它的 server_name 才是完整的。
 */
-bool Config::validateServerNameIsNew(ServerConfig &server, std::set<std::string> &all_server_names) const
+
+// 🚀 注意：我们将传入的账本升级为 map<端口, set<域名>> 复合物理索引网关
+bool Config::validateServerNameIsNew(ServerConfig &server, std::map<int, std::set<std::string>> &all_server_names) const
 {
     size_t index = 0;
+    int current_port = server.port; // 💡 动态提取当前服务器实例所监听的特定物理端口
+
+    // 提取或创建属于当前特定端口的独立域名防伪子沙盒（局部 set 引用）
+    std::set<std::string> &port_scoped_names = all_server_names[current_port];
 
     while (index < server.server_names.size())
     {
         const std::string &name = server.server_names[index];
-        if (all_server_names.find(name) != all_server_names.end())
+
+        // 🔒 像素级互锁：只有在【同一个物理端口内】发生了域名重叠，才是工业级违规！
+        if (port_scoped_names.find(name) != port_scoped_names.end())
         {
-            std::cerr << "Duplicate server_name: " << name << " across multiple servers" << std::endl;
+            std::cerr << "Error: Duplicate server_name \"" << name
+                      << "\" detected specifically on port " << current_port << std::endl;
             return ERROR;
         }
-        all_server_names.insert(name);
+
+        // 安全通关后，仅将其织入属于当前端口的局部防伪结界中
+        port_scoped_names.insert(name);
         index++;
     }
     return SUCCESS;
@@ -180,89 +226,87 @@ bool Config::validateServerNameIsNew(ServerConfig &server, std::set<std::string>
 */
 bool Config::parseDirectiveTokens(const std::vector<ConfigToken> &tokens, size_t &index, std::vector<std::string> &directive_tokens) const
 {
-    if (index >= tokens.size() || isBlockSymbol(tokens[index].value))
-    {
-        std::cerr << "Error: Expected directive near line " << (index < tokens.size() ? tokens[index].line : 0) << std::endl;
-        return ERROR;
-    }
     directive_tokens.clear();
-    directive_tokens.push_back(tokens[index].value);
-    index++;
+
+    // 🚀 【未央学姐的平坦化大循环】：不管你是名字还是参数，进来一起过筛子！
     while (index < tokens.size())
     {
-        if (tokens[index].value == ";")
+        const std::string &val = tokens[index].value;
+
+        if (val == ";")
         {
             index++;
+            // 🔒 防空防御：如果进来直接撞见分号（如 `;`），或者只有指令名就撞见分号（如 `listen;`）
+            if (directive_tokens.empty() || directive_tokens.size() == 1)
+            {
+                std::cerr << "Error: Invalid empty directive or missing arguments near line " << tokens[index - 1].line << std::endl;
+                return ERROR;
+            }
             return SUCCESS;
         }
-        if (tokens[index].value == "{" || tokens[index].value == "}")
+
+        if (val == "{" || val == "}")
         {
-            std::cerr << "Error: Missing ';' before '" << tokens[index].value << "' near line " << tokens[index].line << std::endl;
+            // 如果容器是空的，说明一开局就撞见大括号（非法断句）
+            if (directive_tokens.empty())
+                std::cerr << "Error: Expected directive name, but found '" << val << "' near line " << tokens[index].line << std::endl;
+            else
+                std::cerr << "Error: Missing ';' before '" << val << "' near line " << tokens[index].line << std::endl;
             return ERROR;
         }
-        directive_tokens.push_back(tokens[index].value);
+
+        // 🟢 无论是第一个进来的指令名，还是后面的参数，统统平铺推入
+        directive_tokens.push_back(val);
         index++;
     }
-    std::cerr << "Error: Missing ';' after directive: " << directive_tokens[0] << std::endl;
+
+    // 触底断言：全读完了还没分号
+    std::cerr << "Error: Missing ';' after directive" << std::endl;
     return ERROR;
 }
 
-/*
-函数：Config::parseLocationBlock
-用途：解析一个完整 location /path { ... } block。
-参数来源：parseServerBlock 在 server 内部遇到 location token 时调用；index 指向 location。
-变量解释：
-    - tokens：完整 token 流，提供 location path、{、directive、} 等语法元素。
-    - index：引用参数，调用时指向 location；成功返回时移动到 location 关闭 } 后面。
-    - server：当前 location 所属的 ServerConfig，新的 LocationConfig 会 push 到 server.locations。
-    - current_location_paths：当前 server 内已经出现过的 location path 集合，用来拒绝重复 location。
-    - location：server.locations.back() 的引用，表示正在填充的当前 location。
-    - directive_tokens：临时数组，保存 parseDirectiveTokens 读出的一条 location directive。
-实现逻辑：
-    1. 检查 location 后必须有路径和 {。
-    2. 检查同一个 server 内 location path 不能重复。
-    3. 在 server.locations 里创建 LocationConfig，并记录 path。
-    4. 继续解析 location 内部 directive，全部交给 parseLocationDirective。
-    5. 遇到 } 时关闭当前 location 并返回。
-    6. location 内不允许嵌套 location 或 server。
-*/
 bool Config::parseLocationBlock(const std::vector<ConfigToken> &tokens, size_t &index, ServerConfig &server, std::set<std::string> &current_location_paths)
 {
     // 【防呆检查 1】此时 index 指向 "location"。检查后面是不是至少还有两个词（比如 "/api" 和 "{"）
     if (index + 2 >= tokens.size())
     {
         std::cerr << "Error: Invalid location block opening near line " << tokens[index].line << std::endl;
-        return ERROR; // 词不够了，图纸残缺，报错
+        return ERROR; 
     }
-    
+
     // 【防呆检查 2】检查 location 后面的词是不是符号（比如直接写了 location { ）
     if (isBlockSymbol(tokens[index + 1].value))
     {
         std::cerr << "Error: Expected location path near line " << tokens[index].line << std::endl;
-        return ERROR; // 连个房间名都没有，直接给大括号，报错
+        return ERROR; 
     }
-    
+
     // 【防呆检查 3】检查房间名后面，是不是跟着左大括号 "{"
     if (tokens[index + 2].value != "{")
     {
         std::cerr << "Error: Expected '{' after location path near line " << tokens[index].line << std::endl;
-        return ERROR; // 没按规矩写大括号，报错
+        return ERROR; 
     }
-    
-    // 【核心查重】翻登记簿，看看这个房间名是不是已经存在了（这就是宿主刚才问的那个问题！）
-    if (current_location_paths.find(tokens[index + 1].value) != current_location_paths.end())
+
+    std::string target_path = tokens[index + 1].value;
+
+    // 【核心查重】翻登记簿，看看这个房间名是不是已经存在了
+    if (current_location_paths.find(target_path) != current_location_paths.end())
     {
-        std::cerr << "Duplicate location path: " << tokens[index + 1].value << " in server" << std::endl;
-        return ERROR; // 名字重复，报错
+        std::cerr << "Error: Duplicate location path: " << target_path << " in server" << std::endl;
+        return ERROR; 
     }
 
     // 前期检查全部通过！正式开始建房间
-    server.locations.push_back(LocationConfig()); // 在别墅的图纸里，真正画上一个新房间
-    LocationConfig &location = server.locations.back(); // 拿到这个新房间的控制权
-    location.path = tokens[index + 1].value;      // 给房间挂上门牌号（比如 "/api"）
-    current_location_paths.insert(location.path); // 【关键！】把新挂上的门牌号，写进“房间登记簿”里，防别人重名
+    server.locations.push_back(LocationConfig());       
     
-    index += 3; // 手指一口气往后移三步，跳过 "location"、"/api"、"{" 这三个词，准备读里面的家具配置
+    /* 🛠️ 【修改点 1：绝杀 vector 扩容内存悬空陷阱，采用物理下标寻址】 */
+    // 解释：不持有 locations.back() 的物理引用，改为记录当前新房间在 vector 中的安全下标位置
+    size_t current_loc_idx = server.locations.size() - 1;
+    server.locations[current_loc_idx].path = target_path;            
+    current_location_paths.insert(target_path);       
+
+    index += 3; // 手指一口气往后移三步，跳过 "location"、"path"、"{"
 
     // 开始循环阅读房间里面的要求
     while (index < tokens.size())
@@ -270,45 +314,39 @@ bool Config::parseLocationBlock(const std::vector<ConfigToken> &tokens, size_t &
         // 【成功收工】遇到属于这个房间的 "}"
         if (tokens[index].value == "}")
         {
-            index++; // 手指移到下一个词
-            return SUCCESS; // 房间建好了，成功返回，把控制权还给大别墅！
+            index++;        
+            return SUCCESS; 
         }
-        
-        // 【防套娃 1】房间里不能再建房间
-        if (tokens[index].value == "location")
+
+        // 🟢 完美的防套娃机制
+        std::string current_val = tokens[index].value;
+        if (current_val == "location" || current_val == "server" || current_val == "http")
         {
-            std::cerr << "Error: Nested location block is not allowed near line " << tokens[index].line << std::endl;
-            return ERROR;
-        }
-        
-        // 【防套娃 2】房间里更不能建大别墅
-        if (tokens[index].value == "server")
-        {
-            std::cerr << "Error: Nested server block is not allowed near line " << tokens[index].line << std::endl;
-            return ERROR;
-        }
-        
-        // 【防乱码】房间里不允许出现孤零零的奇怪标点
-        if (tokens[index].value == "{" || tokens[index].value == ";")
-        {
-            std::cerr << "Error: Unexpected token '" << tokens[index].value << "' in location block near line " << tokens[index].line << std::endl;
+            std::cerr << "Error: Nested or illegal block keyword '" << current_val 
+                      << "' is not allowed inside location near line " << tokens[index].line << std::endl;
             return ERROR;
         }
 
-        // 处理房间里的普通指令（比如 root /var/www; 或者 index index.html;）
+        // 【防乱码】房间里不允许出现孤零零的奇怪标点
+        if (current_val == "{")
+        {
+            std::cerr << "Error: Unexpected token '" << current_val << "' in location block near line " << tokens[index].line << std::endl;
+            return ERROR;
+        }
+
+        // 处理房间里的普通指令
         std::vector<std::string> directive_tokens;
-        // 组装指令词语
         if (parseDirectiveTokens(tokens, index, directive_tokens) == ERROR)
             return ERROR;
-            
-        // 将指令应用到这个房间（注意这里的参数，传了 &server 也传了 &location，说明指令会配置在这个小房间上）
-        if (parseDirective(directive_tokens, &server, &location) == ERROR)
+
+        /* 🚀 【动态安全交付】：通过之前锁死的物理下标，动态提取 100% 绝对正确的当前房间物理内存地址 */
+        if (parseDirective(directive_tokens, &server, &(server.locations[current_loc_idx])) == ERROR)
             return ERROR;
     }
-    
+
     // 如果一直读到了文件末尾，都没发现房间的右大括号 "}"
-    std::cerr << "Error: Unclosed location block: " << location.path << std::endl;
-    return ERROR; // 烂尾房间，报错！
+    std::cerr << "Error: Unclosed location block: " << server.locations[current_loc_idx].path << std::endl;
+    return ERROR; 
 }
 
 /*
@@ -330,71 +368,74 @@ bool Config::parseLocationBlock(const std::vector<ConfigToken> &tokens, size_t &
     5. 遇到 } 时关闭 server，检查 server_name 是否重复，然后返回。
     6. server 内不允许嵌套 server。
 */
-bool Config::parseServerBlock(const std::vector<ConfigToken> &tokens, size_t &index, std::set<std::string> &all_server_names)
+bool Config::parseServerBlock(const std::vector<ConfigToken> &tokens, size_t &index, std::map<int, std::set<std::string> > &all_server_names)
 {
     // 【条件1】检查 "server" 后面是不是紧跟着一个左大括号 "{"
     if (index + 1 >= tokens.size() || tokens[index + 1].value != "{")
     {
         std::cerr << "Error: Expected '{' after server near line " << tokens[index].line << std::endl;
-        return ERROR; // 格式不对，直接报错返回
+        return ERROR; 
     }
 
     // 成功确认是服务器块，准备开始记录它的配置
-    servers.push_back(ServerConfig());        // 在我们的“别墅群”列表里，新建一栋“别墅”
-    ServerConfig &server = servers.back();    // 拿到这栋新“别墅”的控制权
-    std::set<std::string> current_location_paths; // 用来记录这栋别墅里有哪些“房间”（location）
+    servers.push_back(ServerConfig());            
     
-    index += 2; // 手指往后移动两步，跳过 "server" 和 "{" 这两个词，准备读里面的内容
+    /* 🛠️ 【修改点 1：绝杀 vector 扩容搬家内存陷阱，升级为安全下标动态寻址】 */
+    // 解释：不长时间持有 servers.back() 的物理引用，改用 current_srv_idx 锁死内存坑位
+    size_t current_srv_idx = servers.size() - 1;
+    std::set<std::string> current_location_paths; 
+
+    index += 2; // 跳过 "server" 和 "{"
 
     // 开始循环阅读大括号里面的每一行要求
     while (index < tokens.size())
     {
         // 【条件2】如果读到了右大括号 "}"，说明这栋“别墅”的设计图读完了
-        // （Server）根本就看不见 location 里的 }，因为那个 } 已经被（Location）自己吃掉并消化了！
         if (tokens[index].value == "}")
         {
-            index++; // 手指移到下一个词，为读别的配置做准备
-            // 检查这栋别墅的名字是不是和别人撞名了，没撞名就算成功
-            return validateServerNameIsNew(server, all_server_names);
+            index++; 
+            // 🚀 动态捞取绝对安全的物理地址进行最终的域名防伪校验
+            return validateServerNameIsNew(servers[current_srv_idx], all_server_names);
         }
-        
-        // 【条件3】如果在大括号里面又看到了 "server" 这个词
-        if (tokens[index].value == "server")
+
+        /* 🛠️ 【修改点 2：并线宏观域熔断，绝杀 http 逆向套娃污染】 */
+        std::string current_val = tokens[index].value;
+        if (current_val == "server" || current_val == "http")
         {
-            std::cerr << "Error: Nested server block is not allowed near line " << tokens[index].line << std::endl;
-            return ERROR; // 别墅里面不能再套一栋别墅，报错！
+            std::cerr << "Error: Nested keyword '" << current_val 
+                      << "' is not allowed inside server block near line " << tokens[index].line << std::endl;
+            return ERROR; 
         }
-        
+
         // 【条件4】如果读到了 "location"，说明要开始建“房间”了
-        if (tokens[index].value == "location")
+        if (current_val == "location")
         {
-            // 去专门负责建房间的函数里处理，如果建房间失败了，整个别墅也算失败
-            if (parseLocationBlock(tokens, index, server, current_location_paths) == ERROR)
+            // 🚀 安全动态交付当前别墅地址
+            if (parseLocationBlock(tokens, index, servers[current_srv_idx], current_location_paths) == ERROR)
                 return ERROR;
-            continue; // 房间建好后，直接进入下一轮循环，接着往下读
+            continue; 
         }
-        
-        // 【条件5】如果读到了孤零零的 "{" 或者 ";" 
-        if (tokens[index].value == "{" || tokens[index].value == ";")
+
+        // 【条件5】如果读到了孤零零的 "{"
+        if (current_val == "{")
         {
-            std::cerr << "Error: Unexpected token '" << tokens[index].value << "' in server block near line " << tokens[index].line << std::endl;
-            return ERROR; // 这是语法错误，就像句子里多出了奇怪的标点，报错！
+            std::cerr << "Error: Unexpected token '" << current_val << "' in server block near line " << tokens[index].line << std::endl;
+            return ERROR; 
         }
 
         // 如果上面都不是，那说明这是一条普通的配置指令（比如 listen 80;）
         std::vector<std::string> directive_tokens;
-        // 【条件6】尝试把这条指令的词组装起来
         if (parseDirectiveTokens(tokens, index, directive_tokens) == ERROR)
-            return ERROR; // 组装失败，报错！
-            
-        // 【条件7】尝试把这条指令真正应用到我们的“别墅”配置上
-        if (parseDirective(directive_tokens, &server, NULL) == ERROR)
-            return ERROR; // 应用失败，报错！
+            return ERROR; 
+
+        // 🚀 【动态安全分发】：将指令真正应用到 100% 物理绝对正确的这栋“别墅”上
+        if (parseDirective(directive_tokens, &(servers[current_srv_idx]), NULL) == ERROR)
+            return ERROR; 
     }
-    
+
     // 【条件8】如果把所有的词都读完了，还没碰到右大括号 "}"
     std::cerr << "Error: Unclosed server block" << std::endl;
-    return ERROR; // 括号没闭合，烂尾楼，报错！
+    return ERROR; 
 }
 
 /*
@@ -414,7 +455,7 @@ bool Config::parseServerBlock(const std::vector<ConfigToken> &tokens, size_t &in
 bool Config::parseTokenStream(const std::vector<ConfigToken> &tokens)
 {
     size_t index = 0;
-    std::set<std::string> all_server_names;
+    std::map<int, std::set<std::string> > &all_server_names = Config::all_server_names; // 🚀 升级为全局跨 server 的端口-域名联合索引账本
 
     while (index < tokens.size())
     {

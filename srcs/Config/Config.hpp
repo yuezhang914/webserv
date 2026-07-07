@@ -11,20 +11,20 @@
 #include "ServerConfig.hpp"
 #include "LocationConfig.hpp"
 
-
 /*
 结构体：ConfigToken
 作用：保存配置文件词法分析后的一个 token 以及它来自哪一行。
 为什么需要：健壮版 parser 不再按“每行一个指令”解析，而是先把整个文件拆成 token 流；line 用来在语法错误时报出更容易定位的位置。
 */
-struct ConfigToken {
+struct ConfigToken
+{
     /* token 的文本值，例如 server、{、listen、127.0.0.1:3435、;、}。 */
     std::string value;
     /* token 在配置文件中的行号，从 1 开始，用于错误提示。 */
     size_t line;
 
     ConfigToken();
-    ConfigToken(const std::string& token_value, size_t token_line);
+    ConfigToken(const std::string &token_value, size_t token_line);
 };
 
 /*
@@ -34,8 +34,16 @@ struct ConfigToken {
 给谁用：setupSockets() 用 servers 里的 host/port 创建监听 socket；serverLoop() 保存 servers 并在每次请求时交给 Router/Response/CGI 查规则。
 核心理解：default.conf 是文本；Config 把文本变成 vector<ServerConfig>。程序运行后不反复读配置文件，而是一直查这个对象里的规则。
 */
-class Config {
+class Config
+{
 private:
+    /*
+    成员：all_server_names
+    含义：以端口为绝对地理边界、以域名为微观防伪原子的二维联合交叉索引账本（二维端口-域名隔离锁）。
+    来源：parseServerBlock() 在服务器块解析收工、撞见右大括号 "}" 时，会将当前别墅的端口与域名集送审。
+    用法：validateServerNameIsNew() 遍历并检索它，精准绝杀“同端口内域名打架抢夺句柄”的工业级违规配置，同时释放跨端口域名复用的最高虚拟主机（Virtual Hosting）可用性。
+    */
+    std::map<int, std::set<std::string>> all_server_names;
     /*
     成员：servers
     含义：配置文件里所有 server { ... } 块解析后的结果列表。
@@ -50,7 +58,7 @@ private:
     输出：去掉开头和结尾空白、换行、分号后的字符串。
     实现逻辑：先找第一个不是空白/分号的位置，再找最后一个不是空白/分号的位置，最后 substr 截取中间部分。
     */
-    std::string trim(const std::string& str) const;
+    std::string trim(const std::string &str) const;
 
     /*
     函数：split
@@ -58,7 +66,7 @@ private:
     输出：拆好的 token 数组，例如 ["127", "0", "0", "1"]。
     实现逻辑：用 stringstream 按 delimiter 逐段读取；每段先 trim；空段跳过；有效段 push 到 vector。
     */
-    std::vector<std::string> split(const std::string& str, char delimiter) const;
+    std::vector<std::string> split(const std::string &str, char delimiter) const;
 
     /*
     函数：parseSize
@@ -66,7 +74,7 @@ private:
     输出：换算后的字节数；格式非法时返回 ERROR_PARSE_SIZE。
     实现逻辑：拆出数字和单位；用 strtoul 把数字转成整数；K/M/G 分别乘 1024、1024^2、1024^3。
     */
-    unsigned long parseSize(const std::string& size_str) const;
+    unsigned long parseSize(const std::string &size_str) const;
 
     /*
     函数：parseDirective
@@ -74,7 +82,7 @@ private:
     输出：成功返回 SUCCESS，失败返回 ERROR。
     实现逻辑：先取 tokens[0] 作为指令名；tokens 后半段作为参数；如果当前在 location 中就分发给 parseLocationDirective；如果当前在 server 中就分发给 parseServerDirective；如果两者都没有，说明指令写在 server 外面，报错。
     */
-    bool parseDirective(const std::vector<std::string>& tokens, ServerConfig* current_server, LocationConfig* current_location);
+    bool parseDirective(const std::vector<std::string> &tokens, ServerConfig *current_server, LocationConfig *current_location);
 
     /*
     函数：parseFile
@@ -82,7 +90,7 @@ private:
     输出：把 servers 填好；成功返回 SUCCESS，失败返回 ERROR。
     实现逻辑：打开整个文件；调用 tokenizeConfig 拆成 token 流；再调用 parseTokenStream 按 server/location/block/directive 语法解析。
     */
-    bool parseFile(const std::string& path);
+    bool parseFile(const std::string &path);
 
     /*
     函数：tokenizeConfig
@@ -90,7 +98,7 @@ private:
     输出：ConfigToken 数组；{、}、; 会被单独拆成 token，# 到行尾会被当作注释跳过。
     用途：让 parser 支持 server{、root srv/www;}、server { listen 3435; root srv/www; } 这类更灵活格式。
     */
-    std::vector<ConfigToken> tokenizeConfig(const std::string& content) const;
+    std::vector<ConfigToken> tokenizeConfig(const std::string &content) const;
 
     /*
     函数：parseTokenStream
@@ -98,7 +106,7 @@ private:
     输出：把所有 server block 解析进 servers；语法错误返回 ERROR。
     实现逻辑：顶层只允许 server block；每个 server block 由 parseServerBlock 负责继续解析。
     */
-    bool parseTokenStream(const std::vector<ConfigToken>& tokens);
+    bool parseTokenStream(const std::vector<ConfigToken> &tokens);
 
     /*
     函数：parseServerBlock
@@ -106,7 +114,7 @@ private:
     输出：创建并填充一个 ServerConfig；函数结束时 index 移到 server block 之后。
     实现逻辑：检查 server 后必须是 {；读取 server 内的 directive 和 location block；遇到 } 时关闭 server。
     */
-    bool parseServerBlock(const std::vector<ConfigToken>& tokens, size_t& index, std::set<std::string>& all_server_names);
+    bool Config::parseServerBlock(const std::vector<ConfigToken> &tokens, size_t &index, std::map<int, std::set<std::string>> &all_server_names);
 
     /*
     函数：parseLocationBlock
@@ -114,7 +122,7 @@ private:
     输出：创建并填充一个 LocationConfig；函数结束时 index 移到 location block 之后。
     实现逻辑：检查 location 后必须有 path 和 {；读取 location 内 directive；遇到 } 时关闭 location。
     */
-    bool parseLocationBlock(const std::vector<ConfigToken>& tokens, size_t& index, ServerConfig& server, std::set<std::string>& current_location_paths);
+    bool parseLocationBlock(const std::vector<ConfigToken> &tokens, size_t &index, ServerConfig &server, std::set<std::string> &current_location_paths);
 
     /*
     函数：parseDirectiveTokens
@@ -122,7 +130,7 @@ private:
     输出：把 directive 到下一个 ; 之间的内容转成普通 string tokens；函数结束时 index 移到 ; 后面。
     实现逻辑：directive 必须用 ; 结束；在 ; 前遇到 { 或 } 会报语法错误。
     */
-    bool parseDirectiveTokens(const std::vector<ConfigToken>& tokens, size_t& index, std::vector<std::string>& directive_tokens) const;
+    bool parseDirectiveTokens(const std::vector<ConfigToken> &tokens, size_t &index, std::vector<std::string> &directive_tokens) const;
 
     /*
     函数：validateServerNameIsNew
@@ -130,7 +138,7 @@ private:
     输出：server_name 不重复返回 SUCCESS；重复返回 ERROR。
     实现逻辑：server block 关闭时登记它的所有 server_name，防止不同 server 重名。
     */
-    bool validateServerNameIsNew(ServerConfig& server, std::set<std::string>& all_server_names) const;
+    bool Config::validateServerNameIsNew(ServerConfig &server, std::map<int, std::set<std::string>> &all_server_names) const;
 
     /*
     函数：parseServerDirective
@@ -138,7 +146,7 @@ private:
     输出：修改 srv 对象；成功返回 SUCCESS，失败返回 ERROR。
     实现逻辑：根据 directive 分别处理 listen/server_name/root/error_page/max_body_size/index/allow_methods/upload_path/autoindex；每个分支检查参数个数和格式，再写入 ServerConfig 对应成员。
     */
-    bool parseServerDirective(const std::string& directive, const std::vector<std::string>& values, ServerConfig* srv);
+    bool parseServerDirective(const std::string &directive, const std::vector<std::string> &values, ServerConfig *srv);
 
     /*
     函数：parseLocationDirective
@@ -146,7 +154,7 @@ private:
     输出：修改 loc 对象；成功返回 SUCCESS，失败返回 ERROR。
     实现逻辑：根据 directive 分别处理 allow_methods/root/alias/index/autoindex/cgi_extension/upload_path/return；检查 root 和 alias 不能同时使用；把规则写进 LocationConfig。
     */
-    bool parseLocationDirective(const std::string& directive, const std::vector<std::string>& values, LocationConfig* srv);
+    bool parseLocationDirective(const std::string &directive, const std::vector<std::string> &values, LocationConfig *srv);
 
     /*
     函数：serversHaveRoot
@@ -154,7 +162,7 @@ private:
     输出：所有 server 都有 root 返回 SUCCESS；任意 server 缺少 root 返回 ERROR。
     实现逻辑：遍历 servers，检查每个 ServerConfig.has_root。
     */
-	bool serversHaveRoot() const;
+    bool serversHaveRoot() const;
 
 public:
     /*
@@ -163,7 +171,7 @@ public:
     输出：构造出一个可被后续模块使用的 Config 对象。
     实现逻辑：先把 error 初始化为 false；调用 parseFile(path) 填充 servers；如果解析失败或缺少 root，就设置 error，main 会据此停止启动。
     */
-    Config(const std::string& path);
+    Config(const std::string &path);
 
     /*
     析构函数：~Config
@@ -176,14 +184,14 @@ public:
     输出：servers 的可修改引用。
     用途：setupSockets() 需要给每个 ServerConfig 写入 socketFd，所以需要非 const 引用。
     */
-    std::vector<ServerConfig>& getServers() { return servers; }
+    std::vector<ServerConfig> &getServers() { return servers; }
 
     /*
     函数：getServers const 版本
     输出：servers 的只读引用。
     用途：serverLoop 等只读取配置，不应该修改配置时使用。
     */
-	const std::vector<ServerConfig>& getServers() const { return servers; }
+    const std::vector<ServerConfig> &getServers() const { return servers; }
 
     /*
     成员：error

@@ -20,20 +20,34 @@
     5. 如果缺少 root，也设置 error=1，因为后面无法把 URI 映射到真实文件路径。
 后续影响：main() 会检查 config.error；只有没有错误才会继续 setupSockets() 和 serverLoop()。
 */
-Config::Config(const std::string& path) {
-	this->error = 0;
-	if (parseFile(path) == ERROR)
-	{
-		std::cerr << "Error: Failed to parse config file" << std::endl;
-		this->error = 1;
-	}
-	else if (serversHaveRoot() == ERROR)
-	{
-		std::cerr << "Error: At least one server must have a root directive" << std::endl;
-		this->error = 1;
-	}
-}
+Config::Config(const std::string& path) 
+    : all_server_names(), error(0) 
+{
+    // 🟢 【第一步：词法切包】把硬盘上的 nginx.conf 文件读进内存，切碎成 std::vector<ConfigToken>
+    if (parseFile(path) == ERROR)
+    {
+        std::cerr << "Error: Failed to read or tokenize config file" << std::endl;
+        this->error = 1;
+        return; // 🔒 已经自爆，后面就没必要陪跑了，及时止损
+    }
 
+    // 🟢 【第二步：语法重组】（原本漏掉的灵魂！）
+    // 解释：拉动你之前写的 parseServerBlock，把肚子里的 tokens 真正组装进 this->servers 别墅群
+    // 并且在组装过程中，自动往 this->all_server_names 账本里登记域名，严防跨端口冲突
+    if (parseTokenStream() == ERROR) 
+    {
+        std::cerr << "Error: Config syntax error during token stream compilation" << std::endl;
+        this->error = 1;
+        return; // 🔒 语法炸了，拒绝进入终审
+    }
+
+    // 🟢 【第三步：业务终审】此时 servers 已经饱含数据，进行全站最后的功能性宏观体检
+    if (serversHaveRoot() == ERROR)
+    {
+        std::cerr << "Error: At least one server must have a root directive" << std::endl;
+        this->error = 1;
+    }
+}
 /*
 函数：Config::~Config
 用途：销毁 Config 对象。
