@@ -217,7 +217,7 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
             srv->server_names.push_back(values[i]);
     }
     /* 🚀 【完美补网：注入 client_max_body_size 工业级防线】 */
-    else if (directive == "client_max_body_size")
+    else if (directive == "max_body_size" || directive == "client_max_body_size")
     {
         if (values.size() != 1)
         {

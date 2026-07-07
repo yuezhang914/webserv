@@ -101,7 +101,7 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
             return ERROR;
         }
     }
-    else if (directive == "client_max_body_size")
+    else if (directive == "max_body_size" || directive == "client_max_body_size")
     {
         if (values.size() != 1)
         {
