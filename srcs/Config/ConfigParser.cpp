@@ -268,21 +268,21 @@ bool Config::parseLocationBlock(const std::vector<ConfigToken> &tokens, size_t &
     if (index + 2 >= tokens.size())
     {
         std::cerr << "Error: Invalid location block opening near line " << tokens[index].line << std::endl;
-        return ERROR; 
+        return ERROR;
     }
 
     // 【防呆检查 2】检查 location 后面的词是不是符号（比如直接写了 location { ）
     if (isBlockSymbol(tokens[index + 1].value))
     {
         std::cerr << "Error: Expected location path near line " << tokens[index].line << std::endl;
-        return ERROR; 
+        return ERROR;
     }
 
     // 【防呆检查 3】检查房间名后面，是不是跟着左大括号 "{"
     if (tokens[index + 2].value != "{")
     {
         std::cerr << "Error: Expected '{' after location path near line " << tokens[index].line << std::endl;
-        return ERROR; 
+        return ERROR;
     }
 
     std::string target_path = tokens[index + 1].value;
@@ -291,17 +291,17 @@ bool Config::parseLocationBlock(const std::vector<ConfigToken> &tokens, size_t &
     if (current_location_paths.find(target_path) != current_location_paths.end())
     {
         std::cerr << "Error: Duplicate location path: " << target_path << " in server" << std::endl;
-        return ERROR; 
+        return ERROR;
     }
 
     // 前期检查全部通过！正式开始建房间
-    server.locations.push_back(LocationConfig());       
-    
+    server.locations.push_back(LocationConfig());
+
     /* 🛠️ 【修改点 1：绝杀 vector 扩容内存悬空陷阱，采用物理下标寻址】 */
     // 解释：不持有 locations.back() 的物理引用，改为记录当前新房间在 vector 中的安全下标位置
     size_t current_loc_idx = server.locations.size() - 1;
-    server.locations[current_loc_idx].path = target_path;            
-    current_location_paths.insert(target_path);       
+    server.locations[current_loc_idx].path = target_path;
+    current_location_paths.insert(target_path);
 
     index += 3; // 手指一口气往后移三步，跳过 "location"、"path"、"{"
 
@@ -311,15 +311,15 @@ bool Config::parseLocationBlock(const std::vector<ConfigToken> &tokens, size_t &
         // 【成功收工】遇到属于这个房间的 "}"
         if (tokens[index].value == "}")
         {
-            index++;        
-            return SUCCESS; 
+            index++;
+            return SUCCESS;
         }
 
         // 🟢 完美的防套娃机制
         std::string current_val = tokens[index].value;
         if (current_val == "location" || current_val == "server" || current_val == "http")
         {
-            std::cerr << "Error: Nested or illegal block keyword '" << current_val 
+            std::cerr << "Error: Nested or illegal block keyword '" << current_val
                       << "' is not allowed inside location near line " << tokens[index].line << std::endl;
             return ERROR;
         }
@@ -343,7 +343,7 @@ bool Config::parseLocationBlock(const std::vector<ConfigToken> &tokens, size_t &
 
     // 如果一直读到了文件末尾，都没发现房间的右大括号 "}"
     std::cerr << "Error: Unclosed location block: " << server.locations[current_loc_idx].path << std::endl;
-    return ERROR; 
+    return ERROR;
 }
 
 /*
@@ -371,16 +371,16 @@ bool Config::parseServerBlock(const std::vector<ConfigToken> &tokens, size_t &in
     if (index + 1 >= tokens.size() || tokens[index + 1].value != "{")
     {
         std::cerr << "Error: Expected '{' after server near line " << tokens[index].line << std::endl;
-        return ERROR; 
+        return ERROR;
     }
 
     // 成功确认是服务器块，准备开始记录它的配置
-    servers.push_back(ServerConfig());            
-    
+    servers.push_back(ServerConfig());
+
     /* 🛠️ 【修改点 1：绝杀 vector 扩容搬家内存陷阱，升级为安全下标动态寻址】 */
     // 解释：不长时间持有 servers.back() 的物理引用，改用 current_srv_idx 锁死内存坑位
     size_t current_srv_idx = servers.size() - 1;
-    std::set<std::string> current_location_paths; 
+    std::set<std::string> current_location_paths;
 
     index += 2; // 跳过 "server" 和 "{"
 
@@ -390,7 +390,25 @@ bool Config::parseServerBlock(const std::vector<ConfigToken> &tokens, size_t &in
         // 【条件2】如果读到了右大括号 "}"，说明这栋“别墅”的设计图读完了
         if (tokens[index].value == "}")
         {
-            index++; 
+            index++;
+
+            // 🚀 【配置下沉高能熔炼中心】：把大厅资产，原位深度拷贝给未配置的小房间
+            // ====================================================================
+            for (size_t k = 0; k < servers[current_srv_idx].locations.size(); ++k)
+            {
+                // 如果小房间的限制依然是默认的 0，说明运维没有在 location 内部特异性配置
+                if (servers[current_srv_idx].locations[k].client_max_body_size == 0)
+                {
+                    // ⚡ 原位深度拷贝！大厅家产直接下沉灌注进小房间
+                    servers[current_srv_idx].locations[k].client_max_body_size = servers[current_srv_idx].client_max_body_size;
+                }
+
+                // 💡 扩展：如果小房间没有配私有 root，也可以在这里顺手顺流下沉！
+                if (servers[current_srv_idx].locations[k].root.empty())
+                {
+                    servers[current_srv_idx].locations[k].root = servers[current_srv_idx].root;
+                }
+            }
             // 🚀 动态捞取绝对安全的物理地址进行最终的域名防伪校验
             return validateServerNameIsNew(servers[current_srv_idx], all_server_names);
         }
@@ -399,9 +417,9 @@ bool Config::parseServerBlock(const std::vector<ConfigToken> &tokens, size_t &in
         std::string current_val = tokens[index].value;
         if (current_val == "server" || current_val == "http")
         {
-            std::cerr << "Error: Nested keyword '" << current_val 
+            std::cerr << "Error: Nested keyword '" << current_val
                       << "' is not allowed inside server block near line " << tokens[index].line << std::endl;
-            return ERROR; 
+            return ERROR;
         }
 
         // 【条件4】如果读到了 "location"，说明要开始建“房间”了
@@ -410,29 +428,29 @@ bool Config::parseServerBlock(const std::vector<ConfigToken> &tokens, size_t &in
             // 🚀 安全动态交付当前别墅地址
             if (parseLocationBlock(tokens, index, servers[current_srv_idx], current_location_paths) == ERROR)
                 return ERROR;
-            continue; 
+            continue;
         }
 
         // 【条件5】如果读到了孤零零的 "{"
         if (current_val == "{")
         {
             std::cerr << "Error: Unexpected token '" << current_val << "' in server block near line " << tokens[index].line << std::endl;
-            return ERROR; 
+            return ERROR;
         }
 
         // 如果上面都不是，那说明这是一条普通的配置指令（比如 listen 80;）
         std::vector<std::string> directive_tokens;
         if (parseDirectiveTokens(tokens, index, directive_tokens) == ERROR)
-            return ERROR; 
+            return ERROR;
 
         // 🚀 【动态安全分发】：将指令真正应用到 100% 物理绝对正确的这栋“别墅”上
         if (parseDirective(directive_tokens, &(servers[current_srv_idx]), NULL) == ERROR)
-            return ERROR; 
+            return ERROR;
     }
 
     // 【条件8】如果把所有的词都读完了，还没碰到右大括号 "}"
     std::cerr << "Error: Unclosed server block" << std::endl;
-    return ERROR; 
+    return ERROR;
 }
 
 /*
