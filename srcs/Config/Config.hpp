@@ -8,8 +8,6 @@
 #include <fstream>
 #include <sstream>
 
-#include "ServerConfig.hpp"
-#include "LocationConfig.hpp"
 
 /*
 结构体：ConfigToken

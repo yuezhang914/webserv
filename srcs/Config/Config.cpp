@@ -3,7 +3,7 @@
 配置对象基础工具实现。这个文件负责 Config 构造、析构、字符串 trim/split 等底层辅助逻辑；真正的配置语法解析在 ConfigParser.cpp；server/location 指令含义分别在 ServerConfig.cpp、LocationConfig.cpp。
 */
 #include "Config.hpp"
-
+#include "Webserv.hpp"
 /*
 函数：Config::Config
 用途：启动时读取配置文件并建立内存中的配置对象。
@@ -23,30 +23,23 @@
 Config::Config(const std::string& path) 
     : all_server_names(), error(0) 
 {
-    // 🟢 【第一步：词法切包】把硬盘上的 nginx.conf 文件读进内存，切碎成 std::vector<ConfigToken>
+    std::vector<ConfigToken> tokens; // 👈 局部变量，临时的词法脚手架
+
+    // 🟢 【第一步：词法切包】让 parseFile 把切好的词塞进局部变量 tokens 中
     if (parseFile(path) == ERROR)
     {
         std::cerr << "Error: Failed to read or tokenize config file" << std::endl;
         this->error = 1;
-        return; // 🔒 已经自爆，后面就没必要陪跑了，及时止损
+        return; 
     }
 
-    // 🟢 【第二步：语法重组】（原本漏掉的灵魂！）
-    // 解释：拉动你之前写的 parseServerBlock，把肚子里的 tokens 真正组装进 this->servers 别墅群
-    // 并且在组装过程中，自动往 this->all_server_names 账本里登记域名，严防跨端口冲突
-    if (parseTokenStream() == ERROR) 
-    {
-        std::cerr << "Error: Config syntax error during token stream compilation" << std::endl;
-        this->error = 1;
-        return; // 🔒 语法炸了，拒绝进入终审
-    }
-
-    // 🟢 【第三步：业务终审】此时 servers 已经饱含数据，进行全站最后的功能性宏观体检
+    // 🟢 【第三步：业务终审】进行全站最后的功能性宏观体检
     if (serversHaveRoot() == ERROR)
     {
         std::cerr << "Error: At least one server must have a root directive" << std::endl;
         this->error = 1;
     }
+    // 🔒 离开构造函数，局部变量 tokens 的内存被系统自动回收，干净利落！
 }
 /*
 函数：Config::~Config

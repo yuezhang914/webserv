@@ -4,10 +4,7 @@
 健壮版 parser 不再要求 } 单独占一行，只要求普通指令用 ; 结束，因此可以解析 server { listen 3435; root srv/www; } 这种写法。
 */
 #include "ConfigParser.hpp"
-#include <algorithm>
-#include <cctype>
-#include <cstdlib>
-#include <sstream>
+#include "Webserv.hpp"
 
 /*
 函数：ConfigToken::ConfigToken
