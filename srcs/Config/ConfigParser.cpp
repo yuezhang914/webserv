@@ -452,38 +452,43 @@ bool Config::parseServerBlock(const std::vector<ConfigToken> &tokens, size_t &in
 bool Config::parseTokenStream(const std::vector<ConfigToken> &tokens)
 {
     size_t index = 0;
-    std::map<int, std::set<std::string> > &all_server_names = Config::all_server_names; // 🚀 升级为全局跨 server 的端口-域名联合索引账本
 
     while (index < tokens.size())
     {
-        if (tokens[index].value == "server")
+        std::string current_val = tokens[index].value;
+
+        // 🟢 兼容点 1：如果碰到了最外层的 http 块声明，直接优雅跳过，手指后移！
+        if (current_val == "http")
         {
-            if (parseServerBlock(tokens, index, all_server_names) == ERROR)
-                return ERROR;
+            if (index + 1 < tokens.size() && tokens[index + 1].value == "{")
+            {
+                index += 2; // 跳过 "http" 和 "{"，直接挺进肚子内部
+                continue;
+            }
+            std::cerr << "Error: Expected '{' after http keyword near line " << tokens[index].line << std::endl;
+            return ERROR;
+        }
+
+        // 🟢 兼容点 2：如果碰到了 http 块闭合的右大括号 "}"
+        // 解释：因为整个文件的末尾通常是 http 块的结束，直接放行
+        if (current_val == "}")
+        {
+            index++;
             continue;
         }
-        if (tokens[index].value == "location")
+
+        // 🟢 原本的核心业务：发现别墅关键字，进入别墅大管家
+        if (current_val == "server")
         {
-            std::cerr << "Error: location block must be inside server block near line " << tokens[index].line << std::endl;
+            if (parseServerBlock(tokens, index, this->all_server_names) == ERROR)
+                return ERROR;
+        }
+        else
+        {
+            // 真正孤零零的垃圾指令才会被拦截
+            std::cerr << "Error: Directive outside server block near line " << tokens[index].line << ": " << current_val << std::endl;
             return ERROR;
         }
-        if (tokens[index].value == "}")
-        {
-            std::cerr << "Error: Unexpected closing brace near line " << tokens[index].line << std::endl;
-            return ERROR;
-        }
-        if (tokens[index].value == "{" || tokens[index].value == ";")
-        {
-            std::cerr << "Error: Unexpected token '" << tokens[index].value << "' near line " << tokens[index].line << std::endl;
-            return ERROR;
-        }
-        std::cerr << "Error: Directive outside server block near line " << tokens[index].line << ": " << tokens[index].value << std::endl;
-        return ERROR;
-    }
-    if (servers.empty())
-    {
-        std::cerr << "Error: Config must contain at least one server block" << std::endl;
-        return ERROR;
     }
     return SUCCESS;
 }

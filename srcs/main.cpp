@@ -14,6 +14,9 @@ int main(int argc, char **argv)
         return 1; // 配置有误，退出程序
     }
 
+    
+    config.printConfig(); // 打印配置文件解析结果，便于调试和验证
+    
     // 继续执行其他逻辑，例如 setupSockets() 和 serverLoop()
     return 0; // 正常退出
 }

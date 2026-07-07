@@ -199,6 +199,8 @@ public:
     用法：main() 检查 config.error；如果有错误就不进入 setupSockets/serverLoop。
     */
     bool error;
+
+    void printConfig() const;
 };
 
 #endif

@@ -46,6 +46,8 @@ class LocationConfig {
 	/* 是否显式写过 alias。设计目的：区分 alias 为空和没配置 alias；当前 parser 写 alias 时应配合设置它。 */
 	bool has_alias;
 
+	unsigned long client_max_body_size; // 记录 max_body_size 指令出现次数，确保同一 server 只出现一次
+
 	/* 构造函数：把所有规则设置为安全默认值，例如 autoindex=false、has_autoindex=false、redirect_status=0、字符串为空。 */
 	LocationConfig();
 	/* 拷贝构造：复制所有配置字段，供 vector 扩容或返回时使用。 */

@@ -10,22 +10,22 @@ location 块解析和 LocationConfig 生命周期实现。它把 location 内的
 用途：解析 location { ... } 里面的一条指令，并写入当前 LocationConfig。
 参数来源：parseDirective 在 current_location 不为空时调用。
 变量解释：
-	- directive：当前 location 指令名，例如 allow_methods、cgi_extension、return。
-	- values：当前指令参数数组，来自 parseDirectiveTokens。
-	- loc：当前正在填充的 LocationConfig 指针。
-	- i：遍历 values 的下标，用于 allow_methods 分支。
-	- status：return 分支解析出的 3xx 重定向状态码。
-	- endptr：strtol 输出参数，用来判断 return 状态码是否是纯数字。
+    - directive：当前 location 指令名，例如 allow_methods、cgi_extension、return。
+    - values：当前指令参数数组，来自 parseDirectiveTokens。
+    - loc：当前正在填充的 LocationConfig 指针。
+    - i：遍历 values 的下标，用于 allow_methods 分支。
+    - status：return 分支解析出的 3xx 重定向状态码。
+    - endptr：strtol 输出参数，用来判断 return 状态码是否是纯数字。
 实现逻辑：
-	1. allow_methods：把方法加入 loc->allow_methods。
-	2. root：检查参数数量，检查不能重复，也不能和 alias 同时使用，然后写入 loc->root 并设置 has_root。
-	3. autoindex/directory_listing：检查 on/off，然后设置 loc->autoindex 和 loc->has_autoindex。
-	4. index：设置该 location 的默认首页文件。
-	5. cgi_extension：要求两个参数，后缀和解释器路径，写入 loc->cgi_extensions。
-	6. upload_path：设置 POST 上传目录。
-	7. return：要求状态码和 URL；状态码必须是 300-399；写入 redirect_status/redirect_url。
-	8. alias：要求一个参数，并检查不能和 root 同时使用；写入 loc->alias，并设置 has_alias=true。
-	9. 未知指令返回 ERROR。
+    1. allow_methods：把方法加入 loc->allow_methods。
+    2. root：检查参数数量，检查不能重复，也不能和 alias 同时使用，然后写入 loc->root 并设置 has_root。
+    3. autoindex/directory_listing：检查 on/off，然后设置 loc->autoindex 和 loc->has_autoindex。
+    4. index：设置该 location 的默认首页文件。
+    5. cgi_extension：要求两个参数，后缀和解释器路径，写入 loc->cgi_extensions。
+    6. upload_path：设置 POST 上传目录。
+    7. return：要求状态码和 URL；状态码必须是 300-399；写入 redirect_status/redirect_url。
+    8. alias：要求一个参数，并检查不能和 root 同时使用；写入 loc->alias，并设置 has_alias=true。
+    9. 未知指令返回 ERROR。
 产出：LocationConfig 成为某个 URI 前缀的特殊规则，后续最长前缀匹配会用它。
 */
 bool Config::parseLocationDirective(const std::string &directive, const std::vector<std::string> &values, LocationConfig *loc)
@@ -47,7 +47,7 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
                     method[j] = std::toupper(method[j]); // 💡 强行强制转大写
 
                 /* 🎯 【修改点 2：严格谓词白名单硬卡点】 */
-                if (method != "GET" && method != "POST" && method != "DELETE") 
+                if (method != "GET" && method != "POST" && method != "DELETE")
                 {
                     std::cerr << "Error: Unsupported HTTP method: " << values[i] << std::endl;
                     return ERROR;
@@ -100,6 +100,35 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
             std::cerr << "Invalid " << directive << " directive value: " << values[0] << std::endl;
             return ERROR;
         }
+    }
+    else if (directive == "client_max_body_size")
+    {
+        if (values.size() != 1)
+        {
+            std::cerr << "Error: client_max_body_size requires exactly 1 value" << std::endl;
+            return ERROR;
+        }
+
+        std::string size_str = values[0];
+        size_t multiplier = 1;
+
+        if (!size_str.empty())
+        {
+            char last_char = size_str[size_str.length() - 1];
+            if (last_char == 'M' || last_char == 'm')
+            {
+                multiplier = 1024 * 1024;
+                size_str = size_str.substr(0, size_str.length() - 1);
+            }
+            else if (last_char == 'K' || last_char == 'k')
+            {
+                multiplier = 1024;
+                size_str = size_str.substr(0, size_str.length() - 1);
+            }
+        }
+
+        // 注意：这里是赋值给小房间结构体 loc 肚子里对应的变量！
+        loc->client_max_body_size = std::atoi(size_str.c_str()) * multiplier;
     }
     else if (directive == "index")
     {
@@ -191,32 +220,24 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
 函数：LocationConfig::LocationConfig
 用途：创建一个带默认值的 location 配置对象。
 变量解释：
-	- allow_methods/cgi_extensions：容器字段，默认空。
-	- root/index/upload_path/path/redirect_url/alias：字符串字段，默认空。
-	- autoindex：目录列表开关，默认 false。
-	- has_autoindex：是否显式写过 autoindex，默认 false。
-	- redirect_status：重定向状态码，默认 0 表示无重定向。
-	- has_root/has_alias：是否显式写过 root/alias，默认 false。
+    - allow_methods/cgi_extensions：容器字段，默认空。
+    - root/index/upload_path/path/redirect_url/alias：字符串字段，默认空。
+    - autoindex：目录列表开关，默认 false。
+    - has_autoindex：是否显式写过 autoindex，默认 false。
+    - redirect_status：重定向状态码，默认 0 表示无重定向。
+    - has_root/has_alias：是否显式写过 root/alias，默认 false。
 实现逻辑：
-	1. 字符串字段设置为空。
-	2. autoindex=false，has_autoindex=false，redirect_status=0。
-	3. allow_methods/cgi_extensions 等容器默认空。
-	4. has_root/has_alias=false，表示还没有显式配置 root 或 alias。
+    1. 字符串字段设置为空。
+    2. autoindex=false，has_autoindex=false，redirect_status=0。
+    3. allow_methods/cgi_extensions 等容器默认空。
+    4. has_root/has_alias=false，表示还没有显式配置 root 或 alias。
 */
 LocationConfig::LocationConfig()
-    : allow_methods()     // 1. 如果你在头文件里最先声明了 set
-    , root("")            // 2. 接着声明了 root
-    , autoindex(false)
-    , has_autoindex(false)
-    , index()            
-    , cgi_extensions()
-    , upload_path("")
-    , path("")
-    , redirect_status(0)
-    , redirect_url("")
-    , alias("")
-    , has_root(false)
-    , has_alias(false)
+    : allow_methods() // 1. 如果你在头文件里最先声明了 set
+      ,
+      root("") // 2. 接着声明了 root
+      ,
+      autoindex(false), has_autoindex(false), index(), cgi_extensions(), upload_path(""), path(""), redirect_status(0), redirect_url(""), alias(""), has_root(false), has_alias(false)
 {
     // 大括号内纯净空荡，零摩擦！
 }
@@ -224,13 +245,13 @@ LocationConfig::LocationConfig()
 函数：LocationConfig 拷贝构造
 用途：复制一个 location 配置对象。
 变量解释：
-	- src：被复制的 LocationConfig。
-	- allow_methods/root/autoindex/has_autoindex/index/cgi_extensions/upload_path/path/redirect_status/redirect_url/alias/has_root/has_alias：都从 src 对应字段复制。
+    - src：被复制的 LocationConfig。
+    - allow_methods/root/autoindex/has_autoindex/index/cgi_extensions/upload_path/path/redirect_status/redirect_url/alias/has_root/has_alias：都从 src 对应字段复制。
 实现逻辑：逐个复制 allow_methods、root、autoindex、has_autoindex、index、cgi_extensions、upload_path、path、redirect、alias、has_root、has_alias。
 使用场景：vector<LocationConfig> 扩容或复制 ServerConfig 时会用到。
 */
 LocationConfig::LocationConfig(const LocationConfig &src)
-	: allow_methods(src.allow_methods), root(src.root), autoindex(src.autoindex), has_autoindex(src.has_autoindex), index(src.index), cgi_extensions(src.cgi_extensions), upload_path(src.upload_path), path(src.path), redirect_status(src.redirect_status), redirect_url(src.redirect_url), alias(src.alias), has_root(src.has_root), has_alias(src.has_alias)
+    : allow_methods(src.allow_methods), root(src.root), autoindex(src.autoindex), has_autoindex(src.has_autoindex), index(src.index), cgi_extensions(src.cgi_extensions), upload_path(src.upload_path), path(src.path), redirect_status(src.redirect_status), redirect_url(src.redirect_url), alias(src.alias), has_root(src.has_root), has_alias(src.has_alias)
 {
 }
 
@@ -238,41 +259,41 @@ LocationConfig::LocationConfig(const LocationConfig &src)
 函数：LocationConfig::operator=
 用途：把 rhs 的 location 规则赋值给当前对象。
 变量解释：
-	- rhs：赋值来源对象。
-	- this：当前被赋值对象；如果 this == &rhs，说明是自我赋值。
-	- 各成员字段：在非自我赋值时逐一复制 rhs 的配置。
+    - rhs：赋值来源对象。
+    - this：当前被赋值对象；如果 this == &rhs，说明是自我赋值。
+    - 各成员字段：在非自我赋值时逐一复制 rhs 的配置。
 实现逻辑：
-	1. 检查是否 self-assignment。
-	2. 复制所有配置字段和标志位。
-	3. 返回 *this。
+    1. 检查是否 self-assignment。
+    2. 复制所有配置字段和标志位。
+    3. 返回 *this。
 */
 LocationConfig &LocationConfig::operator=(const LocationConfig &rhs)
 {
-	if (this != &rhs)
-	{
-		allow_methods = rhs.allow_methods;
-		root = rhs.root;
-		autoindex = rhs.autoindex;
-		has_autoindex = rhs.has_autoindex;
-		index = rhs.index;
-		cgi_extensions = rhs.cgi_extensions;
-		upload_path = rhs.upload_path;
-		path = rhs.path;
-		redirect_status = rhs.redirect_status;
-		redirect_url = rhs.redirect_url;
-		alias = rhs.alias;
-		has_root = rhs.has_root;
-		has_alias = rhs.has_alias;
-	}
-	return *this;
+    if (this != &rhs)
+    {
+        allow_methods = rhs.allow_methods;
+        root = rhs.root;
+        autoindex = rhs.autoindex;
+        has_autoindex = rhs.has_autoindex;
+        index = rhs.index;
+        cgi_extensions = rhs.cgi_extensions;
+        upload_path = rhs.upload_path;
+        path = rhs.path;
+        redirect_status = rhs.redirect_status;
+        redirect_url = rhs.redirect_url;
+        alias = rhs.alias;
+        has_root = rhs.has_root;
+        has_alias = rhs.has_alias;
+    }
+    return *this;
 }
 
 /*
 函数：LocationConfig::~LocationConfig
 用途：销毁 LocationConfig。
 变量解释：
-	- allow_methods/cgi_extensions 等容器：由标准库自动释放。
-	- 字符串和 bool/int 字段：无需手动处理。
+    - allow_methods/cgi_extensions 等容器：由标准库自动释放。
+    - 字符串和 bool/int 字段：无需手动处理。
 实现逻辑：没有手动管理的 fd 或堆内存，string/map/set 自动析构即可。
 */
 LocationConfig::~LocationConfig() {}
