@@ -9,7 +9,7 @@
 #include <cstdlib>
 # include <iostream>
 
-#include "ServerConfig.hpp"
+class ServerConfig; // 前向声明，避免循环包含
 
 /*
 类：LocationConfig
