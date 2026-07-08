@@ -10,9 +10,9 @@
 #include <cctype>
 #include <unistd.h>
 
-class LocationConfig;
+#include "LocationConfig.hpp"
+#include "Defines.hpp"
 
-#define MAX_BODY_SIZE 1048576
 
 
 /*

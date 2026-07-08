@@ -8,8 +8,9 @@
 #include <fstream>
 #include <sstream>
 
-class ServerConfig;
-class LocationConfig;
+#include "ServerConfig.hpp"
+#include "LocationConfig.hpp"
+#include "Defines.hpp"
 /*
 结构体：ConfigToken
 作用：保存配置文件词法分析后的一个 token 以及它来自哪一行。
