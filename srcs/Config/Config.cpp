@@ -158,7 +158,7 @@ void Config::printConfig() const
         std::cout << "    ├─ 📂 Root Path   : " << srv.root << std::endl;
         
         // 假设你们成功补全了 client_max_body_size
-        std::cout << "    ├─ ⚖️ Max Body Size: " << srv.client_max_body_size << " Bytes" << std::endl;
+        std::cout << "    ├─ ⚖️ Max Body Size: " << srv.max_body_size << " Bytes" << std::endl;
 
         // 🟢 3. 微观解构：遍历当前别墅肚子里所有内嵌的 location 小房间
         // 这里的 locations 名字可以根据你们真实的 LocationConfig 向量调整
@@ -168,7 +168,7 @@ void Config::printConfig() const
             const LocationConfig &loc = srv.locations[k];
             std::cout << "        ├─ 📍 房间路由 [" << loc.path << "]" << std::endl; // 比如 /api
             std::cout << "        │  ├─ 📂 房间私有 Root: " << (loc.root.empty() ? "(继承 Server 根)" : loc.root) << std::endl;
-            std::cout << "        │  └─ ⚖️ 房间 Body Size: " << loc.client_max_body_size << " Bytes" << std::endl;
+            std::cout << "        │  └─ ⚖️ 房间 Body Size: " << loc.max_body_size << " Bytes" << std::endl;
         }
         std::cout << "        " << std::endl; // 别墅空行隔离
     }

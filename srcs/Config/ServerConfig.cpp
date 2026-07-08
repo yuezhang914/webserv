@@ -131,9 +131,9 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
             return ERROR;
         }
         if (values[0] == "on")
-            srv->has_autoindex = true;
+            srv->autoindex = true;
         else if (values[0] == "off")
-            srv->has_autoindex = false;
+            srv->autoindex = false;
         else
         {
             std::cerr << "Invalid " << directive << " directive value: " << values[0] << std::endl;
@@ -216,39 +216,6 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
         for (size_t i = 0; i < values.size(); ++i)
             srv->server_names.push_back(values[i]);
     }
-    /* 🚀 【完美补网：注入 client_max_body_size 工业级防线】 */
-    else if (directive == "max_body_size" || directive == "client_max_body_size")
-    {
-        if (values.size() != 1)
-        {
-            std::cerr << "Error: client_max_body_size requires exactly 1 value" << std::endl;
-            return ERROR;
-        }
-
-        // 解释：把类似于 "100M" 或者 "20" 这样的纯文本转成数字存进 srv 结构体肚子里
-        // 提示：你可以选择只解析纯数字（字节数），或者顺手支持带 'M' 或 'K' 的单位。
-        // 这里提供一个最干净的纯数字/基础解析示范：
-        std::string size_str = values[0];
-        size_t multiplier = 1;
-
-        if (!size_str.empty())
-        {
-            char last_char = size_str[size_str.length() - 1];
-            if (last_char == 'M' || last_char == 'm')
-            {
-                multiplier = 1024 * 1024;
-                size_str = size_str.substr(0, size_str.length() - 1);
-            }
-            else if (last_char == 'K' || last_char == 'k')
-            {
-                multiplier = 1024;
-                size_str = size_str.substr(0, size_str.length() - 1);
-            }
-        }
-
-        // 转换并存入你们 ServerConfig 里的成员变量（例如 srv->client_max_body_size）
-        srv->client_max_body_size = std::atoi(size_str.c_str()) * multiplier;
-    }
     else if (directive == "root")
     {
         if (values.size() != 1)
@@ -292,20 +259,27 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
             srv->error_pages[code] = error_path;
         }
     }
-    else if (directive == "max_body_size")
+    else if (directive == "max_body_size" || directive == "client_max_body_size")
     {
+        // 如果已经是 true，说明重复了！
+        if (srv->has_body_size == true)
+        {
+            std::cerr << "Error: \"max_body_size\" directive is duplicate in this server block" << std::endl;
+            return ERROR;
+        }
+
         if (values.size() != 1)
-        {
-            std::cerr << "Invalid client_max_body_size directive" << std::endl;
             return ERROR;
-        }
-        size_t size = parseSize(values[0]);
-        if (size == (size_t)ERROR_PARSE_SIZE)
-        {
-            std::cerr << "Invalid parse size" << std::endl;
+
+        unsigned long converted_size = this->parseSize(values[0]);
+        if (converted_size == static_cast<unsigned long>(ERROR_PARSE_SIZE))
             return ERROR;
-        }
-        srv->max_body_size = size;
+
+        // 🎯存入数据
+        srv->max_body_size = converted_size;
+
+        // 标记已经配过一次了
+        srv->has_body_size = true;
     }
     else if (directive == "index")
     {
@@ -352,18 +326,24 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
     6. autoindex=false，默认不生成目录列表。
     7. 清空 server_names/error_pages/locations/allow_methods 等容器。
 */
-ServerConfig::ServerConfig()
-    : port(8080), countport(0), host(""), server_names() // 在初始化列表里显式触发默认空构造
-      ,
-      root(""), error_pages() // 自动初始化为空 map
-      ,
-      max_body_size(MAX_BODY_SIZE), locations(), index() // 多首页 vector 默认纯净初始化
-      ,
-      upload_path(""), allow_methods(), socketFd(-1) // 必须是 -1
-      ,
-      has_root(false), has_autoindex(false)
+ServerConfig::ServerConfig() :
+    port(80),
+    countport(0),
+    host("127.0.0.1"),
+    server_names(),        // std::vector 默认构造，可以不写或留空
+    root(""),
+    error_pages(),         // std::map 默认构造
+    max_body_size(MAX_BODY_SIZE),
+    has_body_size(false), // 默认没有配置 max_body_size
+    locations(),           // std::vector 默认构造
+    index(),               // 多首页 vector 默认纯净初始化
+    upload_path(""),
+    allow_methods(),       // std::set 默认构造
+    socketFd(-1),          // 必须是 -1 锁死
+    has_root(false),
+    has_autoindex(false)   // 完美对齐你的头文件末尾顺序
 {
-    // 💡 大括号内保持绝对的纯净空荡，不需要做任何画蛇添足的显式 clear()！
+    // 🎯 如果你采用了方案 A 的状态锁，并且把它加在头文件最后，请确保它在列表里也老老实实呆在最后
 }
 
 /*
@@ -379,7 +359,7 @@ ServerConfig::ServerConfig()
 原因：socket fd 是系统资源，不能让两个 ServerConfig 对象同时认为自己拥有同一个 fd，否则析构时可能重复 close。
 */
 ServerConfig::ServerConfig(const ServerConfig &src)
-    : port(src.port), countport(src.countport), host(src.host), server_names(src.server_names), root(src.root), error_pages(src.error_pages), max_body_size(src.max_body_size), locations(src.locations), index(src.index), allow_methods(src.allow_methods), socketFd(0), has_root(src.has_root), has_autoindex(src.has_autoindex)
+    : port(src.port), countport(src.countport), host(src.host), server_names(src.server_names), root(src.root), error_pages(src.error_pages), max_body_size(src.max_body_size), has_body_size(src.has_body_size), locations(src.locations), index(src.index), upload_path(src.upload_path), allow_methods(src.allow_methods), socketFd(0), has_root(src.has_root), has_autoindex(src.has_autoindex)
 {
 }
 
@@ -425,6 +405,7 @@ ServerConfig &ServerConfig::operator=(const ServerConfig &rhs)
         max_body_size = rhs.max_body_size;
         locations = rhs.locations;
         index = rhs.index;
+        upload_path = rhs.upload_path;
         allow_methods = rhs.allow_methods;
         socketFd = 0;
         has_root = rhs.has_root;

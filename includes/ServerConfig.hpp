@@ -10,9 +10,9 @@
 #include <cctype>
 #include <unistd.h>
 
-class LocationConfig;
+#include "LocationConfig.hpp"
+#include "Defines.hpp"
 
-#define MAX_BODY_SIZE 1048576
 
 
 /*
@@ -30,7 +30,7 @@ public:
     std::string root;
     std::map<int, std::string> error_pages;
     unsigned long max_body_size;
-    unsigned long client_max_body_size; // 记录 max_body_size 指令出现次数，确保同一 server 只出现一次
+    bool has_body_size; // 记录 max_body_size 指令出现次数，确保同一 server 只出现一次
     std::vector<LocationConfig> locations;
     
     /* 🛠️ 【修改点 1】：与 Location 块强类型对齐，由单体 string 完美升级为向量容器，承接全局多首页Fallback */
@@ -44,7 +44,8 @@ public:
     
     bool has_root;
     bool has_autoindex; // 同步并线我们在 location 中沉淀的 has_ 状态锁
-
+    bool autoindex;
+    
     ServerConfig();
     
     /* 🛠️ 在实现这个拷贝构造时，内部的 socketFd 必须安全改写为 -1 锁死！ */

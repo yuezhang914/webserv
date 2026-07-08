@@ -103,32 +103,25 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
     }
     else if (directive == "max_body_size" || directive == "client_max_body_size")
     {
-        if (values.size() != 1)
+        // 如果已经是 true，说明重复了！
+        if (loc->has_body_size == true)
         {
-            std::cerr << "Error: client_max_body_size requires exactly 1 value" << std::endl;
+            std::cerr << "Error: \"max_body_size\" directive is duplicate in this location block" << std::endl;
             return ERROR;
         }
 
-        std::string size_str = values[0];
-        size_t multiplier = 1;
+        if (values.size() != 1)
+            return ERROR;
 
-        if (!size_str.empty())
-        {
-            char last_char = size_str[size_str.length() - 1];
-            if (last_char == 'M' || last_char == 'm')
-            {
-                multiplier = 1024 * 1024;
-                size_str = size_str.substr(0, size_str.length() - 1);
-            }
-            else if (last_char == 'K' || last_char == 'k')
-            {
-                multiplier = 1024;
-                size_str = size_str.substr(0, size_str.length() - 1);
-            }
-        }
+        unsigned long converted_size = this->parseSize(values[0]);
+        if (converted_size == static_cast<unsigned long>(ERROR_PARSE_SIZE))
+            return ERROR;
 
-        // 注意：这里是赋值给小房间结构体 loc 肚子里对应的变量！
-        loc->client_max_body_size = std::atoi(size_str.c_str()) * multiplier;
+        // 🎯存入数据
+        loc->max_body_size = converted_size;
+
+        // 标记已经配过一次了
+        loc->has_body_size = true;
     }
     else if (directive == "index")
     {
@@ -237,7 +230,8 @@ LocationConfig::LocationConfig()
       ,
       root("") // 2. 接着声明了 root
       ,
-      autoindex(false), has_autoindex(false), index(), cgi_extensions(), upload_path(""), path(""), redirect_status(0), redirect_url(""), alias(""), has_root(false), has_alias(false)
+      autoindex(false), has_autoindex(false), index(), cgi_extensions(), upload_path(""), path(""), redirect_status(0), redirect_url(""), alias(""), has_root(false), has_alias(false),
+      has_body_size(false)
 {
     // 大括号内纯净空荡，零摩擦！
 }
@@ -251,7 +245,7 @@ LocationConfig::LocationConfig()
 使用场景：vector<LocationConfig> 扩容或复制 ServerConfig 时会用到。
 */
 LocationConfig::LocationConfig(const LocationConfig &src)
-    : allow_methods(src.allow_methods), root(src.root), autoindex(src.autoindex), has_autoindex(src.has_autoindex), index(src.index), cgi_extensions(src.cgi_extensions), upload_path(src.upload_path), path(src.path), redirect_status(src.redirect_status), redirect_url(src.redirect_url), alias(src.alias), has_root(src.has_root), has_alias(src.has_alias)
+    : allow_methods(src.allow_methods), root(src.root), autoindex(src.autoindex), has_autoindex(src.has_autoindex), index(src.index), cgi_extensions(src.cgi_extensions), upload_path(src.upload_path), path(src.path), redirect_status(src.redirect_status), redirect_url(src.redirect_url), alias(src.alias), has_root(src.has_root), has_alias(src.has_alias), has_body_size(src.has_body_size)
 {
 }
 
@@ -284,6 +278,7 @@ LocationConfig &LocationConfig::operator=(const LocationConfig &rhs)
         alias = rhs.alias;
         has_root = rhs.has_root;
         has_alias = rhs.has_alias;
+        has_body_size = rhs.has_body_size;
     }
     return *this;
 }
