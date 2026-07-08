@@ -7,5 +7,6 @@
 #define ERROR_PARSE_SIZE -1
 #define DEFAULT_PORT "8080"
 #define MAX_BODY_SIZE 1048576
+#define SOMAXCONN_BACKLOG 128
 
 #endif
