@@ -131,9 +131,9 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
             return ERROR;
         }
         if (values[0] == "on")
-            srv->has_autoindex = true;
+            srv->autoindex = true;
         else if (values[0] == "off")
-            srv->has_autoindex = false;
+            srv->autoindex = false;
         else
         {
             std::cerr << "Invalid " << directive << " directive value: " << values[0] << std::endl;
@@ -219,35 +219,34 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
     /* 🚀 【完美补网：注入 client_max_body_size 工业级防线】 */
     else if (directive == "max_body_size" || directive == "client_max_body_size")
     {
-        if (values.size() != 1)
+        // 🔒 安全门禁 1：防止用户在一个 server 块里复写多条限制导致逻辑混乱
+        // （利用 srv->client_max_body_size 作为指令计数器，确保同一 server 只合法出现一次）
+        if (srv->client_max_body_size > 0)
         {
-            std::cerr << "Error: client_max_body_size requires exactly 1 value" << std::endl;
+            std::cerr << "Error: \"max_body_size\" directive is duplicate in this server block" << std::endl;
             return ERROR;
         }
 
-        // 解释：把类似于 "100M" 或者 "20" 这样的纯文本转成数字存进 srv 结构体肚子里
-        // 提示：你可以选择只解析纯数字（字节数），或者顺手支持带 'M' 或 'K' 的单位。
-        // 这里提供一个最干净的纯数字/基础解析示范：
-        std::string size_str = values[0];
-        size_t multiplier = 1;
-
-        if (!size_str.empty())
+        // 🔒 安全门禁 2：参数个数严格校验
+        if (values.size() != 1)
         {
-            char last_char = size_str[size_str.length() - 1];
-            if (last_char == 'M' || last_char == 'm')
-            {
-                multiplier = 1024 * 1024;
-                size_str = size_str.substr(0, size_str.length() - 1);
-            }
-            else if (last_char == 'K' || last_char == 'k')
-            {
-                multiplier = 1024;
-                size_str = size_str.substr(0, size_str.length() - 1);
-            }
+            std::cerr << "Error: max_body_size requires exactly 1 value" << std::endl;
+            return ERROR;
         }
 
-        // 转换并存入你们 ServerConfig 里的成员变量（例如 srv->client_max_body_size）
-        srv->client_max_body_size = std::atoi(size_str.c_str()) * multiplier;
+        // 假设你定义的非法转换返回值为 ERROR_PARSE_SIZE（通常是 static_cast<unsigned long>(-1)）
+        unsigned long converted_size = this->parseSize(values[0]);
+        if (converted_size == static_cast<unsigned long>(ERROR_PARSE_SIZE))
+        {
+            std::cerr << "Error: Invalid size format in max_body_size: " << values[0] << std::endl;
+            return ERROR;
+        }
+
+        // 🎯 专一归宿：按照队友要求，把换算好的真实二进制字节数忠实写入 srv->max_body_size
+        srv->max_body_size = converted_size;
+
+        // 📈 计数器无情累加：标记该指令在当前 server 块里已经露过面了
+        srv->client_max_body_size++;
     }
     else if (directive == "root")
     {

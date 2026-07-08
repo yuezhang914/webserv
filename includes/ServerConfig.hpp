@@ -44,7 +44,8 @@ public:
     
     bool has_root;
     bool has_autoindex; // 同步并线我们在 location 中沉淀的 has_ 状态锁
-
+    bool autoindex;
+    
     ServerConfig();
     
     /* 🛠️ 在实现这个拷贝构造时，内部的 socketFd 必须安全改写为 -1 锁死！ */

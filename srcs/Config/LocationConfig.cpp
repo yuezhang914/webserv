@@ -103,32 +103,23 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
     }
     else if (directive == "max_body_size" || directive == "client_max_body_size")
     {
+        // 🔒 安全门禁：参数个数严格校验
         if (values.size() != 1)
         {
-            std::cerr << "Error: client_max_body_size requires exactly 1 value" << std::endl;
+            std::cerr << "Error: max_body_size inside location requires exactly 1 value" << std::endl;
             return ERROR;
         }
 
-        std::string size_str = values[0];
-        size_t multiplier = 1;
-
-        if (!size_str.empty())
+        // 同样，如果转换失败（格式非法或溢出），parseSize 会返回 static_cast<unsigned long>(ERROR_PARSE_SIZE)
+        unsigned long converted_size = this->parseSize(values[0]);
+        if (converted_size == static_cast<unsigned long>(ERROR_PARSE_SIZE))
         {
-            char last_char = size_str[size_str.length() - 1];
-            if (last_char == 'M' || last_char == 'm')
-            {
-                multiplier = 1024 * 1024;
-                size_str = size_str.substr(0, size_str.length() - 1);
-            }
-            else if (last_char == 'K' || last_char == 'k')
-            {
-                multiplier = 1024;
-                size_str = size_str.substr(0, size_str.length() - 1);
-            }
+            std::cerr << "Error: Invalid size format in location max_body_size: " << values[0] << std::endl;
+            return ERROR;
         }
 
-        // 注意：这里是赋值给小房间结构体 loc 肚子里对应的变量！
-        loc->client_max_body_size = std::atoi(size_str.c_str()) * multiplier;
+        // 配合前面“删掉继承下沉”的英明决定，这里只管登记小房间自己的“私有上限”
+        loc->client_max_body_size = converted_size;
     }
     else if (directive == "index")
     {
