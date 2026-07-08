@@ -391,24 +391,6 @@ bool Config::parseServerBlock(const std::vector<ConfigToken> &tokens, size_t &in
         if (tokens[index].value == "}")
         {
             index++;
-
-            // 🚀 【配置下沉高能熔炼中心】：把大厅资产，原位深度拷贝给未配置的小房间
-            // ====================================================================
-            for (size_t k = 0; k < servers[current_srv_idx].locations.size(); ++k)
-            {
-                // 如果小房间的限制依然是默认的 0，说明运维没有在 location 内部特异性配置
-                if (servers[current_srv_idx].locations[k].client_max_body_size == 0)
-                {
-                    // ⚡ 原位深度拷贝！大厅家产直接下沉灌注进小房间
-                    servers[current_srv_idx].locations[k].client_max_body_size = servers[current_srv_idx].client_max_body_size;
-                }
-
-                // 💡 扩展：如果小房间没有配私有 root，也可以在这里顺手顺流下沉！
-                if (servers[current_srv_idx].locations[k].root.empty())
-                {
-                    servers[current_srv_idx].locations[k].root = servers[current_srv_idx].root;
-                }
-            }
             // 🚀 动态捞取绝对安全的物理地址进行最终的域名防伪校验
             return validateServerNameIsNew(servers[current_srv_idx], all_server_names);
         }
