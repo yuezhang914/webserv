@@ -2,7 +2,6 @@
 文件：srcs/Config/ServerConfig.cpp
 server 块解析和 ServerConfig 生命周期实现。这个文件把 listen/root/index/error_page 等 server 级别指令写入 ServerConfig。
 */
-#include "ServerConfig.hpp"
 #include "Webserv.hpp"
 
 /*

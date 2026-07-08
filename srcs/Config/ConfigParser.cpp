@@ -3,7 +3,6 @@
 配置文件语法解析实现。本文件负责把 default.conf 这类文本配置拆成 token 流，然后按 server/location/directive/block 的语法建立 Config::servers。
 健壮版 parser 不再要求 } 单独占一行，只要求普通指令用 ; 结束，因此可以解析 server { listen 3435; root srv/www; } 这种写法。
 */
-#include "ConfigParser.hpp"
 #include "Webserv.hpp"
 
 /*
@@ -224,8 +223,6 @@ bool Config::validateServerNameIsNew(ServerConfig &server, std::map<int, std::se
 bool Config::parseDirectiveTokens(const std::vector<ConfigToken> &tokens, size_t &index, std::vector<std::string> &directive_tokens) const
 {
     directive_tokens.clear();
-
-    // 🚀 【未央学姐的平坦化大循环】：不管你是名字还是参数，进来一起过筛子！
     while (index < tokens.size())
     {
         const std::string &val = tokens[index].value;
@@ -452,44 +449,61 @@ bool Config::parseServerBlock(const std::vector<ConfigToken> &tokens, size_t &in
 bool Config::parseTokenStream(const std::vector<ConfigToken> &tokens)
 {
     size_t index = 0;
+    bool hasHttpBlock = false;
+
+    // 可选的 http 块
+    if (index < tokens.size() && tokens[index].value == "http")
+    {
+        hasHttpBlock = true;
+
+        index++;
+        if (index >= tokens.size() || tokens[index].value != "{")
+        {
+            std::cerr << "Error: Expected '{' after http keyword near line "
+                      << tokens[index - 1].line << std::endl;
+            return ERROR;
+        }
+        index++;    // 跳过 '{'
+    }
 
     while (index < tokens.size())
     {
-        std::string current_val = tokens[index].value;
-
-        // 🟢 兼容点 1：如果碰到了最外层的 http 块声明，直接优雅跳过，手指后移！
-        if (current_val == "http")
-        {
-            if (index + 1 < tokens.size() && tokens[index + 1].value == "{")
-            {
-                index += 2; // 跳过 "http" 和 "{"，直接挺进肚子内部
-                continue;
-            }
-            std::cerr << "Error: Expected '{' after http keyword near line " << tokens[index].line << std::endl;
-            return ERROR;
-        }
-
-        // 🟢 兼容点 2：如果碰到了 http 块闭合的右大括号 "}"
-        // 解释：因为整个文件的末尾通常是 http 块的结束，直接放行
-        if (current_val == "}")
+        // http 块结束
+        if (hasHttpBlock && tokens[index].value == "}")
         {
             index++;
-            continue;
+
+            // http 结束后不应该再有内容
+            if (index != tokens.size())
+            {
+                std::cerr << "Error: Unexpected token after http block near line "
+                          << tokens[index].line << std::endl;
+                return ERROR;
+            }
+            break;
         }
 
-        // 🟢 原本的核心业务：发现别墅关键字，进入别墅大管家
-        if (current_val == "server")
+        if (tokens[index].value == "server")
         {
-            if (parseServerBlock(tokens, index, this->all_server_names) == ERROR)
+            if (parseServerBlock(tokens, index, all_server_names) == ERROR)
                 return ERROR;
         }
         else
         {
-            // 真正孤零零的垃圾指令才会被拦截
-            std::cerr << "Error: Directive outside server block near line " << tokens[index].line << ": " << current_val << std::endl;
+            std::cerr << "Error: Directive outside server block near line "
+                      << tokens[index].line << ": "
+                      << tokens[index].value << std::endl;
             return ERROR;
         }
     }
+
+    // 如果有 http，但没有找到结束的 }
+    if (hasHttpBlock && index == tokens.size())
+    {
+        std::cerr << "Error: Missing closing '}' for http block." << std::endl;
+        return ERROR;
+    }
+
     return SUCCESS;
 }
 
