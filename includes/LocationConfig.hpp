@@ -45,7 +45,9 @@ class LocationConfig {
 	/* 是否显式写过 alias。设计目的：区分 alias 为空和没配置 alias；当前 parser 写 alias 时应配合设置它。 */
 	bool has_alias;
 
-	unsigned long client_max_body_size; 
+	unsigned long max_body_size; 
+
+    bool has_body_size;                 // 标记这个房间里是否已经配过该指令
 
 	/* 构造函数：把所有规则设置为安全默认值，例如 autoindex=false、has_autoindex=false、redirect_status=0、字符串为空。 */
 	LocationConfig();

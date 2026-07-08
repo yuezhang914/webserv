@@ -103,23 +103,25 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
     }
     else if (directive == "max_body_size" || directive == "client_max_body_size")
     {
-        // 🔒 安全门禁：参数个数严格校验
-        if (values.size() != 1)
+        // 如果已经是 true，说明重复了！
+        if (loc->has_body_size == true)
         {
-            std::cerr << "Error: max_body_size inside location requires exactly 1 value" << std::endl;
+            std::cerr << "Error: \"max_body_size\" directive is duplicate in this location block" << std::endl;
             return ERROR;
         }
 
-        // 同样，如果转换失败（格式非法或溢出），parseSize 会返回 static_cast<unsigned long>(ERROR_PARSE_SIZE)
+        if (values.size() != 1)
+            return ERROR;
+
         unsigned long converted_size = this->parseSize(values[0]);
         if (converted_size == static_cast<unsigned long>(ERROR_PARSE_SIZE))
-        {
-            std::cerr << "Error: Invalid size format in location max_body_size: " << values[0] << std::endl;
             return ERROR;
-        }
 
-        // 配合前面“删掉继承下沉”的英明决定，这里只管登记小房间自己的“私有上限”
-        loc->client_max_body_size = converted_size;
+        // 🎯存入数据
+        loc->max_body_size = converted_size;
+
+        // 标记已经配过一次了
+        loc->has_body_size = true;
     }
     else if (directive == "index")
     {
@@ -228,7 +230,8 @@ LocationConfig::LocationConfig()
       ,
       root("") // 2. 接着声明了 root
       ,
-      autoindex(false), has_autoindex(false), index(), cgi_extensions(), upload_path(""), path(""), redirect_status(0), redirect_url(""), alias(""), has_root(false), has_alias(false)
+      autoindex(false), has_autoindex(false), index(), cgi_extensions(), upload_path(""), path(""), redirect_status(0), redirect_url(""), alias(""), has_root(false), has_alias(false),
+      has_body_size(false)
 {
     // 大括号内纯净空荡，零摩擦！
 }

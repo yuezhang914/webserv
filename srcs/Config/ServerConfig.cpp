@@ -216,38 +216,6 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
         for (size_t i = 0; i < values.size(); ++i)
             srv->server_names.push_back(values[i]);
     }
-    /* 🚀 【完美补网：注入 client_max_body_size 工业级防线】 */
-    else if (directive == "max_body_size" || directive == "client_max_body_size")
-    {
-        // 🔒 安全门禁 1：防止用户在一个 server 块里复写多条限制导致逻辑混乱
-        // （利用 srv->client_max_body_size 作为指令计数器，确保同一 server 只合法出现一次）
-        if (srv->client_max_body_size > 0)
-        {
-            std::cerr << "Error: \"max_body_size\" directive is duplicate in this server block" << std::endl;
-            return ERROR;
-        }
-
-        // 🔒 安全门禁 2：参数个数严格校验
-        if (values.size() != 1)
-        {
-            std::cerr << "Error: max_body_size requires exactly 1 value" << std::endl;
-            return ERROR;
-        }
-
-        // 假设你定义的非法转换返回值为 ERROR_PARSE_SIZE（通常是 static_cast<unsigned long>(-1)）
-        unsigned long converted_size = this->parseSize(values[0]);
-        if (converted_size == static_cast<unsigned long>(ERROR_PARSE_SIZE))
-        {
-            std::cerr << "Error: Invalid size format in max_body_size: " << values[0] << std::endl;
-            return ERROR;
-        }
-
-        // 🎯 专一归宿：按照队友要求，把换算好的真实二进制字节数忠实写入 srv->max_body_size
-        srv->max_body_size = converted_size;
-
-        // 📈 计数器无情累加：标记该指令在当前 server 块里已经露过面了
-        srv->client_max_body_size++;
-    }
     else if (directive == "root")
     {
         if (values.size() != 1)
@@ -291,20 +259,27 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
             srv->error_pages[code] = error_path;
         }
     }
-    else if (directive == "max_body_size")
+    else if (directive == "max_body_size" || directive == "client_max_body_size")
     {
+        // 如果已经是 true，说明重复了！
+        if (srv->has_body_size == true)
+        {
+            std::cerr << "Error: \"max_body_size\" directive is duplicate in this server block" << std::endl;
+            return ERROR;
+        }
+
         if (values.size() != 1)
-        {
-            std::cerr << "Invalid client_max_body_size directive" << std::endl;
             return ERROR;
-        }
-        size_t size = parseSize(values[0]);
-        if (size == (size_t)ERROR_PARSE_SIZE)
-        {
-            std::cerr << "Invalid parse size" << std::endl;
+
+        unsigned long converted_size = this->parseSize(values[0]);
+        if (converted_size == static_cast<unsigned long>(ERROR_PARSE_SIZE))
             return ERROR;
-        }
-        srv->max_body_size = size;
+
+        // 🎯存入数据
+        srv->max_body_size = converted_size;
+
+        // 标记已经配过一次了
+        srv->has_body_size = true;
     }
     else if (directive == "index")
     {
@@ -351,18 +326,24 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
     6. autoindex=false，默认不生成目录列表。
     7. 清空 server_names/error_pages/locations/allow_methods 等容器。
 */
-ServerConfig::ServerConfig()
-    : port(8080), countport(0), host(""), server_names() // 在初始化列表里显式触发默认空构造
-      ,
-      root(""), error_pages() // 自动初始化为空 map
-      ,
-      max_body_size(MAX_BODY_SIZE), locations(), index() // 多首页 vector 默认纯净初始化
-      ,
-      upload_path(""), allow_methods(), socketFd(-1) // 必须是 -1
-      ,
-      has_root(false), has_autoindex(false)
+ServerConfig::ServerConfig() :
+    port(80),
+    countport(0),
+    host("127.0.0.1"),
+    server_names(),        // std::vector 默认构造，可以不写或留空
+    root(""),
+    error_pages(),         // std::map 默认构造
+    max_body_size(MAX_BODY_SIZE),
+    has_body_size(false), // 默认没有配置 max_body_size
+    locations(),           // std::vector 默认构造
+    index(),               // 多首页 vector 默认纯净初始化
+    upload_path(""),
+    allow_methods(),       // std::set 默认构造
+    socketFd(-1),          // 必须是 -1 锁死
+    has_root(false),
+    has_autoindex(false)   // 完美对齐你的头文件末尾顺序
 {
-    // 💡 大括号内保持绝对的纯净空荡，不需要做任何画蛇添足的显式 clear()！
+    // 🎯 如果你采用了方案 A 的状态锁，并且把它加在头文件最后，请确保它在列表里也老老实实呆在最后
 }
 
 /*

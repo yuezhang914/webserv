@@ -30,7 +30,7 @@ public:
     std::string root;
     std::map<int, std::string> error_pages;
     unsigned long max_body_size;
-    unsigned long client_max_body_size; // 记录 max_body_size 指令出现次数，确保同一 server 只出现一次
+    bool has_body_size; // 记录 max_body_size 指令出现次数，确保同一 server 只出现一次
     std::vector<LocationConfig> locations;
     
     /* 🛠️ 【修改点 1】：与 Location 块强类型对齐，由单体 string 完美升级为向量容器，承接全局多首页Fallback */
