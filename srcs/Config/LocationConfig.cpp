@@ -245,7 +245,7 @@ LocationConfig::LocationConfig()
 使用场景：vector<LocationConfig> 扩容或复制 ServerConfig 时会用到。
 */
 LocationConfig::LocationConfig(const LocationConfig &src)
-    : allow_methods(src.allow_methods), root(src.root), autoindex(src.autoindex), has_autoindex(src.has_autoindex), index(src.index), cgi_extensions(src.cgi_extensions), upload_path(src.upload_path), path(src.path), redirect_status(src.redirect_status), redirect_url(src.redirect_url), alias(src.alias), has_root(src.has_root), has_alias(src.has_alias)
+    : allow_methods(src.allow_methods), root(src.root), autoindex(src.autoindex), has_autoindex(src.has_autoindex), index(src.index), cgi_extensions(src.cgi_extensions), upload_path(src.upload_path), path(src.path), redirect_status(src.redirect_status), redirect_url(src.redirect_url), alias(src.alias), has_root(src.has_root), has_alias(src.has_alias), has_body_size(src.has_body_size)
 {
 }
 
@@ -278,6 +278,7 @@ LocationConfig &LocationConfig::operator=(const LocationConfig &rhs)
         alias = rhs.alias;
         has_root = rhs.has_root;
         has_alias = rhs.has_alias;
+        has_body_size = rhs.has_body_size;
     }
     return *this;
 }

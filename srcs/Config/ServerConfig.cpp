@@ -359,7 +359,7 @@ ServerConfig::ServerConfig() :
 原因：socket fd 是系统资源，不能让两个 ServerConfig 对象同时认为自己拥有同一个 fd，否则析构时可能重复 close。
 */
 ServerConfig::ServerConfig(const ServerConfig &src)
-    : port(src.port), countport(src.countport), host(src.host), server_names(src.server_names), root(src.root), error_pages(src.error_pages), max_body_size(src.max_body_size), locations(src.locations), index(src.index), allow_methods(src.allow_methods), socketFd(0), has_root(src.has_root), has_autoindex(src.has_autoindex)
+    : port(src.port), countport(src.countport), host(src.host), server_names(src.server_names), root(src.root), error_pages(src.error_pages), max_body_size(src.max_body_size), has_body_size(src.has_body_size), locations(src.locations), index(src.index), upload_path(src.upload_path), allow_methods(src.allow_methods), socketFd(0), has_root(src.has_root), has_autoindex(src.has_autoindex)
 {
 }
 
@@ -405,6 +405,7 @@ ServerConfig &ServerConfig::operator=(const ServerConfig &rhs)
         max_body_size = rhs.max_body_size;
         locations = rhs.locations;
         index = rhs.index;
+        upload_path = rhs.upload_path;
         allow_methods = rhs.allow_methods;
         socketFd = 0;
         has_root = rhs.has_root;
