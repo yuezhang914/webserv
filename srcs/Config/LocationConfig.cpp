@@ -2,7 +2,6 @@
 文件：srcs/Config/LocationConfig.cpp
 location 块解析和 LocationConfig 生命周期实现。它把 location 内的 root/alias/index/cgi_extension/upload_path/return 等指令写入 LocationConfig。
 */
-#include "LocationConfig.hpp"
 #include "Webserv.hpp"
 
 /*
