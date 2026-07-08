@@ -45,11 +45,13 @@ class LocationConfig {
 	/* 是否显式写过 alias。设计目的：区分 alias 为空和没配置 alias；当前 parser 写 alias 时应配合设置它。 */
 	bool has_alias;
 
-	unsigned long max_body_size; 
+	/* 🛠️ 修改点：重新支持 location 级 max_body_size。
+	   意义：location 可以对特定 URI 前缀覆盖 server 的 body 限制；RequestBody 会在读取 body 前通过 ConfigRouteUtils 做最长前缀匹配并使用该值。 */
+	unsigned long max_body_size;
+	/* 是否显式写过 max_body_size。设计目的：区分“location 没写，继承 server 限制”和“location 明确配置自己的限制”。 */
+	bool has_body_size;
 
-    bool has_body_size;                 // 标记这个房间里是否已经配过该指令
-
-	/* 构造函数：把所有规则设置为安全默认值，例如 autoindex=false、has_autoindex=false、redirect_status=0、字符串为空。 */
+	/* 构造函数：把所有规则设置为安全默认值，例如 autoindex=false、has_autoindex=false、max_body_size=MAX_BODY_SIZE、redirect_status=0、字符串为空。 */
 	LocationConfig();
 	/* 拷贝构造：复制所有配置字段，供 vector 扩容或返回时使用。 */
 	LocationConfig(const LocationConfig& src);
