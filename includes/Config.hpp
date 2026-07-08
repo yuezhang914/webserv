@@ -1,3 +1,4 @@
+
 #ifndef CONFIG_HPP
 #define CONFIG_HPP
 
@@ -144,7 +145,7 @@ private:
     函数：parseServerDirective
     输入：server 块里的指令名、参数列表、当前 ServerConfig 指针。
     输出：修改 srv 对象；成功返回 SUCCESS，失败返回 ERROR。
-    实现逻辑：根据 directive 分别处理 listen/server_name/root/error_page/max_body_size/index/allow_methods/upload_path/autoindex；每个分支检查参数个数和格式，再写入 ServerConfig 对应成员。
+    实现逻辑：根据 directive 分别处理 listen/server_name/root/error_page/max_body_size/index/allow_methods/upload_path/autoindex；每个分支检查参数个数和格式，再写入 ServerConfig 对应成员。当前规格支持 server 级 max_body_size，不支持 client_max_body_size。
     */
     bool parseServerDirective(const std::string &directive, const std::vector<std::string> &values, ServerConfig *srv);
 
@@ -152,7 +153,7 @@ private:
     函数：parseLocationDirective
     输入：location 块里的指令名、参数列表、当前 LocationConfig 指针。
     输出：修改 loc 对象；成功返回 SUCCESS，失败返回 ERROR。
-    实现逻辑：根据 directive 分别处理 allow_methods/root/alias/index/autoindex/cgi_extension/upload_path/return；检查 root 和 alias 不能同时使用；把规则写进 LocationConfig。
+    实现逻辑：根据 directive 分别处理 allow_methods/root/alias/index/autoindex/cgi_extension/upload_path/return/max_body_size；检查 root 和 alias 不能同时使用；location 级 max_body_size 会被 RequestBody 通过 ConfigRouteUtils 真正使用。
     */
     bool parseLocationDirective(const std::string &directive, const std::vector<std::string> &values, LocationConfig *srv);
 
@@ -200,8 +201,7 @@ public:
     用法：main() 检查 config.error；如果有错误就不进入 setupSockets/serverLoop。
     */
     bool error;
-
-    void printConfig() const;
+   void printConfig() const;
 };
 
 #endif

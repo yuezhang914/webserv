@@ -2,6 +2,7 @@
 文件：srcs/Config/ServerConfig.cpp
 server 块解析和 ServerConfig 生命周期实现。这个文件把 listen/root/index/error_page 等 server 级别指令写入 ServerConfig。
 */
+#include "ServerConfig.hpp"
 #include "Webserv.hpp"
 
 /*
@@ -111,7 +112,12 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
             }
         }
         else
-            srv->allow_methods.insert("NONE");
+        {
+            /* 🛠️ 【修改点：allow_methods 空参数直接报错】
+               意义：不能塞入伪方法 NONE；配置缺参数应在 Config 阶段失败。 */
+            std::cerr << "Error: allow_methods requires at least one method" << std::endl;
+            return ERROR;
+        }
     }
     else if (directive == "upload_path")
     {
@@ -129,6 +135,13 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
             std::cerr << "Invalid " << directive << " directive" << std::endl;
             return ERROR;
         }
+        /* 🛠️ 【修改点：server autoindex 保留真实值，同时用 has_autoindex 防重复】
+           意义：server 是默认值来源，必须保存 autoindex=true/false；has_autoindex 只用于校验重复配置。 */
+        if (srv->has_autoindex)
+        {
+            std::cerr << "Error: Duplicate " << directive << " directive in server" << std::endl;
+            return ERROR;
+        }
         if (values[0] == "on")
             srv->autoindex = true;
         else if (values[0] == "off")
@@ -138,6 +151,7 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
             std::cerr << "Invalid " << directive << " directive value: " << values[0] << std::endl;
             return ERROR;
         }
+        srv->has_autoindex = true;
     }
     else if (directive == "listen")
     {
@@ -208,12 +222,27 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
     }
     else if (directive == "server_name")
     {
-        /* 【修改点 2：并线域名清空锁，复刻工业覆盖语义】 */
-        /* 解释：在执行 push_back 循环前加入 .clear() 锁，保证在同一个 server 块中
-                如果多次出现 server_name 或者是继承自全局配置时，后写的指令能彻底覆盖、洗牌先写的，对齐 Nginx 官方原厂契约 */
-        srv->server_names.clear();
+        /* 🛠️ 【修改点：server_name 不再静默覆盖】
+           意义：同一个 server 多次写 server_name 容易隐藏配置错误；多个名字请写在同一条指令里。 */
+        if (values.empty())
+        {
+            std::cerr << "Error: server_name requires at least one name" << std::endl;
+            return ERROR;
+        }
+        if (!srv->server_names.empty())
+        {
+            std::cerr << "Error: Duplicate server_name directive in server" << std::endl;
+            return ERROR;
+        }
         for (size_t i = 0; i < values.size(); ++i)
+        {
+            if (values[i].empty())
+            {
+                std::cerr << "Error: Empty server_name value" << std::endl;
+                return ERROR;
+            }
             srv->server_names.push_back(values[i]);
+        }
     }
     else if (directive == "root")
     {
@@ -258,9 +287,11 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
             srv->error_pages[code] = error_path;
         }
     }
-    else if (directive == "max_body_size" || directive == "client_max_body_size")
+    else if (directive == "max_body_size")
     {
-        // 如果已经是 true，说明重复了！
+        /* 🛠️ 【修改点：只删除 client_max_body_size 兼容入口】
+           意义：server 级仍支持 max_body_size 作为默认 body 限制；location 级也支持同名 max_body_size 覆盖。
+           不再支持 Nginx 指令名 client_max_body_size，避免配置规格混乱。 */
         if (srv->has_body_size == true)
         {
             std::cerr << "Error: \"max_body_size\" directive is duplicate in this server block" << std::endl;
@@ -287,12 +318,22 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
             std::cerr << "Error: Invalid index directive" << std::endl;
             return ERROR;
         }
-        /* 【修改点 4：并线多首页 vector 全局状态对齐】 */
-        /* 解释：配合你之前在大房间 ServerConfig 数据底座以及 LocationConfig 里将 index 由 string 升级为 vector 的高能重构，
-                此处同步并线了 .clear() 并使用 size_t 规整化循环，打通了全系统一的‘Fallback 变长首页轮询机制’ */
-        srv->index.clear();
+        /* 🛠️ 【修改点：支持多 index，但禁止重复 index 指令】
+           意义：index index.html index.htm; 表示目录请求时按顺序 fallback；重复写 index 指令容易出现覆盖歧义。 */
+        if (!srv->index.empty())
+        {
+            std::cerr << "Error: Duplicate index directive in server" << std::endl;
+            return ERROR;
+        }
         for (size_t i = 0; i < values.size(); ++i)
+        {
+            if (values[i].empty())
+            {
+                std::cerr << "Error: Empty index value" << std::endl;
+                return ERROR;
+            }
             srv->index.push_back(values[i]);
+        }
     }
     else
     {
@@ -321,7 +362,7 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
     2. countport=0，表示还没解析到 listen。
     3. root/host/index 为空，has_root=false。
     4. max_body_size 使用 MAX_BODY_SIZE 默认值。
-    5. socketFd=0，表示还没有创建监听 socket。
+    5. socketFd=-1，表示还没有创建监听 socket。
     6. autoindex=false，默认不生成目录列表。
     7. 清空 server_names/error_pages/locations/allow_methods 等容器。
 */
@@ -340,7 +381,8 @@ ServerConfig::ServerConfig() :
     allow_methods(),       // std::set 默认构造
     socketFd(-1),          // 必须是 -1 锁死
     has_root(false),
-    has_autoindex(false)   // 完美对齐你的头文件末尾顺序
+    has_autoindex(false),
+    autoindex(false)       // 🛠️ 修改点：显式初始化 server 默认 autoindex，避免随机值。
 {
     // 🎯 如果你采用了方案 A 的状态锁，并且把它加在头文件最后，请确保它在列表里也老老实实呆在最后
 }
@@ -350,15 +392,15 @@ ServerConfig::ServerConfig() :
 用途：复制一个 ServerConfig 的配置字段。
 变量解释：
     - src：被复制的 ServerConfig。
-    - socketFd：不会复制 src.socketFd，而是设为 0，避免 fd 所有权重复。
+    - socketFd：不会复制 src.socketFd，而是设为 -1，避免 fd 所有权重复。
     - 其他字段：port、host、root、locations、error_pages 等普通配置会复制。
 实现逻辑：
     1. 复制端口、host、server_names、root、error_pages、max_body_size、locations、index、allow_methods 等规则数据。
-    2. socketFd 不复制，而是设为 0。
+    2. socketFd 不复制，而是设为 -1。
 原因：socket fd 是系统资源，不能让两个 ServerConfig 对象同时认为自己拥有同一个 fd，否则析构时可能重复 close。
 */
 ServerConfig::ServerConfig(const ServerConfig &src)
-    : port(src.port), countport(src.countport), host(src.host), server_names(src.server_names), root(src.root), error_pages(src.error_pages), max_body_size(src.max_body_size), has_body_size(src.has_body_size), locations(src.locations), index(src.index), upload_path(src.upload_path), allow_methods(src.allow_methods), socketFd(0), has_root(src.has_root), has_autoindex(src.has_autoindex)
+    : port(src.port), countport(src.countport), host(src.host), server_names(src.server_names), root(src.root), error_pages(src.error_pages), max_body_size(src.max_body_size), has_body_size(src.has_body_size), locations(src.locations), index(src.index), upload_path(src.upload_path), allow_methods(src.allow_methods), socketFd(-1), has_root(src.has_root), has_autoindex(src.has_autoindex), autoindex(src.autoindex)
 {
 }
 
@@ -384,11 +426,11 @@ ServerConfig::~ServerConfig()
 变量解释：
     - rhs：赋值来源对象。
     - this：当前被赋值对象；如果 this == &rhs，说明是自我赋值，直接返回。
-    - socketFd：赋值后重置为 0，不接管 rhs.socketFd。
+    - socketFd：赋值后重置为 -1，不接管 rhs.socketFd。
 实现逻辑：
     1. 先检查 self-assignment，避免自己赋值给自己。
     2. 复制所有普通配置字段。
-    3. socketFd 设为 0，不复制 rhs.socketFd。
+    3. socketFd 设为 -1，不复制 rhs.socketFd。
     4. 返回 *this，支持链式赋值。
 */
 ServerConfig &ServerConfig::operator=(const ServerConfig &rhs)
@@ -402,13 +444,15 @@ ServerConfig &ServerConfig::operator=(const ServerConfig &rhs)
         root = rhs.root;
         error_pages = rhs.error_pages;
         max_body_size = rhs.max_body_size;
+        has_body_size = rhs.has_body_size; // 🛠️ 修改点：新增字段必须在赋值时同步复制。
         locations = rhs.locations;
         index = rhs.index;
         upload_path = rhs.upload_path;
         allow_methods = rhs.allow_methods;
-        socketFd = 0;
+        socketFd = -1;
         has_root = rhs.has_root;
         has_autoindex = rhs.has_autoindex;
+        autoindex = rhs.autoindex; // 🛠️ 修改点：server 默认 autoindex 真值必须跟随普通配置复制。
     }
     return *this;
 }
