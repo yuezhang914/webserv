@@ -22,7 +22,7 @@ private:
     void acceptNewConnection(int listenFd);                  // 诞生新客户并挂载上网
     void handleClientRead(int clientFd, size_t poll_index);  // 读取客户端请求
     void handleClientWrite(int clientFd, size_t poll_index); // 发送响应给客户端
-    void closeConnection(int clientFd, size_t &poll_index);  // 清理并断开连接
+    void closeConnection(int clientFd, size_t poll_index);  // 清理并断开连接
 
 public:
     // 🛠️ 构造与析构

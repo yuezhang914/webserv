@@ -129,7 +129,7 @@ void ServerManager::setupSockets()
         std::memset(&addr, 0, sizeof(addr));
         addr.sin_family = AF_INET;
         addr.sin_port = htons(port);
-        addr.sin_addr.s_addr = inet_addr(host.c_str());
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
         if (bind(listenFd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
         {
@@ -294,7 +294,7 @@ void ServerManager::handleClientWrite(int clientFd, size_t poll_index)
 {
     // 🚀 战术对齐：这里先模拟一份固定的 HTTP 响应字符串作为通关测试。
     // 在接下来的大融合阶段，这里会直接读取你高层队友生成的 response_data。
-    std::string mock_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 38\r\n\r\n<h1>Hello from Webserv, XueJie!</h1>";
+    std::string mock_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 37\r\n\r\n<h1>Hello from Webserv, XueJie!</h1>\n";
 
     // 1. 呼叫系统调用，尝试向内核发送写缓冲区倾倒裸字节流
     ssize_t bytes_sent = send(clientFd, mock_response.c_str(), mock_response.size(), 0);
@@ -330,7 +330,7 @@ void ServerManager::handleClientWrite(int clientFd, size_t poll_index)
         // 🚀 【核心回马枪】：一轮交割完毕，根据配置重新调转枪头去监控 POLLIN（读事件），
         // 允许当前浏览器复用这条公路继续发送下一个 HTTP 请求（标准的 Keep-Alive 机制支持）
         _poll_fds[poll_index].events = POLLIN;
-        
+
         // 💡 如果你们之后不打算支持持久长连接（C++98 默认短连接），也可以在这里直接粗暴调用：
         // this->closeConnection(clientFd, poll_index);
     }
@@ -340,7 +340,7 @@ void ServerManager::handleClientWrite(int clientFd, size_t poll_index)
         // 绝杀点：我们必须在缓存中切掉已经发出的字节，保留后面还没发出的尾巴，
         // 并且【千万不要改动】 _poll_fds[poll_index].events，让它继续保持 POLLOUT，下轮循环继续发！
         std::cout << "[ServerManager] Part of response sent (" << bytes_sent << " bytes). Retaining remaining data..." << std::endl;
-        
+
         // （后续真实业务对接时，你的蓄水抽屉里会存放未发送完的内容：_response_buffers[clientFd] = remainder）
     }
 }
@@ -363,28 +363,148 @@ void ServerManager::handleClientWrite(int clientFd, size_t poll_index)
  * 后续影响：资产全面清空。被注销的 clientFd 物理消失，不再占用系统句柄上限。
  *           由于 poll_index 被传引用扣回了正确位置，run() 循环在下一个滴答里依然能滴水不漏地扫描到每一个鲜活的连接，系统稳健度拉满。
  */
-void ServerManager::closeConnection(int clientFd, size_t &poll_index)
+void ServerManager::closeConnection(int clientFd, size_t poll_index)
 {
-    std::cout << "[ServerManager] Executing closing ceremony for Client FD: " << clientFd << std::endl;
+    std::cout << "[ServerManager] Safely clear asset for Client FD: " << clientFd << std::endl;
 
-    // 1. 物理斩断与浏览器的套接字通信管道，释放珍贵的物理 FD 句柄
+    // 1. 物理斩断套接字通信
     close(clientFd);
 
-    // 2. 物理擦除运行时多域名配置关联账本，防止内存空悬
+    // 2. 清理内存账本
     this->_client_to_srv_map.erase(clientFd);
-
-    // 3. 物理擦除并全量释放该客人的请求蓄水小抽屉
     this->_client_buffers.erase(clientFd);
 
-    // 4. 确认防御范围，防止传入的下标引发越界灾难
+    // 3. 🚀 【无伤退役】：我们不在这里 erase 它，而是把它的标志位设为死寂状态
+    // 告诉内核：下一次 poll 别再看它了。同时让 run() 完完整整走完这轮点名！
     if (poll_index < this->_poll_fds.size())
     {
-        // 物理切除大网上的节点。此时，后面的人会集体向前跨一步填补空位！
-        this->_poll_fds.erase(this->_poll_fds.begin() + poll_index);
+        this->_poll_fds[poll_index].fd = -1;
+        this->_poll_fds[poll_index].events = 0;
+        this->_poll_fds[poll_index].revents = 0;
+    }
+}
 
-        // 🚀 【惊天妙手】：因为后面的人往前移了一位，如果不做处理，
-        // 主大循环的 for 循环执行 ++i 就会直接漏掉那个刚刚移上来的无辜节点。
-        // 通过传引用自减 1，完美对冲掉主循环的 ++ 操作，实现了像素级无缝平移检查！
-        --poll_index;
+/**
+ * 函数：ServerManager::acceptNewConnection
+ * 用途：当某个主监听端口触发读事件（POLLIN）时，调用该函数从内核的全连接队列中捞取并诞生成立一个新的客户端 TCP 会话连接。
+ * 参数来源：listenFd 来自 run() 大循环中判定通过的当前活跃监听套接字（即 activeFd）。
+ * 变量解释：
+ *     - listenFd：正在被浏览器疯狂敲门的主监听套接字文件描述符。
+ *     - clientFd：呼叫 accept 后，由内核为其分配的代表该次具体客户端会话的专属文件描述符。
+ *     - client_addr：sockaddr_in 结构体，用来物理承接、记录新客户的 IP 地址和端口来源。
+ *     - client_len：socklen_t 类型，存 sockaddr_in 结构体的物理大小，作为 accept 的入口与出口长度参数。
+ *     - pfd：新组装的 pollfd 结构体，用于将新生的客户通道安插上树。
+ * 实现逻辑：
+ *     1. 初始化 client_addr 内存，并调用 accept(listenFd, ...) 顺藤摸瓜捞出全新的客户端 clientFd。
+ *     2. 检查返回值，若 clientFd 小于 0 且 errno 为 EAGAIN 或 EWOULDBLOCK，说明连接已被抢夺或不存在，属于正常非阻塞抖动，优雅退出；若为其他致命系统错误，打印警告并折返。
+ *     3. 打印迎宾日志，展示新客户的物理文件描述符（clientFd）。
+ *     4. **【铁律洗礼】**：将新诞生的 clientFd 送入本类成员 setNonBlocking()，强行剥夺其阻塞特权，全站异步保全。
+ *     5. **【资产挂牌】**：通过 _listen_socket_map[listenFd] 捞出这个端口对应的 server 配置，将其无缝过户转录到 _client_to_srv_map[clientFd] 中。
+ *     6. **【大阵列上树】**：组装标准的 pollfd，加入对读事件（POLLIN）的战略关注，然后 push_back 挂载进底层的全局核心监视大阵列 _poll_fds 中。由于大循环采取倒序扫描，尾部的 push_back 动作对左侧未完成的遍历节点无任何内存或下标冲击，无需修正下标。
+ * 后续影响：底层 poll 阵列规模动态扩大。此后，这个专属浏览器只要发来哪怕一个字节的 HTTP 裸请求文本，
+ *           主大循环就会在下一个大死循环的滴答里精准捕获到，并完美流向专门处理客户端业务的 handleClientRead() 分支。
+ */
+void ServerManager::acceptNewConnection(int listenFd)
+{
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    std::memset(&client_addr, 0, sizeof(client_addr));
+
+    // 1. 调用 accept(listenFd, ...) 顺藤摸瓜捞出全新的客户端 clientFd
+    int clientFd = accept(listenFd, (struct sockaddr *)&client_addr, &client_len);
+    if (clientFd < 0)
+    {
+        // 2. 检查非阻塞状态下的正常抖动
+        if (errno == EAGAIN || errno == EWOULDBLOCK)
+            return;
+        std::cerr << "Warning: accept failed on listen FD " << listenFd << std::endl;
+        return;
+    }
+
+    // 3. 打印迎宾日志
+    std::cout << "[ServerManager] Accepted new connection from "
+              << inet_ntoa(client_addr.sin_addr) << ":" << ntohs(client_addr.sin_port)
+              << " -> Allocated Client FD: " << clientFd << std::endl;
+
+    // 4. 将新诞生的 clientFd 强行剥夺其阻塞特权
+    this->setNonBlocking(clientFd);
+
+    // 5. 将大厅监听端口的配置，无缝过户拷贝给这个 client 专属的映射中
+    this->_client_to_srv_map[clientFd] = this->_listen_socket_map[listenFd];
+
+    // 初始化该客人的专属拼接小抽屉，防止粘包断包
+    this->_client_buffers[clientFd] = "";
+
+    // 6. 组装标准的 pollfd，推入大阵列尾部，无惧倒序扫描
+    struct pollfd pfd;
+    pfd.fd = clientFd;
+    pfd.events = POLLIN; // 第一步，先重点监控客户端发来的请求数据
+    pfd.revents = 0;
+    this->_poll_fds.push_back(pfd);
+}
+
+void ServerManager::run()
+{
+    if (this->_poll_fds.empty())
+        return;
+    std::cout << "[ServerManager] Main loop started. Entering the matrix..." << std::endl;
+
+    while (true)
+    {
+        // 🚀 【收割车间】：在每次呼叫 poll 之前，把上一轮标记为 -1 的死线统一清理掉
+        for (size_t i = 0; i < this->_poll_fds.size();)
+        {
+            if (this->_poll_fds[i].fd == -1)
+            {
+                this->_poll_fds.erase(this->_poll_fds.begin() + i);
+                // 注意：由于后面的人往前迈了一步，i 不要递增，原地继续检查即可！
+            }
+            else
+            {
+                ++i;
+            }
+        }
+
+        // 此时 _poll_fds 里的内存干净无瑕，呼叫系统调用死等
+        int ret = poll(&this->_poll_fds[0], this->_poll_fds.size(), -1);
+        if (ret < 0)
+        {
+            if (errno == EINTR)
+                continue;
+            break;
+        }
+
+        // 倒序安全扫描活着的人
+        for (size_t i = this->_poll_fds.size(); i > 0; --i)
+        {
+            size_t idx = i - 1;
+
+            // 如果遇到刚才在子函数里被改成 -1 的节点，直接跳过
+            if (this->_poll_fds[idx].fd == -1 || this->_poll_fds[idx].revents == 0)
+                continue;
+
+            int activeFd = this->_poll_fds[idx].fd;
+
+            // 拦截致命异常
+            if (this->_poll_fds[idx].revents & (POLLERR | POLLHUP | POLLNVAL))
+            {
+                this->closeConnection(activeFd, idx);
+                continue;
+            }
+
+            // 拦截读事件
+            if (this->_poll_fds[idx].revents & POLLIN)
+            {
+                if (this->isListenFd(activeFd))
+                    this->acceptNewConnection(activeFd);
+                else
+                    this->handleClientRead(activeFd, idx);
+            }
+            // 拦截写事件
+            else if (this->_poll_fds[idx].revents & POLLOUT)
+            {
+                this->handleClientWrite(activeFd, idx);
+            }
+        }
     }
 }
