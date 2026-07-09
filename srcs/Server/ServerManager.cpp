@@ -292,56 +292,41 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
  */
 void ServerManager::handleClientWrite(int clientFd, size_t poll_index)
 {
-    // 🚀 战术对齐：这里先模拟一份固定的 HTTP 响应字符串作为通关测试。
-    // 在接下来的大融合阶段，这里会直接读取你高层队友生成的 response_data。
-    std::string mock_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 37\r\n\r\n<h1>Hello from Webserv, XueJie!</h1>\n";
+    std::string current_data;
+    if (this->_response_buffers.find(clientFd) != this->_response_buffers.end() && !this->_response_buffers[clientFd].empty())
+        current_data = this->_response_buffers[clientFd];
+    else
+    {
+        // 联调期先用 mock，后续直接对接：current_data = _client_to_srv_map[clientFd].getResponseString();
+        current_data = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 37\r\n\r\n<h1>Hello from Webserv, XueJie!</h1>\n";
+    }
 
-    // 1. 呼叫系统调用，尝试向内核发送写缓冲区倾倒裸字节流
-    ssize_t bytes_sent = send(clientFd, mock_response.c_str(), mock_response.size(), 0);
+    // 2. 呼叫非阻塞发送
+    ssize_t bytes_sent = send(clientFd, current_data.c_str(), current_data.size(), 0);
 
-    // 2. 【判别抖动】：返回负数需要深入解剖内核 errno
+    // 3. 判别抖动
     if (bytes_sent < 0)
     {
-        if (errno == EAGAIN || errno == EWOULDBLOCK)
-        {
-            // 内核写缓冲区满了，属于非阻塞下的正常暂缓信号，直接折返，等下一次 poll 唤醒再继续写
-            return;
-        }
-        if (errno == EINTR)
-        {
-            // 遭到系统信号无辜打断，放弃这轮，期待下一轮继续强发
-            return;
-        }
-        // 发生诸如浏览器直接关闭网页等物理异常（EPIPE / ECONNRESET），强制拔线清理
-        std::cerr << "Warning: send() error on Client FD " << clientFd << ", forcing close." << std::endl;
+        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+            return; // 缓冲区满了或被信号打断，优雅撤退，保持 POLLOUT 等下一轮
+
+        // 致命错误，物理拔线
         this->closeConnection(clientFd, poll_index);
         return;
     }
 
-    // 3. 【分批切片处理】：判断本次喷吐是否已经彻底把数据吐干净了
-    if (static_cast<size_t>(bytes_sent) == mock_response.size())
+    // 4. 【分批切片处理】
+    if (static_cast<size_t>(bytes_sent) == current_data.size())
     {
-        // 🎯 场景 A：全部发完了！功德圆满！
-        std::cout << "[ServerManager] Fully sent HTTP Response back to Client FD " << clientFd << std::endl;
-
-        // 清空该客人的读写蓄水池，为下一次可能复用的请求扫清障碍
-        _client_buffers[clientFd] = "";
-
-        // 🚀 【核心回马枪】：一轮交割完毕，根据配置重新调转枪头去监控 POLLIN（读事件），
-        // 允许当前浏览器复用这条公路继续发送下一个 HTTP 请求（标准的 Keep-Alive 机制支持）
-        _poll_fds[poll_index].events = POLLIN;
-
-        // 💡 如果你们之后不打算支持持久长连接（C++98 默认短连接），也可以在这里直接粗暴调用：
-        // this->closeConnection(clientFd, poll_index);
+        std::cout << "[ServerManager] Fully sent all pending response data to Client FD " << clientFd << std::endl;
+        this->_response_buffers[clientFd] = "";
+        this->_client_buffers[clientFd] = "";
+        this->_poll_fds[poll_index].events = POLLIN;
     }
     else
     {
-        // 🎯 场景 B：因为非阻塞，数据只发出去了前半句！
-        // 绝杀点：我们必须在缓存中切掉已经发出的字节，保留后面还没发出的尾巴，
-        // 并且【千万不要改动】 _poll_fds[poll_index].events，让它继续保持 POLLOUT，下轮循环继续发！
-        std::cout << "[ServerManager] Part of response sent (" << bytes_sent << " bytes). Retaining remaining data..." << std::endl;
-
-        // （后续真实业务对接时，你的蓄水抽屉里会存放未发送完的内容：_response_buffers[clientFd] = remainder）
+        std::cout << "[ServerManager] Part of chunk sent (" << bytes_sent << " bytes). Retaining remaining tail..." << std::endl;
+        this->_response_buffers[clientFd] = current_data.substr(bytes_sent);
     }
 }
 
@@ -373,8 +358,9 @@ void ServerManager::closeConnection(int clientFd, size_t poll_index)
     // 2. 清理内存账本
     this->_client_to_srv_map.erase(clientFd);
     this->_client_buffers.erase(clientFd);
+    this->_response_buffers.erase(clientFd);
 
-    // 3. 🚀 【无伤退役】：我们不在这里 erase 它，而是把它的标志位设为死寂状态
+    // 3. 不在这里 erase 它，而是把它的标志位设为死寂状态
     // 告诉内核：下一次 poll 别再看它了。同时让 run() 完完整整走完这轮点名！
     if (poll_index < this->_poll_fds.size())
     {
@@ -474,7 +460,7 @@ void ServerManager::run()
             break;
         }
 
-        // 倒序安全扫描活着的人
+        // 倒序安全扫描
         for (size_t i = this->_poll_fds.size(); i > 0; --i)
         {
             size_t idx = i - 1;

@@ -14,6 +14,7 @@ private:
     std::map<int, ServerConfig> _listen_socket_map; // listenFd -> ServerConfig
     std::map<int, ServerConfig> _client_to_srv_map; // clientFd -> ServerConfig
     std::map<int, std::string> _client_buffers;     // clientFd -> 请求缓冲区
+    std::map<int, std::string> _response_buffers; // 专属客户端写缓冲区映射（存未发完的尾巴）
 
     // 3. 内部私有工具函数
     void setupSockets();                                     // 砸开所有配置的物理端口
