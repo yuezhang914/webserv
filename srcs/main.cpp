@@ -1,4 +1,4 @@
-#include "Webserv.hpp"  // 🟢 完美！没有相对路径，没有文件夹前缀，注意W大写！
+#include "Webserv.hpp" 
 
 /**
  * 函数：main
@@ -23,40 +23,36 @@ int main(int argc, char **argv)
 {
     std::string config_path = "default.conf"; // 默认配置文件路径
 
-    // 1. 🔒 【42 防御硬性拦截】：严防命令行参数超标，防止考官乱输入
     if (argc > 2)
     {
         std::cerr << "Usage: " << argv[0] << " [config_file_path]" << std::endl;
         return 1;
     }
 
-    // 2. 路由指派自定义路径
+
     if (argc == 2)
     {
         config_path = argv[1]; 
     }
 
-    // 3. 冷启动解析：创建 Config 对象，内部自动执行词法语法大体检
+
     Config config(config_path); 
 
-    // 4. 严密检查配置解析是否有错误（包含学姐刚加的同端口域名查重拦截）
+  
     if (config.error) 
     {
         std::cerr << "Critical Error: Configuration initialization failed. Exiting." << std::endl;
         return 1; 
     }
 
-    // 5. 打印配置文件解析结果，便于开发阶段联调与验证
     config.printConfig(); 
 
-    // 6. 🚀 【核心组装】：将清洗干净的配置账本，全量喂给底层网络大管家
     ServerManager srvmng(config.getServers());
     
-    // 7. 砸开物理端口，拉起大阵列，完成开机准备
-    // （对齐咱们之前写的函数名：setupSockets）
+    
     srvmng.init();
     
-    // 8. 挺进多路复用大循环，永不回头！
+    
     srvmng.run();
 
     return 0; 
