@@ -2,12 +2,7 @@
 #ifndef CONFIG_HPP
 #define CONFIG_HPP
 
-#include <string>
-#include <vector>
-#include <map>
-#include <set>
-#include <fstream>
-#include <sstream>
+
 
 #include "ServerConfig.hpp"
 #include "LocationConfig.hpp"

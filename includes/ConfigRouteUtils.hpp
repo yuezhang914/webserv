@@ -1,11 +1,11 @@
 #ifndef CONFIGROUTEUTILS_HPP
 #define CONFIGROUTEUTILS_HPP
 
-#include <string>
-#include <vector>
 #include "ServerConfig.hpp"
 #include "LocationConfig.hpp"
 
+#include <string>
+#include <vector>
 /*
 文件：srcs/Config/ConfigRouteUtils.hpp
 作用：提供只依赖 Config 数据结构的路由辅助函数。

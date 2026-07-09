@@ -1,14 +1,7 @@
 #ifndef LOCATIONCONFIG_HPP
 #define LOCATIONCONFIG_HPP
 
-
-#include <string>
-#include <vector>
-#include <map>
 #include <set>
-#include <cstdlib>
-# include <iostream>
-
 
 /*
 类：LocationConfig

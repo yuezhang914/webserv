@@ -2,14 +2,6 @@
 #define SERVERCONFIG_HPP
 
 
-#include <string>
-#include <vector>
-#include <map>
-#include <set>
-#include <sstream>
-#include <cctype>
-#include <unistd.h>
-
 #include "LocationConfig.hpp"
 #include "Defines.hpp"
 
