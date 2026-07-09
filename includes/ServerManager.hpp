@@ -2,6 +2,7 @@
 #define SERVER_MANAGER_HPP
 
 #include "ServerConfig.hpp"
+#include "ClientIO.hpp"
 
 class ServerManager
 {
@@ -15,6 +16,8 @@ private:
     std::map<int, ServerConfig> _client_to_srv_map; // clientFd -> ServerConfig
     std::map<int, std::string> _client_buffers;     // clientFd -> 请求缓冲区
     std::map<int, std::string> _response_buffers; // 专属客户端写缓冲区映射（存未发完的尾巴）
+    std::map<int, ClientIO> _ios;// key: 客人的物理套接字, value: 为这个客人量身定做的物理搬运工 (ClientIO 实例)
+    
 
     // 3. 内部私有工具函数
     void setupSockets();                                     // 砸开所有配置的物理端口

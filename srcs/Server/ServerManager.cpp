@@ -216,55 +216,57 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
 {
     char buffer[BUFFER_SIZE];
 
-    // 1. 挺进非阻塞数据吞噬大循环
     while (true)
     {
-        std::memset(buffer, 0, BUFFER_SIZE);
+        // 交由该客人的专属 ClientIO 物理搬运工去吃字节
+        ssize_t bytes_read = this->_ios[clientFd].readFromNet(buffer, BUFFER_SIZE - 1);
 
-        // 2. 呼叫系统调用捞取内核缓冲区里的裸字节
-        ssize_t bytes_read = recv(clientFd, buffer, BUFFER_SIZE, 0);
-
-        // 3. 【判别断开】：返回 0 代表客户端友好断开了连接
         if (bytes_read == 0)
         {
-            std::cout << "[ServerManager] Client FD: " << clientFd << " closed connection gracefully (EOF)." << std::endl;
+            std::cout << "[ServerManager] Client FD " << clientFd << " closed connection (EOF)." << std::endl;
             this->closeConnection(clientFd, poll_index);
             return;
         }
 
-        // 4. 【判别抖动】：返回负数需要根据内核 errno 做细分切割
         if (bytes_read < 0)
         {
+            // 🟢 【黄金防线】：必须把这三个非阻塞正常抖动全部无伤拦截！
             if (errno == EAGAIN || errno == EWOULDBLOCK)
             {
-                // 数据已经被完全吸干，属于非阻塞状态下的完美收工信号
+                // 代表内核缓冲区这轮已经吃干净了，优雅 break 退出 while 循环，绝对不是报错！
                 break;
             }
             if (errno == EINTR)
             {
-                // 遭到系统内部信号打断，不气馁，继续尝试读取
+                // 被系统某些微小的信号临时打断（比如你在键盘上晃动鼠标或终端刷新），原汁原味继续强攻
                 continue;
             }
-            // 发生诸如物理断网、重置等真实底层错误，强制把连接拔掉
-            std::cerr << "Warning: recv() error on Client FD " << clientFd << ", forcing close." << std::endl;
+
+            // 🔴 只有走到这里，才说明是真的物理断线（如 ECONNRESET 猝死）
+            std::cerr << "Warning: Real physical recv() exception on Client FD " << clientFd
+                      << ", errno: " << errno << ", forcing close." << std::endl;
             this->closeConnection(clientFd, poll_index);
             return;
         }
 
-        // 5. 【拼接蓄水】：安全读到正字节数，原封不动灌入该客人的专属蓄水小抽屉中
-        _client_buffers[clientFd].append(buffer, bytes_read);
+        // 拼接蓄水
+        buffer[bytes_read] = '\0';
+        this->_client_buffers[clientFd] += std::string(buffer);
     }
 
-    // 6. 【交接分流预备】：检查蓄水池，看看有没有攒够一个完整的 HTTP Header 边界（"\r\n\r\n"）
-    // 注意：如果是带 Body 的 POST 请求，业务层后续还会根据 Content-Length 深度校验，
-    // 我们底层网络在这里先以基础边界作为第一阶段收工的物理信号。
-    if (_client_buffers[clientFd].find("\r\n\r\n") != std::string::npos)
+    // 退出循环后，查验请求边界
+    if (this->_client_buffers[clientFd].find("\r\n\r\n") != std::string::npos)
     {
-        std::cout << "[ServerManager] Complete HTTP request block captured from Client FD " << clientFd << std::endl;
+        std::cout << "[ServerManager] HTTP Request boundary matched for FD " << clientFd << ". Transition to POLLOUT." << std::endl;
 
-        // 🚀 【核心大转折】：既然读完了，就不要再死死盯着 POLLIN 了。
-        // 将大阵列里对该客户的战略监控目标，180 度大转弯修改为 POLLOUT（可写）！
-        _poll_fds[poll_index].events = POLLOUT;
+        // 【通关测试硬编码】：模拟队友交接，将完全体物资一针注入写蓄水池（精准 37 字节身体）
+        std::string mock_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 37\r\n\r\n<h1>Hello from Webserv, XueJie!</h1>\n";
+
+        // 🚀 直接用 ClientIO 提供的注资接口把物资灌进去
+        this->_ios[clientFd].pushWriteBuffer(mock_response);
+
+        // 调转枪头，通知内核下一轮滴答立刻检查可写事件
+        this->_poll_fds[poll_index].events = POLLOUT;
     }
 }
 
@@ -292,41 +294,36 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
  */
 void ServerManager::handleClientWrite(int clientFd, size_t poll_index)
 {
-    std::string current_data;
-    if (this->_response_buffers.find(clientFd) != this->_response_buffers.end() && !this->_response_buffers[clientFd].empty())
-        current_data = this->_response_buffers[clientFd];
-    else
-    {
-        // 联调期先用 mock，后续直接对接：current_data = _client_to_srv_map[clientFd].getResponseString();
-        current_data = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 37\r\n\r\n<h1>Hello from Webserv, XueJie!</h1>\n";
-    }
+    // 把写缓冲区满了以后的物理切片、substr 剁尾巴细节，全部委派给 ClientIO 实现
+    ssize_t bytes_sent = this->_ios[clientFd].writeToNet();
 
-    // 2. 呼叫非阻塞发送
-    ssize_t bytes_sent = send(clientFd, current_data.c_str(), current_data.size(), 0);
-
-    // 3. 判别抖动
     if (bytes_sent < 0)
     {
-        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
-            return; // 缓冲区满了或被信号打断，优雅撤退，保持 POLLOUT 等下一轮
-
-        // 致命错误，物理拔线
+        // 遭遇致命异常（如浏览器强行断线），交由大管家执行物理拔线
         this->closeConnection(clientFd, poll_index);
         return;
     }
 
-    // 4. 【分批切片处理】
-    if (static_cast<size_t>(bytes_sent) == current_data.size())
+    // 查验本轮倾倒过后，搬运工本地的写蓄水池物资是否彻底清空（场景 A vs 场景 B）
+    if (this->_ios[clientFd].isWriteFinished())
     {
-        std::cout << "[ServerManager] Fully sent all pending response data to Client FD " << clientFd << std::endl;
-        this->_response_buffers[clientFd] = "";
+        // 场景 A：数据全量送达
+        std::cout << "[ServerManager] Fully sent HTTP Response back to Client FD " << clientFd << std::endl;
+
+        // 擦干净桌子，清空该客人的读缓存蓄水池，为后续长连接复用扫清障碍
         this->_client_buffers[clientFd] = "";
+
+        // 让搬运工把自己的写蓄水池和物理状态也彻底归零！
+        this->_ios[clientFd].clear();
+
+        // 【持久化长连接核心】：交割完毕，重新调转枪头去监控 POLLIN（等读事件）
         this->_poll_fds[poll_index].events = POLLIN;
     }
     else
     {
-        std::cout << "[ServerManager] Part of chunk sent (" << bytes_sent << " bytes). Retaining remaining tail..." << std::endl;
-        this->_response_buffers[clientFd] = current_data.substr(bytes_sent);
+        // 场景 B：因为非阻塞，数据只发了一半
+        // 我们什么都不用做，events 保持 POLLOUT 标志，下轮循环内核腾出空位会自动再次叫醒我们！
+        std::cout << "[ServerManager] Buffer choked. Sliced and retained data tail for Client FD " << clientFd << std::endl;
     }
 }
 
@@ -421,6 +418,9 @@ void ServerManager::acceptNewConnection(int listenFd)
     // 初始化该客人的专属拼接小抽屉，防止粘包断包
     this->_client_buffers[clientFd] = "";
 
+    //显式调用有参构造，把合法的 clientFd 灌进账本！
+    this->_ios[clientFd] = ClientIO(clientFd);
+    
     // 6. 组装标准的 pollfd，推入大阵列尾部，无惧倒序扫描
     struct pollfd pfd;
     pfd.fd = clientFd;

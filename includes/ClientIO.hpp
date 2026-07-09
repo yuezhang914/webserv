@@ -27,8 +27,12 @@ public:
     // 状态哨兵：检查该客人的积压数据是不是已经 100% 吐干净了
     bool isWriteFinished() const;
 
+    void clear(); // 清空写蓄水池
+
     // 资产暴露：获取底层物理 FD
     int getFd() const;
+
+
 };
 
 #endif

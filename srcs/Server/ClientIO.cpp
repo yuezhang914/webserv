@@ -133,6 +133,11 @@ bool ClientIO::isWriteFinished() const
     return this->_write_buf.empty();
 }
 
+void ClientIO::clear()
+{
+    this->_write_buf.clear(); // 物理清空写缓存，防止残余字节干扰下一轮
+}
+
 /**
  * 函数：ClientIO::getFd
  * 用途：私有资产物理指针暴露接口。允许大管家在需要核对 pollfd 账本或者进行底层标识符核验时，获取本搬运工守护的物理 FD 身份。

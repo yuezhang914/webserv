@@ -2,6 +2,9 @@
 #define LOCATIONCONFIG_HPP
 
 #include <set>
+#include <string>
+#include <vector>
+#include <map>
 
 /*
 类：LocationConfig
