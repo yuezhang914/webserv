@@ -10,11 +10,18 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <vector>
+#include <map>
+#include <string>
+#include <poll.h>
+#include <iostream>
+#include <cstring>
 
 // 3. 业务平坦化组装
 #include "Config.hpp"
 #include "ServerConfig.hpp"
 #include "LocationConfig.hpp"
 #include "ConfigParser.hpp"
+#include "ServerManager.hpp"
 // ...
 #endif
