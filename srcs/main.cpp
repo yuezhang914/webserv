@@ -20,7 +20,9 @@
  * 后续影响：主线程自此常驻内核事件等待队列，服务器开始全面接受外部客户端的 HTTP 洪流冲击。
  */
 int main(int argc, char **argv)
-{
+{ 
+    signal(SIGPIPE, SIG_IGN);
+	signal(SIGINT, signalHandler);
     std::string config_path = "default.conf"; // 默认配置文件路径
 
     if (argc > 2)

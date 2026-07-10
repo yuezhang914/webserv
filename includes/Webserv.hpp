@@ -31,5 +31,6 @@
 #include "ConfigParser.hpp"
 #include "ServerManager.hpp"
 #include "ClientIO.hpp"
+#include "Signal.hpp"
 // ...
 #endif
