@@ -53,7 +53,6 @@ static bool has_bad_uri_char(const std::string& uri) {
     5. 对 path 的小写版本检查 %00、%2e、%2f，防止编码后的空字符、点和斜杠绕过路径检查。
     6. 对 path 检查 /../、path == /..、结尾 /..、开头 ../ 等路径穿越形式。
     7. 全部通过返回 REQUEST_OK，否则返回 REQUEST_ERROR。
-修改说明：旧版直接用完整 uri 判断结尾 /..，遇到 /..?x=1 会因为 query 改变字符串长度而漏掉路径穿越；新版先分离 path 再检查。
 后续影响：如果这里失败，parseRequestBuffer 会返回 REQUEST_ERROR，ServerManager 会生成错误响应或关闭连接。
 */
 int sanitizeRequestUri(Request& req) {

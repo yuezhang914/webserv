@@ -14,7 +14,6 @@
 /*
 枚举：RequestStatus
 作用：让 ServerManager 明确知道当前 buffer 的解析状态。
-修改说明：旧 serverLoop 兼容入口已删除；Request 模块现在只解析 ServerManager/ClientIO 已经读入的字符串 buffer。
 */
 enum RequestStatus {
 	REQUEST_OK = 0,          /* 请求完整且合法，Request 已经填好，可以进入 buildResponse 或 CGI。 */
@@ -54,7 +53,6 @@ struct Request {
 实现逻辑：本函数不调用 recv，也不修改传入 buffer；它只判断 buffer 里是否已经包含一个完整且合法的 HTTP/1.1 request。成功时填好 req，并把 consumed 设置成本次请求占用的字节数，调用方再从自己的 _client_buffers[clientFd] 中 erase(consumed)。
 格式检查：会严格检查 request line 三段格式、Host 必填、header key 合法性、重复 Host/Content-Length、Content-Length 纯数字、Transfer-Encoding 只支持 chunked、header 总大小、URI 路径穿越、chunked trailer 与 body size。
 状态区分：格式错误返回 REQUEST_ERROR；请求未收完整返回 REQUEST_INCOMPLETE；body 数字合法但超过当前 server/location max_body_size 时返回 ERROR_MAX_BODY_LENGTH。
-修改说明：删除旧 parse_request 兼容入口后，这就是 Request 模块给 ServerManager 的唯一解析入口。
 */
 int parseRequestBuffer(const std::string& buffer, Request& req, const ServerConfig* server, size_t& consumed);
 

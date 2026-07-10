@@ -4,7 +4,7 @@ HTTP request parser 实现。这个文件只负责从 ServerManager 已经读入
 本版强化点：严格区分 400 与 413；校验 request line、header key、重复 Host/Content-Length、Transfer-Encoding、Host 必填、header 总大小；chunked 解析支持 trailer 消费，并在读到巨大 chunk size 时提前判断 body limit。
 */
 #include "RequestParser.hpp"
-#include "../Config/ConfigRouteUtils.hpp"
+#include "../../includes/ConfigRouteUtils.hpp"
 
 static const size_t MAX_HEADER_SIZE = 8192;
 
@@ -75,7 +75,6 @@ static std::string trim_ows(const std::string& value) {
     4. 检查 version 必须是 HTTP/1.1；本项目只实现 HTTP/1.1 请求解析。
     5. 把 method/uri/version 写进 req。
     6. 调用 sanitizeRequestUri 检查 URI 安全。
-修改说明：旧版只找两个空格，会把 `GET / HTTP/1.1 extra` 的 version 保存成 `HTTP/1.1 extra`；新版要求请求行必须正好三段。
 */
 static int parse_request_line(const std::string& request_line, Request& req) {
 	std::istringstream line_stream(request_line);
@@ -104,7 +103,6 @@ static int parse_request_line(const std::string& request_line, Request& req) {
     6. 重复 Host 直接返回 REQUEST_ERROR。
     7. 重复 Content-Length 直接返回 REQUEST_ERROR，避免多个长度造成请求走私风险。
 例子："Content-Length: 3" 会保存为 headers["content-length"] = "3"。
-修改说明：旧版只检查有没有冒号，会接受空 key、带空格 key，并且重复 Content-Length 会被后一个覆盖；新版在解析阶段直接拒绝。
 */
 static int parse_headers(std::istringstream& iss, Request& req) {
 	std::string line;
@@ -155,7 +153,6 @@ static bool has_required_host(const Request& req) {
     2. 不接受 +5、-1、空格、abc、12x 等格式。
     3. 手动累加数字，避免 strtol 溢出后难以区分错误类型。
     4. 一旦发现值超过 body_limit，立即返回 ERROR_MAX_BODY_LENGTH。
-修改说明：旧版把格式错误和超过限制都返回 ERROR_MAX_BODY_LENGTH，导致 `Content-Length: abc` 会被当成 413；新版格式错返回 400，超过限制才返回 413。
 */
 static int parse_content_length(const std::string& value, unsigned long body_limit, size_t& content_length) {
 	if (value.empty())
@@ -212,7 +209,6 @@ static int is_chunked_transfer_encoding(const Request& req, bool& has_te, bool& 
     2. 分号前必须是非空十六进制数字，不接受空格和非法字符。
     3. 手动按 16 进制累加，避免溢出。
     4. 每增加一位都检查 current_body_size + size 是否超过 body_limit。
-修改说明：旧版只有在整个 chunk 数据收完并 append 到 body 后才检查大小；新版读到 chunk size 后就能提前拒绝巨大 chunk，避免一直等待一个注定超过限制的 body。
 */
 static int read_chunk_size_for_buffer(const std::string& line, size_t current_body_size, unsigned long body_limit, size_t& size) {
 	size_t semicolon = line.find(';');
@@ -252,7 +248,6 @@ static int read_chunk_size_for_buffer(const std::string& line, size_t current_bo
     2. 否则查找 "\r\n\r\n"，表示 trailer header block 结束。
     3. 找不到说明数据还没收完整，返回 REQUEST_INCOMPLETE。
     4. 找到后逐行检查 trailer key 是否是合法 token；本项目忽略 trailer 内容，但必须完整消费。
-修改说明：旧版只找下一个 "\r\n"，遇到 trailer 会只消费第一行，留下多余 CRLF 干扰下一个请求；新版会完整吃掉 trailer block。
 */
 static int find_chunked_trailer_end(const std::string& buffer, size_t pos, size_t& consumed) {
 	if (buffer.size() < pos + 2)
@@ -291,7 +286,6 @@ static int find_chunked_trailer_end(const std::string& buffer, size_t pos, size_
     4. 如果当前 chunk 数据还没收完整，返回 REQUEST_INCOMPLETE。
     5. 把每个 chunk data 追加进 body。
     6. 遇到 0 长度 chunk 后，调用 find_chunked_trailer_end 完整消费 trailer，再设置 req.body 和 consumed。
-修改说明：新版不再把 trailer 留给下一次解析，也不再等待超大 chunk 全部到齐才报 413。
 */
 static int parse_chunked_buffer(const std::string& buffer, size_t body_start, Request& req, size_t& consumed) {
 	size_t pos = body_start;
@@ -339,7 +333,6 @@ static int parse_chunked_buffer(const std::string& buffer, size_t body_start, Re
     9. Content-Length 和 Transfer-Encoding 同时出现直接 REQUEST_ERROR。
     10. Content-Length 格式错返回 REQUEST_ERROR，数字合法但超过 effective body limit 返回 ERROR_MAX_BODY_LENGTH。
     11. chunked body 交给 parse_chunked_buffer；普通 body 等待 Content-Length 指定长度完整后截取。
-修改说明：这是严格复核后的防守版 parser，修复了旧版把非法 Content-Length 当 413、非 chunked TE 被误当无 body、chunked trailer 未完整消费、request line/header key 过松、缺 Host 未报错、header 无限增长等问题。
 */
 int parseRequestBuffer(const std::string& buffer, Request& req, const ServerConfig* server, size_t& consumed) {
 	consumed = 0;
