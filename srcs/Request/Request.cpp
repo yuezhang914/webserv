@@ -1,6 +1,6 @@
 /*
 文件：srcs/Request/Request.cpp
-HTTP request 基础工具实现。这里保留 Request 的通用工具、URI 安全检查和调试输出；真正的请求读取与解析流程已拆到 RequestParser.cpp。
+HTTP request 基础工具实现。 Request 的通用工具、URI 安全检查和调试输出；真正的请求读取与解析流程已拆到 RequestParser.cpp。
 */
 #include "Request.hpp"
 
@@ -43,25 +43,40 @@ static bool has_bad_uri_char(const std::string& uri) {
 
 /*
 函数：sanitizeRequestUri
-用途：检查 Request.uri 是否安全，防止非法路径或路径穿越。
-参数来源：parseRequestBuffer 内部的 parse_request_line 已经把请求行中的 URI 写进 req.uri。
+用途：检查 Request.uri 是否安全，防止非法路径、控制字符、fragment 和路径穿越。
+参数来源：parseRequestBuffer 内部的 parse_request_line 已经把请求行中的 URI 写进 req.uri；URI 可能带 query，例如 /search?q=a。
 实现逻辑：
-    1. URI 不能为空，并且必须以 / 开头。
-    2. 调用 has_bad_uri_char，拒绝控制字符和反斜杠。
-    3. 转成小写后检查 %00、%2e、%2f，防止编码后的空字符、点、斜杠绕过检查。
-    4. 检查 /../、结尾 /..、开头 ../，防止访问 root 外面的文件。
-    5. 全部通过返回 REQUEST_OK，否则返回 REQUEST_ERROR。
+    1. URI 不能为空，不能包含 HTTP fragment 标记 #，因为 fragment 不应该出现在 HTTP request target 中。
+    2. 先按 ? 分离 path 和 query；路径安全检查只针对 path，避免 query 干扰 /.. 结尾判断。
+    3. path 必须以 / 开头。
+    4. 对完整 URI 调用 has_bad_uri_char，拒绝控制字符和反斜杠。
+    5. 对 path 的小写版本检查 %00、%2e、%2f，防止编码后的空字符、点和斜杠绕过路径检查。
+    6. 对 path 检查 /../、path == /..、结尾 /..、开头 ../ 等路径穿越形式。
+    7. 全部通过返回 REQUEST_OK，否则返回 REQUEST_ERROR。
+修改说明：旧版直接用完整 uri 判断结尾 /..，遇到 /..?x=1 会因为 query 改变字符串长度而漏掉路径穿越；新版先分离 path 再检查。
 后续影响：如果这里失败，parseRequestBuffer 会返回 REQUEST_ERROR，ServerManager 会生成错误响应或关闭连接。
 */
 int sanitizeRequestUri(Request& req) {
-	if (req.uri.empty() || req.uri[0] != '/')
+	if (req.uri.empty())
+		return REQUEST_ERROR;
+	if (req.uri.find('#') != std::string::npos)
 		return REQUEST_ERROR;
 	if (has_bad_uri_char(req.uri))
 		return REQUEST_ERROR;
-	std::string lower = to_lower(req.uri);
-	if (lower.find("%00") != std::string::npos || lower.find("%2e") != std::string::npos || lower.find("%2f") != std::string::npos)
+
+	size_t query_pos = req.uri.find('?');
+	std::string path = req.uri.substr(0, query_pos);
+	if (path.empty() || path[0] != '/')
 		return REQUEST_ERROR;
-	if (req.uri.find("/../") != std::string::npos || req.uri.find("/..") == req.uri.size() - 3 || req.uri.find("../") == 0)
+
+	std::string lower_path = to_lower(path);
+	if (lower_path.find("%00") != std::string::npos || lower_path.find("%2e") != std::string::npos || lower_path.find("%2f") != std::string::npos)
+		return REQUEST_ERROR;
+	if (path == "/.." || path.find("/../") != std::string::npos)
+		return REQUEST_ERROR;
+	if (path.size() >= 3 && path.compare(path.size() - 3, 3, "/..") == 0)
+		return REQUEST_ERROR;
+	if (path.find("../") == 0)
 		return REQUEST_ERROR;
 	return REQUEST_OK;
 }
