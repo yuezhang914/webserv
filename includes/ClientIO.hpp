@@ -2,6 +2,7 @@
 #define CLIENTIO_HPP
 
 #include <string>
+#include <sys/types.h>
 
 class ClientIO
 {
