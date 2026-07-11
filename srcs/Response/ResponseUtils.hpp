@@ -1,4 +1,5 @@
-#pragma once
+#ifndef RESPONSEUTILS_HPP
+#define RESPONSEUTILS_HPP
 
 #include "Response.hpp"
 
@@ -7,3 +8,5 @@
 LocationConfig* getMatchingLocation(const Request& req, const ServerConfig* server, Response& res, bool &use_location);
 /* 根据 URI 后缀和 location.cgi_extensions 判断请求是否需要执行 CGI。 */
 bool isCGIRequest(const LocationConfig *loc, const std::string& uri);
+
+#endif

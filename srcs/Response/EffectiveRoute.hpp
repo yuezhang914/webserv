@@ -4,6 +4,8 @@
 #include <string>
 #include <iostream>
 #include <vector>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include "ServerConfig.hpp"
 #include "LocationConfig.hpp"
 #include "../Request/Request.hpp"
