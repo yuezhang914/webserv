@@ -3,20 +3,28 @@
 HTTP request 基础工具实现。 Request 的通用工具、URI 安全检查和调试输出；真正的请求读取与解析流程已拆到 RequestParser.cpp。
 */
 #include "Request.hpp"
+#include <cctype>
 
 /*
 函数：to_lower
-用途：把字符串转成小写。
-参数来源：header 名称、Host 值、URI 安全检查等。
+用途：把字符串中的英文字母统一转换成小写。
+参数来源：主要接收 HTTP header 名、Transfer-Encoding 值、URI 安全检查等字符串。
+返回值：返回转换后的小写字符串，不修改原始参数。
 实现逻辑：
     1. 复制输入字符串到 res，避免修改原字符串。
-    2. 使用 std::transform 和 ::tolower 把每个字符变成小写。
-    3. 返回小写后的副本。
+    2. 使用 while 逐个读取字符。
+    3. 先把字符转换成 unsigned char，再交给 std::tolower，避免有符号 char 直接传入字符分类函数产生未定义行为。
+    4. 把转换结果写回副本并返回。
 为什么需要：HTTP header 名称大小写不敏感，把 key 统一成小写后，后面可以稳定查 headers["content-length"]。
 */
 std::string to_lower(const std::string& str) {
 	std::string res = str;
-	std::transform(res.begin(), res.end(), res.begin(), ::tolower);
+	size_t i = 0;
+	while (i < res.size()) {
+		unsigned char c = static_cast<unsigned char>(res[i]);
+		res[i] = static_cast<char>(std::tolower(c));
+		++i;
+	}
 	return res;
 }
 
