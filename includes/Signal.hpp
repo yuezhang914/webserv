@@ -1,6 +1,8 @@
-#pragma once
+#ifndef SIGNAL_HPP
+#define SIGNAL_HPP
+
 #include <csignal>
-#include "../../includes/Webserv.hpp"
+#include "Webserv.hpp"
 
 /*
 全局变量：g_stop
@@ -15,3 +17,5 @@ extern volatile sig_atomic_t g_stop;
 作用：处理 Ctrl+C 等信号，让 serverLoop 可以优雅退出。
 */
 void signalHandler(int sig);
+
+#endif
