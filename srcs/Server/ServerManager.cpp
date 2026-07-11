@@ -215,11 +215,14 @@ bool ServerManager::isListenFd(int fd)
 void ServerManager::handleClientRead(int clientFd, size_t poll_index)
 {
     char buffer[BUFFER_SIZE];
+    
+    // 1. 🚀【全新并轨】：直接从总账本里把这个客人的整体生命盒子引用刨出来
+    Connection &conn = this->_connections[clientFd];
 
     while (true)
     {
-        // 交由该客人的专属 ClientIO 物理搬运工去吃字节
-        ssize_t bytes_read = this->_ios[clientFd].readFromNet(buffer, BUFFER_SIZE - 1);
+        // 2. 🚀【解耦调用】：让盒子内部自带的专属物理搬运工 io 去捞热乎的裸字节
+        ssize_t bytes_read = conn.io.readFromNet(buffer, BUFFER_SIZE - 1);
 
         if (bytes_read == 0)
         {
@@ -238,7 +241,7 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
             }
             if (errno == EINTR)
             {
-                // 被系统某些微小的信号临时打断（比如你在键盘上晃动鼠标或终端刷新），原汁原味继续强攻
+                // 被系统某些微小的信号临时打断，原汁原味继续强攻
                 continue;
             }
 
@@ -249,21 +252,21 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
             return;
         }
 
-        // 拼接蓄水
+        // 3. 🚀【拼接蓄水】：直接追加到它自己身上的 read_buffer 抽屉里
         buffer[bytes_read] = '\0';
-        this->_client_buffers[clientFd] += std::string(buffer);
+        conn.read_buffer += std::string(buffer);
     }
 
-    // 退出循环后，查验请求边界
-    if (this->_client_buffers[clientFd].find("\r\n\r\n") != std::string::npos)
+    // 4. 🚀【边界判定】：退出异步吞噬循环后，直接核验自己盒子里的 read_buffer 边界
+    if (conn.read_buffer.find("\r\n\r\n") != std::string::npos)
     {
         std::cout << "[ServerManager] HTTP Request boundary matched for FD " << clientFd << ". Transition to POLLOUT." << std::endl;
 
-        // 【通关测试硬编码】：模拟队友交接，将完全体物资一针注入写蓄水池（精准 37 字节身体）
-        std::string mock_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 37\r\n\r\n<h1>Hello from Webserv, XueJie!</h1>\n";
+        // 【通关测试硬编码】：模拟高层队友拼好的完全体物资
+        std::string mock_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 37\r\n\r\n<h1>Hello from Connection Box!</h1>\n";
 
-        // 🚀 直接用 ClientIO 提供的注资接口把物资灌进去
-        this->_ios[clientFd].pushWriteBuffer(mock_response);
+        // 5. 🚀【注资接口】：通过盒子里的搬运工灌入写蓄水池
+        conn.io.pushWriteBuffer(mock_response);
 
         // 调转枪头，通知内核下一轮滴答立刻检查可写事件
         this->_poll_fds[poll_index].events = POLLOUT;
@@ -294,8 +297,11 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
  */
 void ServerManager::handleClientWrite(int clientFd, size_t poll_index)
 {
-    // 把写缓冲区满了以后的物理切片、substr 剁尾巴细节，全部委派给 ClientIO 实现
-    ssize_t bytes_sent = this->_ios[clientFd].writeToNet();
+    // 1.【全新并轨】：直接从总账本里把这个客人的整体生命盒子引用刨出来
+    Connection &conn = this->_connections[clientFd];
+
+    // 2.【解耦调用】：把物理切片、substr 剁尾巴细节，全部委派给盒子自带的搬运工实现
+    ssize_t bytes_sent = conn.io.writeToNet();
 
     if (bytes_sent < 0)
     {
@@ -304,17 +310,14 @@ void ServerManager::handleClientWrite(int clientFd, size_t poll_index)
         return;
     }
 
-    // 查验本轮倾倒过后，搬运工本地的写蓄水池物资是否彻底清空（场景 A vs 场景 B）
-    if (this->_ios[clientFd].isWriteFinished())
+    // 3.【状态查验】：查验本轮倾倒过后，搬运工本地的写蓄水池物资是否彻底清空（场景 A vs 场景 B）
+    if (conn.io.isWriteFinished())
     {
         // 场景 A：数据全量送达
         std::cout << "[ServerManager] Fully sent HTTP Response back to Client FD " << clientFd << std::endl;
 
-        // 擦干净桌子，清空该客人的读缓存蓄水池，为后续长连接复用扫清障碍
-        this->_client_buffers[clientFd] = "";
-
-        // 让搬运工把自己的写蓄水池和物理状态也彻底归零！
-        this->_ios[clientFd].clear();
+        // 4.【一键长连接复位】：直接呼叫盒子自己的一键清空，把读缓存、写蓄水池容量全部物理归零！
+        conn.clear();
 
         // 【持久化长连接核心】：交割完毕，重新调转枪头去监控 POLLIN（等读事件）
         this->_poll_fds[poll_index].events = POLLIN;
@@ -322,7 +325,8 @@ void ServerManager::handleClientWrite(int clientFd, size_t poll_index)
     else
     {
         // 场景 B：因为非阻塞，数据只发了一半
-        // 我们什么都不用做，events 保持 POLLOUT 标志，下轮循环内核腾出空位会自动再次叫醒我们！
+        // 搬运工内部已经通过 substr 剁好了尾巴。我们什么都不用做，events 保持 POLLOUT 标志，
+        // 下轮循环内核腾出空位会自动再次叫醒我们继续喷吐！
         std::cout << "[ServerManager] Buffer choked. Sliced and retained data tail for Client FD " << clientFd << std::endl;
     }
 }
@@ -352,13 +356,13 @@ void ServerManager::closeConnection(int clientFd, size_t poll_index)
     // 1. 物理斩断套接字通信
     close(clientFd);
 
-    // 2. 清理内存账本
-    this->_client_to_srv_map.erase(clientFd);
-    this->_client_buffers.erase(clientFd);
-    this->_response_buffers.erase(clientFd);
+    // 2.【核心绝杀】：只要一笔抹掉这个 clientFd 的盒子
+    // 盒子里面的 read_buffer、物理搬运工 ClientIO（包含写缓冲区）全部自动物理析构，干净利落！
+    this->_connections.erase(clientFd);
 
-    // 3. 不在这里 erase 它，而是把它的标志位设为死寂状态
-    // 告诉内核：下一次 poll 别再看它了。同时让 run() 完完整整走完这轮点名！
+    // 3. 保持原样的黄金安全气囊
+    // 不在这里立马从 vector 中 erase 它，而是把它的标志位设为死寂状态 (-1)
+    // 告诉内核：下一次 poll 别再看它了。同时让 run() 的倒序大循环完完整整走完这轮点名，绝对不踩空！
     if (poll_index < this->_poll_fds.size())
     {
         this->_poll_fds[poll_index].fd = -1;
@@ -412,19 +416,13 @@ void ServerManager::acceptNewConnection(int listenFd)
     // 4. 将新诞生的 clientFd 强行剥夺其阻塞特权
     this->setNonBlocking(clientFd);
 
-    // 5. 将大厅监听端口的配置，无缝过户拷贝给这个 client 专属的映射中
-    this->_client_to_srv_map[clientFd] = this->_listen_socket_map[listenFd];
+    //直接把所有人格属性打包成一个盒子塞进账本
+    this->_connections[clientFd] = Connection(clientFd, this->_listen_socket_map[listenFd]);
 
-    // 初始化该客人的专属拼接小抽屉，防止粘包断包
-    this->_client_buffers[clientFd] = "";
-
-    //显式调用有参构造，把合法的 clientFd 灌进账本！
-    this->_ios[clientFd] = ClientIO(clientFd);
-    
-    // 6. 组装标准的 pollfd，推入大阵列尾部，无惧倒序扫描
+    // 挂载进 poll 阵列
     struct pollfd pfd;
     pfd.fd = clientFd;
-    pfd.events = POLLIN; // 第一步，先重点监控客户端发来的请求数据
+    pfd.events = POLLIN;
     pfd.revents = 0;
     this->_poll_fds.push_back(pfd);
 }
@@ -437,7 +435,7 @@ void ServerManager::run()
 
     while (true)
     {
-        // 🚀 【收割车间】：在每次呼叫 poll 之前，把上一轮标记为 -1 的死线统一清理掉
+        //【收割车间】：在每次呼叫 poll 之前，把上一轮标记为 -1 的死线统一清理掉
         for (size_t i = 0; i < this->_poll_fds.size();)
         {
             if (this->_poll_fds[i].fd == -1)

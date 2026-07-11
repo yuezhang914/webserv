@@ -32,5 +32,8 @@
 #include "ServerManager.hpp"
 #include "ClientIO.hpp"
 #include "Signal.hpp"
+#include "ClientIO.hpp"
+#include "Connection.hpp"
+
 // ...
 #endif
