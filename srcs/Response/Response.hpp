@@ -13,7 +13,7 @@
 结构体：Response
 作用：保存一次 HTTP response 的全部内容，最后通过 responseToString() 变成真正发给 curl/浏览器的字符串。
 从哪来：buildResponse()/handleGet()/handlePost()/handleDelete()/finalizeCGIResponse() 创建或填充它。
-给谁用：Client.cpp 的 queue_response() 接收 responseToString() 的结果，再由 send_waiting_response() 分批发送。
+给谁用：ServerManager 调用 responseToString() 得到完整 HTTP 文本，再交给 ClientIO::pushWriteBuffer()/writeToNet() 分批发送。
 */
 struct Response {
 	/* HTTP 版本，通常固定为 HTTP/1.1。 */
@@ -58,7 +58,7 @@ struct File {
 	std::string fileName;
 	/* 目标完整文件路径。POST 时由 generateUniqueFilename 生成；DELETE 时直接等于 eff.uri。 */
 	std::string filePath;
-	/* 请求 body 应有长度。来源：Content-Length header，被 isValidContentLength 写入。 */
+	/* 请求 body 应有长度。普通请求来自 Content-Length；chunked 请求来自解码后的 request.body.size()。 */
 	size_t length;
 	/* 处理 POST/DELETE 过程中的响应对象。出错时成员函数直接往这里 createResponse。 */
 	Response response;
@@ -76,7 +76,6 @@ struct File {
 Response buildResponse(const Request& request);
 std::string getStatusMessage(int statusCode);
 int checkRequestVersion(const std::string& version, Response& response, std::map<int, std::string> error_pages);
-bool shouldConnectionBeClosed(const std::map<std::string, std::string>& headers);
 bool isErrorStatusCode(int statusCode);
 
 #endif

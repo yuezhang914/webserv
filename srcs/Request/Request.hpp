@@ -2,7 +2,7 @@
 #define REQUEST_HPP
 
 #include "Webserv.hpp"
-#include <algorithm>
+
 /*
 兼容说明：ERROR_MAX_BODY_LENGTH 是 RequestParser 返回给 ServerManager 的特殊状态。
 有些合并版本的 Defines.hpp 里还没有这个宏；这里做兜底定义，保证 Request 对外接口自洽。
