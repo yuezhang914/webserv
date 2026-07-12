@@ -614,6 +614,8 @@ unsigned long Config::parseSize(const std::string &size_str) const
 
     std::string num_str = size_str;
     char unit = '\0';
+    // 先数数 num_str 里面一共有几个字（length），把这个数减去 1 得到最后一个字的座位号，
+    // 然后用方括号 [] 去把那个座位上的字符揪出来，存到 last 变量里。
     char last = num_str[num_str.length() - 1];
     if (std::isalpha(static_cast<unsigned char>(last)))
     {
@@ -643,6 +645,9 @@ unsigned long Config::parseSize(const std::string &size_str) const
             return static_cast<unsigned long>(ERROR_PARSE_SIZE);
         }
         unsigned long digit = static_cast<unsigned long>(num_str[index] - '0');
+//    ULONG_MAX：这是 C++ 里的一个大魔王常量，代表 unsigned long（无符号长整型）所能表示的最大、最极限的数字。
+//    在 64 位系统上，它是一个巨大的 20 位数（$18446744073709551615$）。
+//    10UL：就是数字 10，后面的 UL 是告诉编译器“把这个 10 当作 unsigned long 类型来看待”
         if (num > (ULONG_MAX - digit) / 10UL)
         {
             std::cerr << "Error: Size value overflows unsigned long: " << size_str << std::endl;
