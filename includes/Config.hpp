@@ -51,8 +51,8 @@ private:
     /*
     函数：trim
     输入：一段配置文本或一个 token。
-    输出：去掉开头和结尾空白、换行、分号后的字符串。
-    实现逻辑：先找第一个不是空白/分号的位置，再找最后一个不是空白/分号的位置，最后 substr 截取中间部分。
+    输出：去掉开头和结尾空格、tab、回车、换行后的字符串。
+    实现逻辑：先找第一个非空白字符，再找最后一个非空白字符，最后 substr 截取中间部分；分号由 tokenizer 单独处理。
     */
     std::string trim(const std::string &str) const;
 
@@ -68,7 +68,7 @@ private:
     函数：parseSize
     输入：配置里的大小字符串，例如 "1M"、"512K"、"1024"。
     输出：换算后的字节数；格式非法时返回 ERROR_PARSE_SIZE。
-    实现逻辑：拆出数字和单位；用 strtoul 把数字转成整数；K/M/G 分别乘 1024、1024^2、1024^3。
+    实现逻辑：严格检查纯数字和可选 K/M/G 单位；逐位转换并分别检查数字累积与单位乘法是否溢出。
     */
     unsigned long parseSize(const std::string &size_str) const;
 
@@ -92,7 +92,7 @@ private:
     函数：tokenizeConfig
     输入：整个配置文件文本。
     输出：ConfigToken 数组；{、}、; 会被单独拆成 token，# 到行尾会被当作注释跳过。
-    用途：让 parser 支持 server{、root srv/www;}、server { listen 3435; root srv/www; } 这类更灵活格式。
+    用途：让 parser 支持 server{、root srv/www;} 等排版；当前格式不支持单引号或双引号字符串，parseFile 会在 tokenize 前拒绝。
     */
     std::vector<ConfigToken> tokenizeConfig(const std::string &content) const;
 
@@ -148,7 +148,7 @@ private:
     函数：parseLocationDirective
     输入：location 块里的指令名、参数列表、当前 LocationConfig 指针。
     输出：修改 loc 对象；成功返回 SUCCESS，失败返回 ERROR。
-    实现逻辑：根据 directive 分别处理 allow_methods/root/alias/index/autoindex/cgi_extension/upload_path/return/max_body_size；检查 root 和 alias 不能同时使用；location 级 max_body_size 会被 RequestBody 通过 ConfigRouteUtils 真正使用。
+    实现逻辑：根据 directive 分别处理 allow_methods/root/alias/index/autoindex/cgi_extension/upload_path/return/max_body_size；检查 root 和 alias 不能同时使用；location 级 max_body_size 会被 RequestParser 通过 ConfigRouteUtils 真正使用。
     */
     bool parseLocationDirective(const std::string &directive, const std::vector<std::string> &values, LocationConfig *srv);
 
@@ -180,14 +180,14 @@ public:
     输出：servers 的可修改引用。
     用途：setupSockets() 需要给每个 ServerConfig 写入 socketFd，所以需要非 const 引用。
     */
-    std::vector<ServerConfig> &getServers() { return servers; }
+    std::vector<ServerConfig> &getServers();
 
     /*
     函数：getServers const 版本
     输出：servers 的只读引用。
     用途：serverLoop 等只读取配置，不应该修改配置时使用。
     */
-    const std::vector<ServerConfig> &getServers() const { return servers; }
+    const std::vector<ServerConfig> &getServers() const;
 
     /*
     成员：error

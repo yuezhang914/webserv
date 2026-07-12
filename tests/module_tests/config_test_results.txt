@@ -1,0 +1,185 @@
+=== Config strict module tests ===
+[PASS] 完整 server/location 配置可解析
+[PASS] 完整配置生成一个 ServerConfig
+[PASS] listen 保存 IPv4
+[PASS] listen 保存端口
+[PASS] listen 出现计数正确
+[PASS] 保存多个 server_name
+[PASS] server_name 保持配置顺序
+[PASS] 保存 server root 与 has_root
+[PASS] server 多 index 保持顺序
+[PASS] server 明确保存 autoindex off
+[PASS] server max_body_size 转换为字节
+[PASS] server 保存三个允许方法
+[PASS] allow_methods 统一保存为大写
+[PASS] 保存 server upload_path
+[PASS] 一个 error_page 可映射多个状态码
+[PASS] error_page 状态码映射正确
+[PASS] 生成一个 LocationConfig
+[PASS] 保存 location path
+[PASS] 保存 location alias 与 has_alias
+[PASS] alias location 没有误设 has_root
+[PASS] location 多 index 保持顺序
+[PASS] location 明确保存 autoindex on
+[PASS] location max_body_size 转换并标记覆盖
+[PASS] location allow_methods 保存正确
+[PASS] 保存 location upload_path
+[PASS] 保存 CGI 扩展名与解释器映射
+[PASS] 保存 location return 重定向
+[PASS] 最小合法配置
+[PASS] 紧凑格式无需逐行书写
+[PASS] 空格、tab 与换行可混合
+[PASS] 行尾注释被忽略
+[PASS] 注释中的单双引号不会触发 quoted-string 错误
+[PASS] 同一个配置可包含多个 server
+[PASS] 相同 server_name 在不同端口允许复用
+[PASS] 不同 server 可使用相同 location path
+[PASS] listen 只写端口
+[PASS] listen 只写 IPv4 时采用默认端口
+[PASS] listen 支持 IPv4:port
+[PASS] max_body_size 接受无单位数字
+[PASS] max_body_size 接受 K 单位
+[PASS] max_body_size 接受小写 k 单位并转大写处理
+[PASS] max_body_size 接受 M 单位
+[PASS] max_body_size 接受 G 单位
+[PASS] max_body_size 接受零
+[PASS] allow_methods 方法名可写小写
+[PASS] 重复方法由 set 去重
+[PASS] server autoindex on 合法
+[PASS] server autoindex off 合法
+[PASS] location 可以继承 server root
+[PASS] location 可以单独覆盖 root
+[PASS] location 可以使用 alias
+[PASS] return 接受 300
+[PASS] return 接受 399
+[PASS] 空配置文件被拒绝
+[PASS] 只有注释的配置被拒绝
+[PASS] 不支持 http 顶层包装 block
+[PASS] 顶层普通 directive 被拒绝
+[PASS] 顶层 location 被拒绝
+[PASS] 顶层多余右大括号被拒绝
+[PASS] server 后缺少左大括号
+[PASS] server block 缺少右大括号
+[PASS] server 内嵌套 server 被拒绝
+[PASS] location 内嵌套 location 被拒绝
+[PASS] location 内嵌套 server 被拒绝
+[PASS] server 内孤立左大括号被拒绝
+[PASS] location 内孤立左大括号被拒绝
+[PASS] 普通 directive 缺少分号
+[PASS] 文件结束前 directive 缺少分号
+[PASS] 孤立分号被拒绝
+[PASS] directive 只有名称没有参数被拒绝
+[PASS] location 后缺少 path
+[PASS] location path 后缺少左大括号
+[PASS] location block 缺少右大括号
+[PASS] 同一 server 内重复 location path 被拒绝
+[PASS] location path 必须以斜杠开头
+[PASS] 配置正文不支持双引号
+[PASS] 配置正文不支持单引号
+[PASS] 未知 server directive 被拒绝
+[PASS] 旧 client_max_body_size 指令被拒绝
+[PASS] 旧 directory_listing 别名被拒绝
+[PASS] listen 缺少参数
+[PASS] listen 参数过多
+[PASS] 同一 server 重复 listen
+[PASS] listen 端口不能为负数
+[PASS] listen 端口不能带加号
+[PASS] listen 端口不能为零
+[PASS] listen 端口不能超过 65535
+[PASS] listen 端口必须是纯数字
+[PASS] IPv4 不能少于四段
+[PASS] IPv4 不能多于四段
+[PASS] IPv4 每段不能超过 255
+[PASS] IPv4 段不能为空
+[PASS] IPv4 不允许尾随点号
+[PASS] IPv4 不允许前导零
+[PASS] server_name 缺少参数
+[PASS] 同一 server 重复 server_name directive
+[PASS] 同一条 server_name 中重复名称
+[PASS] 同一端口的不同 server 不能使用相同 server_name
+[PASS] server 缺少 root
+[PASS] root 缺少参数
+[PASS] root 参数过多
+[PASS] 同一 server 重复 root
+[PASS] index 缺少参数
+[PASS] 同一 server 重复 index directive
+[PASS] autoindex 缺少参数
+[PASS] autoindex 参数过多
+[PASS] autoindex 只接受 on/off
+[PASS] 同一 server 重复 autoindex
+[PASS] allow_methods 缺少参数
+[PASS] allow_methods 拒绝未实现方法
+[PASS] upload_path 缺少参数
+[PASS] upload_path 参数过多
+[PASS] 同一 server 重复 upload_path
+[PASS] error_page 至少需要状态码和路径
+[PASS] error_page 状态码必须为纯数字
+[PASS] error_page 状态码不能低于 300
+[PASS] error_page 状态码不能高于 599
+[PASS] max_body_size 缺少参数
+[PASS] max_body_size 参数过多
+[PASS] 同一 server 重复 max_body_size
+[PASS] max_body_size 不能为负数
+[PASS] max_body_size 不能带加号
+[PASS] max_body_size 不能是小数
+[PASS] max_body_size 不能只有单位
+[PASS] max_body_size 拒绝未知单位
+[PASS] max_body_size 拒绝双字符单位
+[PASS] max_body_size 拒绝超出 unsigned long 的数字
+[PASS] max_body_size 单位乘法溢出被拒绝
+[PASS] 未知 location directive 被拒绝
+[PASS] location 不支持旧 directory_listing 别名
+[PASS] location root 缺少参数
+[PASS] location root 参数过多
+[PASS] location 重复 root
+[PASS] location root 与 alias 不能同时存在
+[PASS] location alias 与 root 不能同时存在（反向顺序）
+[PASS] alias 缺少参数
+[PASS] alias 参数过多
+[PASS] location 重复 alias
+[PASS] location index 缺少参数
+[PASS] location 重复 index directive
+[PASS] location autoindex 缺少参数
+[PASS] location autoindex 参数过多
+[PASS] location autoindex 只接受 on/off
+[PASS] location 重复 autoindex
+[PASS] location allow_methods 缺少参数
+[PASS] location allow_methods 拒绝 PUT
+[PASS] location upload_path 缺少参数
+[PASS] location upload_path 参数过多
+[PASS] location 重复 upload_path
+[PASS] location max_body_size 缺少参数
+[PASS] location max_body_size 参数过多
+[PASS] location 重复 max_body_size
+[PASS] location max_body_size 拒绝负数
+[PASS] location max_body_size 拒绝加号
+[PASS] location max_body_size 拒绝非法单位
+[PASS] cgi_extension 缺少参数
+[PASS] cgi_extension 参数过多
+[PASS] cgi_extension 扩展名必须以点开头
+[PASS] 同一 location 重复 CGI 扩展名
+[PASS] return 缺少 URL
+[PASS] return 参数过多
+[PASS] return 状态码必须为纯数字
+[PASS] return 状态码不能低于 300
+[PASS] return 状态码不能高于 399
+[PASS] 路由工具测试配置可解析
+[PASS] findMatchingLocation 找到普通前缀
+[PASS] findMatchingLocation 选择最长前缀
+[PASS] location 匹配忽略 query string
+[PASS] 没有匹配 location 时返回 NULL 并清除标志
+[PASS] location 明确覆盖 server body limit
+[PASS] body limit 使用最长匹配 location
+[PASS] location 未写 body size 时继承 server
+[PASS] 无 location 时使用 server body limit
+[PASS] server 指针为空时返回安全默认 body limit
+[PASS] LocationConfig 拷贝构造复制全部配置字段
+[PASS] LocationConfig 赋值运算复制关键字段
+[PASS] ServerConfig 拷贝构造复制配置字段
+[PASS] ServerConfig 拷贝构造不复制 socketFd 所有权
+[PASS] ServerConfig 赋值运算复制配置字段
+[PASS] ServerConfig 赋值运算不复制 socketFd 所有权
+==================================
+TOTAL: 180
+PASS : 180
+FAIL : 0

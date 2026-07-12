@@ -20,11 +20,11 @@ location 块解析和 LocationConfig 生命周期实现。它把 location 内的
 实现逻辑：
     1. allow_methods：把方法加入 loc->allow_methods。
     2. root：检查参数数量，检查不能重复，也不能和 alias 同时使用，然后写入 loc->root 并设置 has_root。
-    3. autoindex/directory_listing：检查 on/off，然后设置 loc->autoindex 和 loc->has_autoindex。
+    3. autoindex：检查 on/off，然后设置 loc->autoindex 和 loc->has_autoindex；旧别名不再接受。
     4. max_body_size：只接受一个 size 参数，写入 loc->max_body_size 并设置 has_body_size。
     5. index：设置该 location 的默认首页文件。
-    6. cgi_extension：要求两个参数，后缀和解释器路径，写入 loc->cgi_extensions。
-    7. upload_path：设置 POST 上传目录。
+    6. cgi_extension：要求两个参数，后缀和解释器路径，并拒绝同一后缀重复配置。
+    7. upload_path：设置 POST 上传目录，并拒绝同一 location 重复配置。
     8. return：要求状态码和 URL；状态码必须是 300-399；写入 redirect_status/redirect_url。
     9. alias：要求一个参数，并检查不能和 root 同时使用；写入 loc->alias，并设置 has_alias=true。
     10. 未知指令返回 ERROR。
@@ -85,7 +85,7 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
         loc->root = values[0];
         loc->has_root = true;
     }
-    else if (directive == "autoindex" || directive == "directory_listing")
+    else if (directive == "autoindex")
     {
         if (values.size() != 1)
         {
@@ -118,7 +118,7 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
     else if (directive == "max_body_size")
     {
         /* 🛠️ 【修改点：支持 location 级 max_body_size】
-           意义：Config 保存 location 自己的 body 限制；RequestBody 通过 ConfigRouteUtils 在读取 body 前计算 effective limit，避免只解析不生效的半支持。 */
+           意义：Config 保存 location 自己的 body 限制；RequestParser 通过 ConfigRouteUtils 在读取 body 前计算 effective limit，避免只解析不生效的半支持。 */
         if (loc->has_body_size == true)
         {
             std::cerr << "Error: \"max_body_size\" directive is duplicate in this location block" << std::endl;
@@ -172,6 +172,12 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
             std::cerr << "Error: Invalid cgi_extension format. Expected e.g., .py path" << std::endl;
             return ERROR;
         }
+        if (loc->cgi_extensions.find(values[0]) != loc->cgi_extensions.end())
+        {
+            std::cerr << "Error: Duplicate cgi_extension for " << values[0]
+                      << " in location " << loc->path << std::endl;
+            return ERROR;
+        }
         loc->cgi_extensions[values[0]] = values[1];
     }
     else if (directive == "upload_path")
@@ -179,6 +185,12 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
         if (values.size() != 1)
         {
             std::cerr << "Error: Invalid upload_path directive" << std::endl;
+            return ERROR;
+        }
+        if (!loc->upload_path.empty())
+        {
+            std::cerr << "Error: Duplicate upload_path directive in location "
+                      << loc->path << std::endl;
             return ERROR;
         }
         loc->upload_path = values[0];

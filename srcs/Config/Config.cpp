@@ -19,26 +19,25 @@
     5. 如果缺少 root，也设置 error=1，因为后面无法把 URI 映射到真实文件路径。
 后续影响：main() 会检查 config.error；只有没有错误才会继续 setupSockets() 和 serverLoop()。
 */
-Config::Config(const std::string& path) 
-    : all_server_names(), error(0) 
+Config::Config(const std::string &path)
+    : all_server_names(), error(0)
 {
-    std::vector<ConfigToken> tokens; // 👈 局部变量，临时的词法脚手架
-
-    // 🟢 【第一步：词法切包】让 parseFile 把切好的词塞进局部变量 tokens 中
+    // 读取配置文件，先切分 token，再按 server/location 结构解析，
+    // 最终把 ServerConfig 和 LocationConfig 保存到 Config::servers。
     if (parseFile(path) == ERROR)
     {
-        std::cerr << "Error: Failed to read or tokenize config file" << std::endl;
+        std::cerr << "Error: Failed to parse config file" << std::endl;
         this->error = 1;
-        return; 
+        return;
     }
 
-    // 🟢 【第三步：业务终审】进行全站最后的功能性宏观体检
+    // 第三步：
+    // 对已经生成的所有 ServerConfig 做整体校验。
     if (serversHaveRoot() == ERROR)
     {
-        std::cerr << "Error: At least one server must have a root directive" << std::endl;
+        std::cerr << "Error: A server is missing the root directive" << std::endl;
         this->error = 1;
     }
-    // 🔒 离开构造函数，局部变量 tokens 的内存被系统自动回收，干净利落！
 }
 /*
 函数：Config::~Config
@@ -51,29 +50,67 @@ Config::Config(const std::string& path)
     2. vector/string/map/set 会自动析构。
     3. ServerConfig 的析构函数会负责关闭自己的 socketFd。
 */
-Config::~Config() {}
+Config::~Config() 
+{}
+
+std::vector<ServerConfig> &Config::getServers()
+{
+    return servers;
+}
+
+const std::vector<ServerConfig> &Config::getServers() const
+{
+    return servers;
+}
+
+/*
+函数：Config::serversHaveRoot
+用途：检查每个 server 是否有 root 指令。
+变量解释：
+    - servers：Config 的成员变量，保存所有已经解析出的 ServerConfig。
+    - it：遍历 servers 的 const_iterator。
+    - it->has_root：每个 server 是否显式配置过 root 的标志。
+实现逻辑：
+    1. 遍历 servers。
+    2. 如果某个 ServerConfig.has_root 是 false，说明没有配置 root，返回 ERROR。
+    3. 所有 server 都有 root，返回 SUCCESS。
+为什么重要：没有 root 时，Webserv 无法把 /ping.html 映射成 srv/www/ping.html 这种真实文件路径。
+*/
+bool Config::serversHaveRoot() const
+{
+    for (std::vector<ServerConfig>::const_iterator it = servers.begin(); it != servers.end(); ++it)
+    {
+        if (it->has_root == false)
+            return ERROR;
+    }
+    return SUCCESS;
+}
+
+
 
 /*
 函数：Config::trim
-用途：清理字符串两端的空白字符和分号。
-参数来源：split() 或旧辅助场景传入的文本；健壮版配置 parser 主要由 tokenizeConfig 处理 ;。
+用途：清理字符串两端的空白字符。
+参数来源：split() 拆分 listen 参数时，把每一段传入本函数。
 变量解释：
     - str：待清理的输入字符串。
-    - first：第一个有效字符的位置。
-    - last：最后一个有效字符的位置。
-    - 返回值：str 去掉首尾空白和分号后的结果。
+    - first：第一个非空白字符的位置。
+    - last：最后一个非空白字符的位置。
+    - 返回值：str 去掉首尾空格、tab、回车和换行后的结果。
 实现逻辑：
-    1. find_first_not_of 找到第一个不是空格、tab、换行、分号的位置。
-    2. 如果整段都没有有效字符，返回空字符串。
-    3. find_last_not_of 找到最后一个不是空白/分号的位置。
-    4. substr 截取有效内容。
-例子："  root srv/www;  " 经过 trim 后变成 "root srv/www"。
+    1. find_first_not_of 找到第一个非空白字符。
+    2. 如果整段都是空白，返回空字符串。
+    3. find_last_not_of 找到最后一个非空白字符。
+    4. substr 截取中间的有效内容。
+说明：分号已经由 tokenizeConfig 单独拆成 token，这里不再兼容或删除分号。
 */
-std::string Config::trim(const std::string& str) const {
-	size_t first = str.find_first_not_of(" \t\n;");
-	if (first == std::string::npos) return "";
-	size_t last = str.find_last_not_of(" \t\n;");
-	return str.substr(first, last - first + 1);
+std::string Config::trim(const std::string &str) const
+{
+    size_t first = str.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos)
+        return "";
+    size_t last = str.find_last_not_of(" \t\r\n");
+    return str.substr(first, last - first + 1);
 }
 
 /*
@@ -89,21 +126,24 @@ std::string Config::trim(const std::string& str) const {
 实现逻辑：
     1. 用 stringstream 包装输入字符串。
     2. 用 getline 按 delimiter 读取每一段。
-    3. 每一段先 trim，去掉空白和末尾分号。
+    3. 每一段先 trim，只去掉首尾空白。
     4. 如果 token 非空，就 push_back 到 tokens。
     5. 返回 tokens 给 parseDirective。
 例子："listen 127.0.0.1:3435;" 会变成 ["listen", "127.0.0.1:3435"]。
 */
-std::vector<std::string> Config::split(const std::string& str, char delimiter) const {
-	std::vector<std::string> tokens;
-	std::stringstream ss(str);
-	std::string token;
+std::vector<std::string> Config::split(const std::string &str, char delimiter) const
+{
+    std::vector<std::string> tokens;
+    std::stringstream ss(str);
+    std::string token;
 
-	while (std::getline(ss, token, delimiter)) {
-		token = trim(token);
-		if (!token.empty()) {
-			tokens.push_back(token);
-		}
-	}
-	return(tokens);
+    while (std::getline(ss, token, delimiter))
+    {
+        token = trim(token);
+        if (!token.empty())
+        {
+            tokens.push_back(token);
+        }
+    }
+    return (tokens);
 }
