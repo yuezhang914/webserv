@@ -42,7 +42,7 @@ class LocationConfig {
 	bool has_alias;
 
 	/* 🛠️ 修改点：重新支持 location 级 max_body_size。
-	   意义：location 可以对特定 URI 前缀覆盖 server 的 body 限制；RequestBody 会在读取 body 前通过 ConfigRouteUtils 做最长前缀匹配并使用该值。 */
+	   意义：location 可以对特定 URI 前缀覆盖 server 的 body 限制；RequestParser 会在读取 body 前通过 ConfigRouteUtils 做最长前缀匹配并使用该值。 */
 	unsigned long max_body_size;
 	/* 是否显式写过 max_body_size。设计目的：区分“location 没写，继承 server 限制”和“location 明确配置自己的限制”。 */
 	bool has_body_size;

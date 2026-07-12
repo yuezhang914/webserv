@@ -4,6 +4,7 @@
 健壮版 parser 不再要求 } 单独占一行，只要求普通指令用 ; 结束，因此可以解析 server { listen 3435; root srv/www; } 这种写法。
 */
 #include "Webserv.hpp"
+#include <climits>
 
 /*
 函数：ConfigToken::ConfigToken
@@ -50,9 +51,51 @@ static bool isBlockSymbol(const std::string &token)
 }
 
 /*
+函数：findUnsupportedQuoteLine
+用途：检查配置正文中是否出现当前语法不支持的单引号或双引号。
+参数来源：parseFile 读取完整配置文本后、调用 tokenizeConfig 之前传入。
+变量解释：
+    - content：完整配置文件文本。
+    - quote_line：输出参数；发现引号时记录所在行号。
+    - line：当前扫描行号，从 1 开始。
+    - in_comment：当前是否位于 # 开始的行注释中。
+实现逻辑：
+    1. 从左到右扫描配置正文。
+    2. # 之后直到换行都属于注释，注释里的引号不会参与配置语法。
+    3. 在注释外遇到单引号或双引号时立即记录行号并返回 true。
+    4. 全文没有不支持的引号时返回 false。
+说明：当前配置格式不支持 quoted string，因此不会建立引号状态，也不会让引号改变空白、#、{、}、; 的含义。
+*/
+static bool findUnsupportedQuoteLine(const std::string &content, size_t &quote_line)
+{
+    size_t index = 0;
+    size_t line = 1;
+    bool in_comment = false;
+
+    while (index < content.size())
+    {
+        char c = content[index];
+        if (c == '\n')
+        {
+            line++;
+            in_comment = false;
+        }
+        else if (!in_comment && c == '#')
+            in_comment = true;
+        else if (!in_comment && (c == '"' || c == '\''))
+        {
+            quote_line = line;
+            return true;
+        }
+        index++;
+    }
+    return false;
+}
+
+/*
 函数：Config::tokenizeConfig
 用途：把整个配置文件文本拆成 token 流。
-参数来源：parseFile 读完整个配置文件后传入 content。
+参数来源：parseFile 读完整个配置文件并确认没有不支持的引号后传入 content。
 变量解释：
     - content：parseFile 读出的完整配置文件文本。
     - tokens：函数最终返回的 token 数组，每个元素保存 token 文本和行号。
@@ -60,13 +103,14 @@ static bool isBlockSymbol(const std::string &token)
     - current_line：current 这个 token 开始出现的行号。
     - line：当前扫描位置所在行号，从 1 开始。
     - index：当前正在扫描 content 的下标。
-    - c：content[index] 当前字符，用来判断空白、注释、括号、分号或普通字符。
+    - c：content[index] 当前字符。
 实现逻辑：
     1. 从左到右扫描每个字符。
-    2. 空白字符会结束当前 token；换行会让 line 递增。
-    3. # 到当前行末尾都作为注释跳过。
-    4. {、}、; 无论是否贴着别的字符，都会单独成为 token。
-    5. 其他字符累积到当前 token。
+    2. 空白字符结束当前普通 token；换行同时增加行号。
+    3. # 到当前行末尾作为注释跳过。
+    4. {、}、; 无论是否贴着其他字符，都单独成为 token。
+    5. 其他字符累积到 current。
+说明：当前配置格式不支持单引号或双引号；parseFile 会在进入本函数前直接拒绝它们。
 例子：server{listen 3435;} 会变成 server、{、listen、3435、;、}。
 */
 std::vector<ConfigToken> Config::tokenizeConfig(const std::string &content) const
@@ -77,35 +121,11 @@ std::vector<ConfigToken> Config::tokenizeConfig(const std::string &content) cons
     size_t line = 1;
     size_t index = 0;
 
-    // 🛠️ 防御 1：并线引号沙盒状态锁
-    bool in_quotes = false;
-    char quote_char = '\0';
-
     while (index < content.size())
     {
         char c = content[index];
 
-        // 🛠️ 防御 2：引号边界状态切换断言
-        if ((c == '"' || c == '\'') && (index == 0 || content[index - 1] != '\\')) // 考虑了斜杠转义
-        {
-            if (!in_quotes)
-            {
-                // 进入引号沙盒：记录单双引号类型
-                in_quotes = true;
-                quote_char = c;
-            }
-            else if (c == quote_char)
-                in_quotes = false; // 闭合引号，解除沙盒
-
-            if (current.empty())
-                current_line = line;
-            current += c; // 引号本身作为 token 内容的一部分保留
-            index++;
-            continue;
-        }
-
-        // 🛠️ 防御 3：注释熔断防御（只有在引号沙盒外部，# 才能具备注释功能）
-        if (c == '#' && !in_quotes)
+        if (c == '#')
         {
             if (!current.empty())
             {
@@ -117,8 +137,7 @@ std::vector<ConfigToken> Config::tokenizeConfig(const std::string &content) cons
             continue;
         }
 
-        // 🛠️ 防御 4：空白分割拦截（只有在引号沙盒外部，空格和换行才能切断指令）
-        if (std::isspace(static_cast<unsigned char>(c)) && !in_quotes)
+        if (std::isspace(static_cast<unsigned char>(c)))
         {
             if (!current.empty())
             {
@@ -131,8 +150,7 @@ std::vector<ConfigToken> Config::tokenizeConfig(const std::string &content) cons
             continue;
         }
 
-        // 🛠️ 防御 5：语法元字符拦截（只有在引号沙盒外部，大括号和分号才能强行作为独立 token 剥离）
-        if ((c == '{' || c == '}' || c == ';') && !in_quotes)
+        if (c == '{' || c == '}' || c == ';')
         {
             if (!current.empty())
             {
@@ -143,10 +161,6 @@ std::vector<ConfigToken> Config::tokenizeConfig(const std::string &content) cons
             index++;
             continue;
         }
-
-        // 🟢 处于正常字符流或引号沙盒内部，普通吞噬字符
-        if (c == '\n')
-            line++; // 即使在引号内或被跳过，换行也要精准累加行号，确保抛错行号绝不失真！
 
         if (current.empty())
             current_line = line;
@@ -284,6 +298,14 @@ bool Config::parseLocationBlock(const std::vector<ConfigToken> &tokens, size_t &
 
     std::string target_path = tokens[index + 1].value;
 
+    // location path 必须是 URI 路径前缀，因此必须从 / 开始。
+    if (target_path.empty() || target_path[0] != '/')
+    {
+        std::cerr << "Error: Location path must start with '/' near line "
+                  << tokens[index + 1].line << std::endl;
+        return ERROR;
+    }
+
     // 【核心查重】翻登记簿，看看这个房间名是不是已经存在了
     if (current_location_paths.find(target_path) != current_location_paths.end())
     {
@@ -312,11 +334,11 @@ bool Config::parseLocationBlock(const std::vector<ConfigToken> &tokens, size_t &
             return SUCCESS;
         }
 
-        // 🟢 完美的防套娃机制
+        // location 内不能继续嵌套 location 或 server block。
         std::string current_val = tokens[index].value;
-        if (current_val == "location" || current_val == "server" || current_val == "http")
+        if (current_val == "location" || current_val == "server")
         {
-            std::cerr << "Error: Nested or illegal block keyword '" << current_val
+            std::cerr << "Error: Nested block keyword '" << current_val
                       << "' is not allowed inside location near line " << tokens[index].line << std::endl;
             return ERROR;
         }
@@ -392,12 +414,12 @@ bool Config::parseServerBlock(const std::vector<ConfigToken> &tokens, size_t &in
             return validateServerNameIsNew(servers[current_srv_idx], all_server_names);
         }
 
-        /* 🛠️ 【修改点 2：并线宏观域熔断，绝杀 http 逆向套娃污染】 */
+        // server block 内不能再嵌套另一个 server block。
         std::string current_val = tokens[index].value;
-        if (current_val == "server" || current_val == "http")
+        if (current_val == "server")
         {
-            std::cerr << "Error: Nested keyword '" << current_val
-                      << "' is not allowed inside server block near line " << tokens[index].line << std::endl;
+            std::cerr << "Error: Nested server block is not allowed near line "
+                      << tokens[index].line << std::endl;
             return ERROR;
         }
 
@@ -438,72 +460,41 @@ bool Config::parseServerBlock(const std::vector<ConfigToken> &tokens, size_t &in
 参数来源：parseFile 调用 tokenizeConfig 后传入 tokens。
 变量解释：
     - tokens：tokenizeConfig 的输出，表示整个配置文件的 token 流。
-    - index：当前顶层扫描位置；遇到 server block 时会被 parseServerBlock 推进。
-    - all_server_names：跨 server 的名字登记表，传给 parseServerBlock 做重复检查。
+    - index：当前顶层扫描位置；parseServerBlock 会把它推进到当前 server block 之后。
 实现逻辑：
-    1. 顶层只允许出现 server block。
-    2. 每遇到 server，就调用 parseServerBlock 解析整个 server 区域。
-    3. 顶层出现 }、{、;、普通 directive 或 location 都是语法错误。
-    4. 所有 token 解析结束后，至少必须有一个 server。
+    1. 空 token 流属于无效配置。
+    2. 顶层只允许连续出现一个或多个 server block。
+    3. 每遇到 server，就调用 parseServerBlock 解析完整 block。
+    4. 顶层出现其他 token，立即报告“server block 外存在非法内容”。
+    5. 解析结束后确认至少生成了一个 ServerConfig。
+说明：当前配置格式没有额外的顶层包装 block。
 */
 bool Config::parseTokenStream(const std::vector<ConfigToken> &tokens)
 {
-    size_t index = 0;
-    bool hasHttpBlock = false;
-
-    // 可选的 http 块
-    if (index < tokens.size() && tokens[index].value == "http")
+    if (tokens.empty())
     {
-        hasHttpBlock = true;
-
-        index++;
-        if (index >= tokens.size() || tokens[index].value != "{")
-        {
-            std::cerr << "Error: Expected '{' after http keyword near line "
-                      << tokens[index - 1].line << std::endl;
-            return ERROR;
-        }
-        index++;    // 跳过 '{'
-    }
-
-    while (index < tokens.size())
-    {
-        // http 块结束
-        if (hasHttpBlock && tokens[index].value == "}")
-        {
-            index++;
-
-            // http 结束后不应该再有内容
-            if (index != tokens.size())
-            {
-                std::cerr << "Error: Unexpected token after http block near line "
-                          << tokens[index].line << std::endl;
-                return ERROR;
-            }
-            break;
-        }
-
-        if (tokens[index].value == "server")
-        {
-            if (parseServerBlock(tokens, index, all_server_names) == ERROR)
-                return ERROR;
-        }
-        else
-        {
-            std::cerr << "Error: Directive outside server block near line "
-                      << tokens[index].line << ": "
-                      << tokens[index].value << std::endl;
-            return ERROR;
-        }
-    }
-
-    // 如果有 http，但没有找到结束的 }
-    if (hasHttpBlock && index == tokens.size())
-    {
-        std::cerr << "Error: Missing closing '}' for http block." << std::endl;
+        std::cerr << "Error: Empty config file" << std::endl;
         return ERROR;
     }
 
+    size_t index = 0;
+    while (index < tokens.size())
+    {
+        if (tokens[index].value != "server")
+        {
+            std::cerr << "Error: Only server blocks are allowed at top level near line "
+                      << tokens[index].line << ": " << tokens[index].value << std::endl;
+            return ERROR;
+        }
+        if (parseServerBlock(tokens, index, all_server_names) == ERROR)
+            return ERROR;
+    }
+
+    if (servers.empty())
+    {
+        std::cerr << "Error: Config must contain at least one server block" << std::endl;
+        return ERROR;
+    }
     return SUCCESS;
 }
 
@@ -547,52 +538,85 @@ bool Config::parseDirective(const std::vector<std::string> &tokens, ServerConfig
 
 /*
 函数：Config::parseSize
-用途：把 max_body_size 的文本值转成字节数。
-参数来源：parseServerDirective 解析 max_body_size 1M; 时传入 "1M"。
+用途：把 max_body_size 的严格文本值转换成字节数。
+参数来源：parseServerDirective 或 parseLocationDirective 解析 max_body_size 1M; 时传入 "1M"。
 变量解释：
-    - size_str：配置里原始大小字符串，例如 1M、512K、1024。
-    - num_str：去掉单位后的数字部分字符串，交给 strtoul 转换。
-    - unit：保存 K/M/G 这类单位；没有单位时为 \0。
-    - endptr：strtoul 输出参数，指向数字解析停止的位置，用于判断是否有非法字符。
-    - num：数字部分转成的 unsigned long，最后根据 unit 换算成字节数。
+    - size_str：配置里的原始大小字符串，例如 1M、512K、1024。
+    - num_str：去掉可选单位后的纯数字部分。
+    - unit：K/M/G 单位的大写形式；没有单位时为 \0。
+    - multiplier：单位对应的乘数；无单位为 1。
+    - num：逐位累积得到的数字部分。
 实现逻辑：
-    1. 先复制输入到 num_str，并准备 unit 保存单位。
-    2. 如果最后一个字符是字母，就把它当单位 K/M/G，并从数字字符串中删除。
-    3. 用 strtoul 把数字部分转成 unsigned long。
-    4. 如果数字格式非法，返回 ERROR_PARSE_SIZE。
-    5. 根据单位把数值乘以 1024、1024*1024 或 1024*1024*1024。
-    6. 单位不是 K/M/G 且不为空时，返回 ERROR_PARSE_SIZE。
-例子：1M -> 1048576；512K -> 524288。
+    1. 字符串不能为空；末尾只有一个 K/M/G 单位时才接受单位。
+    2. 数字部分必须全部由 0-9 组成，因此 +1、-1、1.5 都会被拒绝。
+    3. 逐位计算 num，并在乘 10、加 digit 前检查 unsigned long 溢出。
+    4. 根据单位得到 multiplier，并在最终乘法前再次检查溢出。
+    5. 成功返回字节数；任何格式或溢出错误返回 ERROR_PARSE_SIZE。
+例子：1M -> 1048576；512K -> 524288；+1 和超大 G 值都会被拒绝。
 */
 unsigned long Config::parseSize(const std::string &size_str) const
 {
+    if (size_str.empty())
+    {
+        std::cerr << "Error: Invalid empty size" << std::endl;
+        return static_cast<unsigned long>(ERROR_PARSE_SIZE);
+    }
+
     std::string num_str = size_str;
     char unit = '\0';
-
-    if (!num_str.empty() && isalpha(num_str[num_str.length() - 1]))
+    char last = num_str[num_str.length() - 1];
+    if (std::isalpha(static_cast<unsigned char>(last)))
     {
-        unit = toupper(num_str[num_str.length() - 1]);
+        unit = static_cast<char>(std::toupper(static_cast<unsigned char>(last)));
+        if (unit != 'K' && unit != 'M' && unit != 'G')
+        {
+            std::cerr << "Error: Invalid size unit: " << size_str << std::endl;
+            return static_cast<unsigned long>(ERROR_PARSE_SIZE);
+        }
         num_str.erase(num_str.length() - 1);
     }
-    char *endptr;
-    unsigned long num = strtoul(num_str.c_str(), &endptr, 10);
-    if (*endptr != '\0' || num_str.empty())
+
+    if (num_str.empty())
     {
-        std::cout << "Error: Invalid size format: " << size_str << std::endl;
-        return ERROR_PARSE_SIZE;
+        std::cerr << "Error: Invalid size format: " << size_str << std::endl;
+        return static_cast<unsigned long>(ERROR_PARSE_SIZE);
     }
+
+    unsigned long num = 0;
+    size_t index = 0;
+    while (index < num_str.size())
+    {
+        unsigned char c = static_cast<unsigned char>(num_str[index]);
+        if (!std::isdigit(c))
+        {
+            std::cerr << "Error: Invalid size format: " << size_str << std::endl;
+            return static_cast<unsigned long>(ERROR_PARSE_SIZE);
+        }
+        unsigned long digit = static_cast<unsigned long>(num_str[index] - '0');
+        if (num > (ULONG_MAX - digit) / 10UL)
+        {
+            std::cerr << "Error: Size value overflows unsigned long: " << size_str << std::endl;
+            return static_cast<unsigned long>(ERROR_PARSE_SIZE);
+        }
+        num = num * 10UL + digit;
+        index++;
+    }
+
+    unsigned long multiplier = 1UL;
     if (unit == 'K')
-        num *= 1024;
+        multiplier = 1024UL;
     else if (unit == 'M')
-        num *= 1024 * 1024;
+        multiplier = 1024UL * 1024UL;
     else if (unit == 'G')
-        num *= 1024 * 1024 * 1024;
-    else if (unit != '\0')
+        multiplier = 1024UL * 1024UL * 1024UL;
+
+    if (num > ULONG_MAX / multiplier)
     {
-        std::cout << "Error: Invalid size unit: " << size_str << std::endl;
-        return ERROR_PARSE_SIZE;
+        std::cerr << "Error: Size unit multiplication overflows unsigned long: "
+                  << size_str << std::endl;
+        return static_cast<unsigned long>(ERROR_PARSE_SIZE);
     }
-    return num;
+    return num * multiplier;
 }
 
 /*
@@ -603,14 +627,16 @@ unsigned long Config::parseSize(const std::string &size_str) const
     - path：main/Config 构造函数传入的配置文件路径。
     - file：ifstream 对象，用来打开并读取 path。
     - buffer：ostringstream，用来一次性接收 file.rdbuf() 的全部内容。
-    - tokens：tokenizeConfig(buffer.str()) 的结果，传给 parseTokenStream。
+    - content：配置文件的完整文本。
+    - quote_line：发现不支持的引号时记录其行号。
+    - tokens：tokenizeConfig(content) 的结果，传给 parseTokenStream。
 实现逻辑：
     1. 用 ifstream 打开 path，打不开就返回 ERROR。
-    2. 把整个文件读入字符串。
-    3. 调用 tokenizeConfig，把文件拆成带行号的 token 流。
-    4. 调用 parseTokenStream 按 server/location/directive 语法解析所有 token。
-    5. parseTokenStream 会负责检查多余 }、缺少 }、缺少 ;、location 写在 server 外、嵌套 block 等错误。
-产出：servers 成员变量被填好，后续 setupSockets/serverLoop 都依赖它。
+    2. 把整个文件读入 content。
+    3. 检查注释外是否出现单引号或双引号；当前语法不支持 quoted string，出现即报错。
+    4. 调用 tokenizeConfig，把正文拆成带行号的 token 流。
+    5. 调用 parseTokenStream，按 server/location/directive 语法建立 servers。
+产出：servers 成员变量被填好，后续 ServerManager、Request 和 Response 都读取这些配置对象。
 */
 bool Config::parseFile(const std::string &path)
 {
@@ -625,29 +651,15 @@ bool Config::parseFile(const std::string &path)
     buffer << file.rdbuf();
     file.close();
 
-    std::vector<ConfigToken> tokens = tokenizeConfig(buffer.str());
-    return parseTokenStream(tokens);
-}
-
-/*
-函数：Config::serversHaveRoot
-用途：检查每个 server 是否有 root 指令。
-变量解释：
-    - servers：Config 的成员变量，保存所有已经解析出的 ServerConfig。
-    - it：遍历 servers 的 const_iterator。
-    - it->has_root：每个 server 是否显式配置过 root 的标志。
-实现逻辑：
-    1. 遍历 servers。
-    2. 如果某个 ServerConfig.has_root 是 false，说明没有配置 root，返回 ERROR。
-    3. 所有 server 都有 root，返回 SUCCESS。
-为什么重要：没有 root 时，Webserv 无法把 /ping.html 映射成 srv/www/ping.html 这种真实文件路径。
-*/
-bool Config::serversHaveRoot() const
-{
-    for (std::vector<ServerConfig>::const_iterator it = servers.begin(); it != servers.end(); ++it)
+    std::string content = buffer.str();
+    size_t quote_line = 0;
+    if (findUnsupportedQuoteLine(content, quote_line))
     {
-        if (it->has_root == false)
-            return ERROR;
+        std::cerr << "Error: Quoted strings are not supported near line "
+                  << quote_line << std::endl;
+        return ERROR;
     }
-    return SUCCESS;
+
+    std::vector<ConfigToken> tokens = tokenizeConfig(content);
+    return parseTokenStream(tokens);
 }

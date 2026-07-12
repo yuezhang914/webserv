@@ -30,6 +30,8 @@ static int is_valid_ipv4(const char *ip)
     if (ip == NULL)
         return ERROR;
     std::string text(ip);
+    if (text.empty() || text[0] == '.' || text[text.length() - 1] == '.')
+        return ERROR;
     std::stringstream stream(text);
     std::string part;
     int count = 0;
@@ -75,8 +77,8 @@ static int is_valid_ipv4(const char *ip)
     - size：max_body_size 分支 parseSize 返回的字节数。
 实现逻辑：
     1. allow_methods：把 GET/POST/DELETE 等方法加入 srv->allow_methods。
-    2. upload_path：检查只能有一个参数，然后写入 srv->upload_path。
-    3. autoindex/directory_listing：检查参数是 on/off，然后设置 srv->autoindex。
+    2. upload_path：检查参数数量并拒绝同一 server 重复配置。
+    3. autoindex：检查参数只能是 on/off，并拒绝旧别名和重复配置。
     4. listen：解析 IP 和端口，支持 port、ip、ip:port 三种形式；检查 IP 和端口合法；写入 srv->host/srv->port；限制同一个 server 只出现一次 listen。
     5. server_name：把所有名字 push 到 srv->server_names。
     6. root：检查只能有一个参数且不能重复，然后写入 srv->root 并设置 has_root=true。
@@ -123,12 +125,17 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
     {
         if (values.size() != 1)
         {
-            std::cerr << "Error: Invalid upload_path directive - only one value allowed" << std::endl;
+            std::cerr << "Error: Invalid upload_path directive - exactly one value required" << std::endl;
+            return ERROR;
+        }
+        if (!srv->upload_path.empty())
+        {
+            std::cerr << "Error: Duplicate upload_path directive in server" << std::endl;
             return ERROR;
         }
         srv->upload_path = values[0];
     }
-    else if (directive == "autoindex" || directive == "directory_listing")
+    else if (directive == "autoindex")
     {
         if (values.size() != 1)
         {
@@ -206,14 +213,30 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
             srv->host = "INADDR_ANY";
         }
 
-        char *endptr;
-        srv->port = strtol(port_str.c_str(), &endptr, 10);
+        if (port_str.empty())
+        {
+            std::cerr << "Invalid empty port in listen directive" << std::endl;
+            return ERROR;
+        }
+        size_t port_index = 0;
+        while (port_index < port_str.size())
+        {
+            if (!std::isdigit(static_cast<unsigned char>(port_str[port_index])))
+            {
+                std::cerr << "Invalid port in listen directive: " << port_str << std::endl;
+                return ERROR;
+            }
+            port_index++;
+        }
 
-        if (*endptr != '\0' || port_str.empty() || srv->port < 0 || srv->port > 65535)
+        char *endptr;
+        long parsed_port = strtol(port_str.c_str(), &endptr, 10);
+        if (*endptr != '\0' || parsed_port <= 0 || parsed_port > 65535)
         {
             std::cerr << "Invalid port in listen directive: " << port_str << std::endl;
             return ERROR;
         }
+        srv->port = static_cast<int>(parsed_port);
 
         /* 🎯 【修改点 1：调整计数时序，落闸防御状态污染】 */
         /* 解释：将 srv->countport++ 彻底移到本分支所有格式与值域校验通过的最下行，

@@ -38,7 +38,7 @@ static std::string stripQueryString(const std::string& uri)
     3. 如果 path 以 location.path 开头，说明匹配。
     4. 只保留 path 最长的匹配，保证 /upload/images/ 优先于 /upload/。
     5. 找到则设置 use_location=true 并返回指针；否则返回 NULL。
-意义：RequestBody 在读取 body 前也需要 location 匹配，不能依赖 CGI/Response 模块。
+意义：RequestParser 在读取 body 前也需要 location 匹配，不能依赖 CGI/Response 模块。
 */
 LocationConfig* findMatchingLocation(const std::string& uri, const std::vector<LocationConfig>& locations, bool &use_location)
 {
@@ -73,7 +73,7 @@ LocationConfig* findMatchingLocation(const std::string& uri, const std::vector<L
     2. 用 findMatchingLocation 提前匹配 location。
     3. 如果 location 存在且 has_body_size=true，说明 location 明确覆盖 body 限制，返回 loc->max_body_size。
     4. 否则返回 server->max_body_size。
-意义：Config 里存 location.max_body_size 后，RequestBody 会在读取 body 前调用这里，避免“只解析不生效”。
+意义：Config 里存 location.max_body_size 后，RequestParser 会在读取 body 前调用这里，避免“只解析不生效”。
 */
 unsigned long getEffectiveBodyLimit(const ServerConfig* server, const std::string& uri)
 {
