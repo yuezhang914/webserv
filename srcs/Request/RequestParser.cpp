@@ -78,27 +78,50 @@ static std::string trim_ows(const std::string& value) {
     6. 把三段写进 req，再调用 sanitizeRequestUri 检查 URI 安全。
 为什么严格检查：istringstream 会自动跳过 tab 和多个空格，可能把不符合 request-line 格式的文本误当成合法请求。
 */
-static int parse_request_line(const std::string& request_line, Request& req) {
-	if (request_line.find('	') != std::string::npos)
-		return REQUEST_ERROR;
-	size_t first_space = request_line.find(' ');
-	if (first_space == std::string::npos || first_space == 0)
-		return REQUEST_ERROR;
-	size_t second_space = request_line.find(' ', first_space + 1);
-	if (second_space == std::string::npos || second_space == first_space + 1)
-		return REQUEST_ERROR;
-	if (second_space + 1 >= request_line.size())
-		return REQUEST_ERROR;
-	if (request_line.find(' ', second_space + 1) != std::string::npos)
-		return REQUEST_ERROR;
-	req.method = request_line.substr(0, first_space);
-	req.uri = request_line.substr(first_space + 1, second_space - first_space - 1);
-	req.version = request_line.substr(second_space + 1);
-	if (!is_valid_token(req.method))
-		return REQUEST_ERROR;
-	if (req.version != "HTTP/1.1")
-		return REQUEST_ERROR;
-	return sanitizeRequestUri(req);
+static int parse_request_line(
+    const std::string& request_line,
+    Request& req)
+{
+    if (request_line.empty())
+        return REQUEST_ERROR;
+
+    // 请求行只能用普通空格分隔，不能出现 Tab。
+    if (request_line.find('\t') != std::string::npos)
+        return REQUEST_ERROR;
+
+    // 找 method 后面的第一个普通空格。
+    size_t first_space = request_line.find(' ');
+    if (first_space == std::string::npos || first_space == 0)
+        return REQUEST_ERROR;
+
+    // 找 URI 后面的第二个普通空格。
+    size_t second_space = request_line.find(' ', first_space + 1);
+    if (second_space == std::string::npos
+        || second_space == first_space + 1)
+        return REQUEST_ERROR;
+
+    // 第二个空格后必须有 HTTP version。
+    if (second_space + 1 >= request_line.size())
+        return REQUEST_ERROR;
+
+    // 请求行只能有两个普通空格。
+    if (request_line.find(' ', second_space + 1)
+        != std::string::npos)
+        return REQUEST_ERROR;
+
+    req.method = request_line.substr(0, first_space);
+    req.uri = request_line.substr(
+        first_space + 1,
+        second_space - first_space - 1);
+    req.version = request_line.substr(second_space + 1);
+
+    if (!is_valid_token(req.method))
+        return REQUEST_ERROR;
+
+    if (req.version != "HTTP/1.1")
+        return REQUEST_ERROR;
+
+    return sanitizeRequestUri(req);
 }
 
 /*

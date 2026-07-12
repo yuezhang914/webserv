@@ -13,6 +13,16 @@
 #include <unistd.h>
 #include <vector>
 
+/*
+结构体：ParseResult
+用途：
+    保存一次配置解析测试的完整结果，便于测试函数同时检查解析状态、
+    生成的 ServerConfig 列表和错误输出。
+成员：
+    - ok：Config 是否成功解析；true 表示 config.error 为 0。
+    - servers：解析后生成的全部 ServerConfig 副本。
+    - diagnostics：解析过程中捕获到的标准输出和错误输出。
+*/
 struct ParseResult
 {
     bool ok;
@@ -20,6 +30,17 @@ struct ParseResult
     std::string diagnostics;
 };
 
+/*
+类：TestRunner
+用途：
+    统一记录并输出模块测试结果。
+成员：
+    - _passed：已经通过的断言数量。
+    - _failed：已经失败的断言数量。
+实现逻辑：
+    每次调用 expect() 都根据 condition 增加通过或失败计数，
+    main() 最后通过这些计数打印汇总并决定程序退出状态。
+*/
 class TestRunner
 {
 private:
@@ -27,8 +48,25 @@ private:
     int _failed;
 
 public:
+    /*
+    函数：TestRunner::TestRunner
+    用途：创建一个尚未执行任何测试的测试记录器。
+    实现逻辑：把通过数和失败数都初始化为 0。
+    */
     TestRunner() : _passed(0), _failed(0) {}
 
+    /*
+    函数：TestRunner::expect
+    用途：
+        检查一项测试条件，输出 [PASS] 或 [FAIL]，并更新计数。
+    参数来源：
+        - condition：各测试函数计算出的断言结果。
+        - name：当前测试项的中文名称。
+        - details：失败时附加显示的诊断信息；默认空字符串。
+    实现逻辑：
+        condition 为 true 时增加 _passed；否则增加 _failed，
+        并在 details 非空时把失败原因输出在测试名称后面。
+    */
     void expect(bool condition, const std::string &name,
                 const std::string &details = "")
     {
@@ -47,14 +85,40 @@ public:
         }
     }
 
+    /*
+    函数：TestRunner::passed
+    用途：返回当前已通过的测试数量。
+    返回值：_passed。
+    */
     int passed() const { return _passed; }
+    /*
+    函数：TestRunner::failed
+    用途：返回当前已失败的测试数量。
+    返回值：_failed。
+    */
     int failed() const { return _failed; }
+    /*
+    函数：TestRunner::total
+    用途：返回当前已经执行的测试总数。
+    返回值：通过数与失败数之和。
+    */
     int total() const { return _passed + _failed; }
 };
 
 static std::string g_tmp_dir;
 static int g_file_counter = 0;
 
+/*
+函数：makeTempPath
+用途：
+    为下一条测试配置生成一个不会与前面测试重复的临时文件路径。
+变量来源：
+    - g_tmp_dir：prepareTempDirectory() 创建的本次测试专用目录。
+    - g_file_counter：全局递增编号，每生成一个路径后加 1。
+    - path：用来拼接目录、文件编号和 .conf 后缀。
+返回值：
+    形如 /tmp/webserv_config_module_test_PID/case_0.conf 的路径。
+*/
 static std::string makeTempPath()
 {
     std::ostringstream path;
@@ -62,6 +126,19 @@ static std::string makeTempPath()
     return path.str();
 }
 
+/*
+函数：writeFile
+用途：
+    把一段测试配置文本写入指定临时文件，供 Config 按真实文件方式解析。
+参数来源：
+    - path：makeTempPath() 生成的临时配置文件路径。
+    - content：某条测试构造出的配置文本。
+变量解释：
+    - file：以二进制输出模式打开的 ofstream。
+    - ok：write 完成后文件流是否仍处于正常状态。
+返回值：
+    true 表示文件成功打开并写完；false 表示创建或写入失败。
+*/
 static bool writeFile(const std::string &path, const std::string &content)
 {
     std::ofstream file(path.c_str(), std::ios::out | std::ios::binary);
@@ -73,6 +150,25 @@ static bool writeFile(const std::string &path, const std::string &content)
     return ok;
 }
 
+/*
+函数：parseConfigText
+用途：
+    把内存中的配置字符串写成临时 .conf 文件，再调用真实 Config
+    构造函数解析，并收集解析结果和错误信息。
+参数来源：
+    - content：各测试函数传入的完整配置文本。
+变量解释：
+    - result：保存解析成功状态、servers 和诊断输出。
+    - path：本次测试使用的临时文件路径。
+    - captured：临时接收 std::cout 和 std::cerr 的输出。
+    - old_cerr / old_cout：保存原来的输出缓冲区，测试结束后恢复。
+实现逻辑：
+    1. 创建临时配置文件并写入 content。
+    2. 临时把标准输出和错误输出重定向到 captured。
+    3. 构造 Config，让项目真实 parser 读取该文件。
+    4. 保存 config.error 和 config.getServers()。
+    5. 恢复输出流，删除临时文件并返回 ParseResult。
+*/
 static ParseResult parseConfigText(const std::string &content)
 {
     ParseResult result;
@@ -102,6 +198,16 @@ static ParseResult parseConfigText(const std::string &content)
     return result;
 }
 
+/*
+函数：oneServer
+用途：
+    生成一段带有合法 listen 和 root 的基础 server 配置，
+    并把调用者给出的额外指令插入 server 内部。
+参数来源：
+    - extra：某项测试需要追加的 server 指令或 location block。
+返回值：
+    可直接交给 parseConfigText() 的完整 server 配置字符串。
+*/
 static std::string oneServer(const std::string &extra)
 {
     return "server {\n"
@@ -111,11 +217,33 @@ static std::string oneServer(const std::string &extra)
            "\n}\n";
 }
 
+/*
+函数：oneLocation
+用途：
+    生成一个合法 server，并在其中创建 location /test/，
+    再把调用者给出的指令插入该 location。
+参数来源：
+    - extra：某项 location 测试需要检查的指令文本。
+返回值：
+    包含一个 server 和一个 location 的完整配置字符串。
+*/
 static std::string oneLocation(const std::string &extra)
 {
     return oneServer("location /test/ {\n" + extra + "\n}\n");
 }
 
+/*
+函数：expectValid
+用途：
+    验证一段应该合法的配置确实被 Config 接受。
+参数来源：
+    - runner：main() 中创建的统一测试记录器。
+    - name：当前测试项名称。
+    - config：预期可以成功解析的配置文本。
+实现逻辑：
+    调用 parseConfigText()；result.ok 为 true 时通过，
+    否则把 parser 输出的 diagnostics 作为失败详情。
+*/
 static void expectValid(TestRunner &runner, const std::string &name,
                         const std::string &config)
 {
@@ -124,6 +252,18 @@ static void expectValid(TestRunner &runner, const std::string &name,
                   result.ok ? "" : result.diagnostics);
 }
 
+/*
+函数：expectInvalid
+用途：
+    验证一段应该非法的配置确实被 Config 拒绝。
+参数来源：
+    - runner：main() 中创建的统一测试记录器。
+    - name：当前测试项名称。
+    - config：预期解析失败的配置文本。
+实现逻辑：
+    调用 parseConfigText()；result.ok 为 false 时通过；
+    如果 parser 错误接受了该配置，则记录失败。
+*/
 static void expectInvalid(TestRunner &runner, const std::string &name,
                           const std::string &config)
 {
@@ -132,6 +272,23 @@ static void expectInvalid(TestRunner &runner, const std::string &name,
                   !result.ok ? "" : "parser accepted an invalid config");
 }
 
+/*
+函数：testValidStructureAndStorage
+用途：
+    使用一份包含完整 server/location 指令的合法配置，
+    检查 parser 不仅能成功解析，还把每个值保存到了正确字段。
+参数来源：
+    - runner：main() 创建的 TestRunner。
+主要检查：
+    listen、server_name、root、index、autoindex、max_body_size、
+    allow_methods、upload_path、error_page、location、alias、
+    CGI 映射和 return 重定向等字段。
+实现逻辑：
+    1. 构造完整配置并调用 parseConfigText()。
+    2. 先确认成功生成一个 ServerConfig。
+    3. 逐项检查 server 字段。
+    4. 再检查其中唯一 LocationConfig 的字段。
+*/
 static void testValidStructureAndStorage(TestRunner &runner)
 {
     const std::string full =
@@ -230,6 +387,19 @@ static void testValidStructureAndStorage(TestRunner &runner)
                   "保存 location return 重定向");
 }
 
+/*
+函数：testValidGrammar
+用途：
+    集中验证当前 Config 规格明确支持的合法语法形式。
+参数来源：
+    - runner：main() 创建的 TestRunner。
+覆盖内容：
+    最小配置、紧凑格式、空白和注释、多 server、
+    listen 的三种格式、body size 单位、方法名大小写、
+    root/alias 使用以及合法重定向状态码。
+实现逻辑：
+    每种合法语法分别构造配置，并通过 expectValid() 检查。
+*/
 static void testValidGrammar(TestRunner &runner)
 {
     expectValid(runner, "最小合法配置", oneServer(""));
@@ -285,6 +455,19 @@ static void testValidGrammar(TestRunner &runner)
                 oneLocation("return 399 /target;"));
 }
 
+/*
+函数：testInvalidTopLevelAndBlocks
+用途：
+    验证顶层结构、server/location block 和分号规则中的非法情况
+    都会在 Config 阶段被拒绝。
+参数来源：
+    - runner：main() 创建的 TestRunner。
+覆盖内容：
+    空配置、http 外层、顶层 directive、缺失或多余大括号、
+    block 嵌套、孤立符号、缺少分号、非法 location 开头及引号。
+实现逻辑：
+    每个错误场景分别构造配置，并通过 expectInvalid() 检查。
+*/
 static void testInvalidTopLevelAndBlocks(TestRunner &runner)
 {
     expectInvalid(runner, "空配置文件被拒绝", "");
@@ -335,6 +518,20 @@ static void testInvalidTopLevelAndBlocks(TestRunner &runner)
                   "server { listen 8080; root 'srv/www'; }\n");
 }
 
+/*
+函数：testInvalidServerDirectives
+用途：
+    验证 server 级指令的参数数量、格式、取值范围和重复规则。
+参数来源：
+    - runner：main() 创建的 TestRunner。
+覆盖内容：
+    未知指令、listen/IP/端口、server_name、root、index、
+    autoindex、allow_methods、upload_path、error_page 和
+    max_body_size 的严格错误场景。
+实现逻辑：
+    针对每一类非法 server 指令生成独立配置，
+    通过 expectInvalid() 确认 parser 拒绝它。
+*/
 static void testInvalidServerDirectives(TestRunner &runner)
 {
     expectInvalid(runner, "未知 server directive 被拒绝",
@@ -451,6 +648,19 @@ static void testInvalidServerDirectives(TestRunner &runner)
                   "server { listen 8080; root a; max_body_size 18446744073709551615G; }\n");
 }
 
+/*
+函数：testInvalidLocationDirectives
+用途：
+    验证 location 级指令的参数数量、互斥关系、重复规则和取值范围。
+参数来源：
+    - runner：main() 创建的 TestRunner。
+覆盖内容：
+    root/alias 互斥、index、autoindex、allow_methods、
+    upload_path、max_body_size、cgi_extension 和 return。
+实现逻辑：
+    使用 oneLocation() 构造每个错误场景，
+    再通过 expectInvalid() 检查 Config 是否正确拒绝。
+*/
 static void testInvalidLocationDirectives(TestRunner &runner)
 {
     expectInvalid(runner, "未知 location directive 被拒绝",
@@ -536,6 +746,21 @@ static void testInvalidLocationDirectives(TestRunner &runner)
                   oneLocation("return 400 /a;"));
 }
 
+/*
+函数：testRouteUtils
+用途：
+    验证 ConfigRouteUtils 中 location 最长前缀匹配和 body 限制继承逻辑。
+参数来源：
+    - runner：main() 创建的 TestRunner。
+变量解释：
+    - config：包含多个相交 location 的测试配置。
+    - server：解析得到的唯一 ServerConfig。
+    - use_location：findMatchingLocation() 的输出标志。
+    - loc：当前 URI 匹配到的 LocationConfig 指针。
+主要检查：
+    普通匹配、最长匹配、忽略 query string、无匹配返回 NULL，
+    以及 location body size 覆盖或继承 server 限制。
+*/
 static void testRouteUtils(TestRunner &runner)
 {
     const std::string config =
@@ -586,6 +811,23 @@ static void testRouteUtils(TestRunner &runner)
                   "server 指针为空时返回安全默认 body limit");
 }
 
+/*
+函数：testObjectCopySemantics
+用途：
+    验证 LocationConfig 和 ServerConfig 的拷贝构造、赋值运算符
+    是否完整复制普通配置，同时不复制 socket fd 所有权。
+参数来源：
+    - runner：main() 创建的 TestRunner。
+变量解释：
+    - original_loc / original_server：预先填充字段的源对象。
+    - copied_loc / copied_server：通过拷贝构造得到的对象。
+    - assigned_loc / assigned_server：通过 operator= 得到的对象。
+实现逻辑：
+    1. 填充原始 location 并检查拷贝与赋值结果。
+    2. 填充原始 server 并检查普通字段。
+    3. 确认 copied_server 和 assigned_server 的 socketFd 都为 -1，
+       防止两个对象重复拥有并关闭同一个 fd。
+*/
 static void testObjectCopySemantics(TestRunner &runner)
 {
     LocationConfig original_loc;
@@ -671,6 +913,19 @@ static void testObjectCopySemantics(TestRunner &runner)
     original_server.socketFd = -1;
 }
 
+/*
+函数：prepareTempDirectory
+用途：
+    为本次 Config 模块测试创建一个独立临时目录。
+变量解释：
+    - path：使用当前进程 PID 拼出的目录路径。
+    - g_tmp_dir：保存最终临时目录，供 makeTempPath() 使用。
+实现逻辑：
+    调用 mkdir() 创建权限为 0700 的目录；
+    创建成功或目录已经存在都视为可用。
+返回值：
+    true 表示临时目录可用，false 表示创建失败。
+*/
 static bool prepareTempDirectory()
 {
     std::ostringstream path;
@@ -681,11 +936,34 @@ static bool prepareTempDirectory()
     return errno == EEXIST;
 }
 
+/*
+函数：cleanupTempDirectory
+用途：
+    测试结束后删除 prepareTempDirectory() 创建的临时目录。
+实现逻辑：
+    所有临时配置文件已经由 parseConfigText() 单独删除，
+    因此这里直接调用 rmdir() 删除空目录。
+*/
 static void cleanupTempDirectory()
 {
     rmdir(g_tmp_dir.c_str());
 }
 
+/*
+函数：main
+用途：
+    Config 严格模块测试的程序入口，按固定顺序执行全部测试组并输出汇总。
+实现逻辑：
+    1. 创建本次测试使用的临时目录。
+    2. 创建 TestRunner。
+    3. 依次执行合法配置、非法配置、路由工具和拷贝语义测试。
+    4. 清理临时目录。
+    5. 输出 TOTAL、PASS 和 FAIL。
+返回值：
+    - 0：全部测试通过。
+    - 1：至少一项测试失败。
+    - 2：无法创建临时测试目录，测试未能开始。
+*/
 int main()
 {
     if (!prepareTempDirectory())

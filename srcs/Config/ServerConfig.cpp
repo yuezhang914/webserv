@@ -162,87 +162,138 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
     }
     else if (directive == "listen")
     {
+        // 检查 listen 是否刚好只有一个参数。
+        // 合法：listen 8080;
+        // 非法：listen; 或 listen 127.0.0.1 8080;
         if (values.size() != 1)
         {
             std::cerr << "Invalid listen directive" << std::endl;
             return ERROR;
         }
 
+        // 检查当前 server 是否已经出现过 listen 指令。
+        // 本项目规定一个 server 只能配置一次 listen，
+        // countport 大于等于 1 表示之前已经成功解析过 listen。
         if (srv->countport >= 1)
         {
-            std::cerr << "Invalid number of port" << std::endl;
+            std::cerr << "Error: Duplicate listen directive in server" << std::endl;
             return ERROR;
         }
 
+        // 取出 listen 的唯一参数，并准备分别保存 IP 和端口。
+        // value 可能是：
+        // 8080
+        // 127.0.0.1
+        // 127.0.0.1:8080   
         std::string value = values[0];
         std::string ip;
         std::string port_str;
+
+        // 查找冒号的位置，用来判断参数是否同时包含 IP 和端口。
         size_t colon_pos = value.find(':');
 
+        // 参数中没有冒号时，它可能是“只写 IP”或“只写端口”。
         if (colon_pos == std::string::npos)
         {
+            // 暂时按点号拆分参数。
+            // IPv4 通常由四段组成，例如 127.0.0.1。
             std::vector<std::string> parts = split(value, '.');
+
+            // 如果按点号能拆成四段，先把它当作 IPv4，
+            // 后面再由 is_valid_ipv4() 严格检查；
+            // 没有显式端口时使用 DEFAULT_PORT。
             if (parts.size() == 4)
             {
                 ip = value;
                 port_str = DEFAULT_PORT;
             }
+            // 如果不是四段，则把整个参数当作端口。
+            // IP 留空，后面会转换成监听所有本机 IPv4 接口。
             else
             {
                 port_str = value;
                 ip = "";
             }
         }
+        // 参数中存在冒号时，按照“IP:端口”的格式拆分。
         else
         {
             ip = value.substr(0, colon_pos);
             port_str = value.substr(colon_pos + 1);
         }
 
+        // 用户显式填写了 IP 时，先检查 IPv4 格式是否合法。
         if (!ip.empty())
         {
+            // 拒绝段数错误、非数字、超过 255、前导零、
+            // 开头或结尾带点号等非法 IPv4。
             if (is_valid_ipv4(ip.c_str()) == ERROR)
             {
-                std::cerr << "Invalid IP in listen directive: " << ip << std::endl;
+                std::cerr << "Invalid IP in listen directive: "
+                          << ip << std::endl;
                 return ERROR;
             }
+
+            // IP 校验成功后，保存到当前 ServerConfig。
             srv->host = ip;
         }
+        // 用户没有填写 IP 时，表示监听本机所有可用 IPv4 接口。
         else
         {
             srv->host = "INADDR_ANY";
         }
 
+        // 检查端口字符串是否为空。
+        // 例如 listen 127.0.0.1:; 会得到空端口，必须拒绝。
         if (port_str.empty())
         {
-            std::cerr << "Invalid empty port in listen directive" << std::endl;
+            std::cerr << "Invalid empty port in listen directive"
+                      << std::endl;
             return ERROR;
         }
+
         size_t port_index = 0;
+
+        // 逐个检查端口字符串中的字符，确保端口只由数字组成。
+        // 这样会拒绝 +80、-80、80abc、80.5 等格式。
         while (port_index < port_str.size())
         {
+            // 当前字符不是数字时，说明端口格式非法。
             if (!std::isdigit(static_cast<unsigned char>(port_str[port_index])))
             {
-                std::cerr << "Invalid port in listen directive: " << port_str << std::endl;
+                std::cerr << "Invalid port in listen directive: "
+                          << port_str << std::endl;
                 return ERROR;
             }
+
             port_index++;
         }
 
         char *endptr;
+
+        // 把已经通过字符检查的端口字符串转换成长整数。
         long parsed_port = strtol(port_str.c_str(), &endptr, 10);
+
+        // 检查字符串是否被完整转换，并检查端口范围必须是 1 到 65535。
+        // *endptr != '\0'：说明转换过程中遇到了未处理字符。
+        // parsed_port <= 0：拒绝端口 0 和负数。
+        // parsed_port > 65535：超过 IPv4/IPv6 端口最大值。
         if (*endptr != '\0' || parsed_port <= 0 || parsed_port > 65535)
         {
-            std::cerr << "Invalid port in listen directive: " << port_str << std::endl;
+            std::cerr << "Invalid port in listen directive: "
+                      << port_str << std::endl;
             return ERROR;
         }
+
+        // 端口格式和值域都合法后，保存到当前 ServerConfig。
         srv->port = static_cast<int>(parsed_port);
 
-        /* 🎯 【修改点 1：调整计数时序，落闸防御状态污染】 */
-        /* 解释：将 srv->countport++ 彻底移到本分支所有格式与值域校验通过的最下行，
-                确保在遭遇非法端口格式投毒（如 999999）直接强退时，不会错误改写、污染全局的状态计数位 */
+        // 只有整个 listen 指令全部解析成功后才增加计数。
+        // 这样非法 listen 不会错误地把 countport 改成 1，
+        // 也不会影响后续配置状态。
         srv->countport++;
     }
+
     else if (directive == "server_name")
     {
         /* 🛠️ 【修改点：server_name 不再静默覆盖】
@@ -289,7 +340,7 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
             std::cerr << "Invalid error_page directive" << std::endl;
             return ERROR;
         }
-        /* 【修改点 3：锁定尾部路径，完美兼容多错误码一对多映射】 */
+        /* 【修改点 3：锁定尾部路径，完美兼容多错误码多对一映射】 */
         /* 解释：彻底推翻了“状态码与路径必然单对单成对出现”的旧版误区。物理锁定 values[values.size() - 1] 必然是页面路径，
                 再通过循环把前面由于多码聚合（如 error_page 404 403 /error.html）切出来的全部错误码安全地灌入状态机，封杀了路径错位乱码隐患 */
         std::string error_path = values[values.size() - 1];
@@ -300,6 +351,11 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
         }
         for (size_t i = 0; i < values.size() - 1; ++i)
         {
+    // String to Long（将字符串转换为长整型）有三个核心参数：
+    // values[i].c_str()（原材料）：把宿主的 std::string 字符串转换成传统的 C 风格字符串（const char*），喂给函数。
+    // &endptr（安检员）：注意这里加了 & 取地址符，意思是把我们刚才准备好的“侦察兵”的对讲机地址交给函数。
+    //                  函数在转换结束时，会往 endptr 里写入不合法字符的位置。
+    // 10（进制数）：明确告诉编译器：“我是按十进制来算数字的（0-9）”。
             char *endptr;
             int code = strtol(values[i].c_str(), &endptr, 10);
             if (*endptr != '\0' || code < 300 || code > 599)
@@ -389,23 +445,22 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
     6. autoindex=false，默认不生成目录列表。
     7. 清空 server_names/error_pages/locations/allow_methods 等容器。
 */
-ServerConfig::ServerConfig() :
-    port(80),
-    countport(0),
-    host("127.0.0.1"),
-    server_names(),        // std::vector 默认构造，可以不写或留空
-    root(""),
-    error_pages(),         // std::map 默认构造
-    max_body_size(MAX_BODY_SIZE),
-    has_body_size(false), // 默认没有配置 max_body_size
-    locations(),           // std::vector 默认构造
-    index(),               // 多首页 vector 默认纯净初始化
-    upload_path(""),
-    allow_methods(),       // std::set 默认构造
-    socketFd(-1),          // 必须是 -1 锁死
-    has_root(false),
-    has_autoindex(false),
-    autoindex(false)       // 🛠️ 修改点：显式初始化 server 默认 autoindex，避免随机值。
+ServerConfig::ServerConfig() : port(80),
+                               countport(0),
+                               host("127.0.0.1"),
+                               server_names(), // std::vector 默认构造，可以不写或留空
+                               root(""),
+                               error_pages(), // std::map 默认构造
+                               max_body_size(MAX_BODY_SIZE),
+                               has_body_size(false), // 默认没有配置 max_body_size
+                               locations(),          // std::vector 默认构造
+                               index(),              // 多首页 vector 默认纯净初始化
+                               upload_path(""),
+                               allow_methods(), // std::set 默认构造
+                               socketFd(-1),    // 必须是 -1 锁死
+                               has_root(false),
+                               has_autoindex(false),
+                               autoindex(false) // 🛠️ 修改点：显式初始化 server 默认 autoindex，避免随机值。
 {
     // 🎯 如果你采用了方案 A 的状态锁，并且把它加在头文件最后，请确保它在列表里也老老实实呆在最后
 }

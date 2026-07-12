@@ -273,6 +273,56 @@ bool Config::parseDirectiveTokens(const std::vector<ConfigToken> &tokens, size_t
     return ERROR;
 }
 
+// 函数：Config::parseLocationBlock
+// 用途：
+//     解析一个完整的 location { ... } 配置块，并把其中的配置保存到当前
+//     ServerConfig 的 locations 数组中。
+// 参数来源：
+//     - tokens：
+//       tokenizeConfig() 生成的完整配置 token 流。
+//       调用本函数时，tokens[index] 应当正好是 "location"。
+//     - index：
+//       当前解析位置的引用参数。
+//       调用时指向 "location"；
+//       解析成功后移动到该 location 右大括号 "}" 后面的 token。
+//     - server：
+//       parseServerBlock() 当前正在填充的 ServerConfig。
+//       解析出的 LocationConfig 最终会加入 server.locations。
+//     - current_location_paths：
+//       当前 server 内已经出现过的 location path 集合。
+//       用于拒绝同一个 server 中重复的 location 路径。
+// 变量解释：
+//     - target_path：
+//       location 后面的 URI 路径前缀，例如 "/"、"/upload/"、"/cgi/"。
+//     - current_loc_idx：
+//       新建 LocationConfig 在 server.locations 中的下标。
+//       后续始终通过下标重新取得对象，避免 vector 扩容后旧引用失效。
+//     - current_val：
+//       当前正在检查的 token 内容，用来识别右大括号、嵌套 block
+//       或普通 directive。
+//     - directive_tokens：
+//       保存一条普通 location 指令及其参数。
+//       例如 index index.html; 会被保存为 ["index", "index.html"]。
+// 实现逻辑：
+//     1. 检查 location 后面至少还有 path 和左大括号。
+//     2. 检查 path 不是 {、}、; 这类结构符号。
+//     3. 检查 path 后面必须紧跟左大括号 "{"。
+//     4. 检查 location path 必须以 "/" 开头。
+//     5. 使用 current_location_paths 检查当前 server 内是否存在重复 path。
+//     6. 在 server.locations 中创建新的 LocationConfig，并保存 path。
+//     7. 记录新 location 的下标，避免长期持有可能因 vector 扩容而失效的引用。
+//     8. 跳过 location、path、"{"，开始解析 block 内部内容。
+//     9. 遇到 "}" 时结束当前 location，并把 index 移到右大括号之后。
+//     10. location 内禁止继续嵌套 location 或 server block。
+//     11. 普通指令先由 parseDirectiveTokens() 读取到分号，
+//         再由 parseDirective() 分发给 parseLocationDirective()。
+//     12. 如果读到文件末尾仍没有遇到右大括号，返回未闭合 block 错误。
+// 返回值：
+//     - SUCCESS：
+//       location block 语法正确，所有指令成功写入 LocationConfig。
+//     - ERROR：
+//       location 开头格式错误、path 非法、path 重复、出现嵌套 block、
+//       directive 非法、缺少分号或缺少右大括号。
 bool Config::parseLocationBlock(const std::vector<ConfigToken> &tokens, size_t &index, ServerConfig &server, std::set<std::string> &current_location_paths)
 {
     // 【防呆检查 1】此时 index 指向 "location"。检查后面是不是至少还有两个词（比如 "/api" 和 "{"）
@@ -564,6 +614,8 @@ unsigned long Config::parseSize(const std::string &size_str) const
 
     std::string num_str = size_str;
     char unit = '\0';
+    // 先数数 num_str 里面一共有几个字（length），把这个数减去 1 得到最后一个字的座位号，
+    // 然后用方括号 [] 去把那个座位上的字符揪出来，存到 last 变量里。
     char last = num_str[num_str.length() - 1];
     if (std::isalpha(static_cast<unsigned char>(last)))
     {
@@ -593,6 +645,9 @@ unsigned long Config::parseSize(const std::string &size_str) const
             return static_cast<unsigned long>(ERROR_PARSE_SIZE);
         }
         unsigned long digit = static_cast<unsigned long>(num_str[index] - '0');
+//    ULONG_MAX：这是 C++ 里的一个大魔王常量，代表 unsigned long（无符号长整型）所能表示的最大、最极限的数字。
+//    在 64 位系统上，它是一个巨大的 20 位数（$18446744073709551615$）。
+//    10UL：就是数字 10，后面的 UL 是告诉编译器“把这个 10 当作 unsigned long 类型来看待”
         if (num > (ULONG_MAX - digit) / 10UL)
         {
             std::cerr << "Error: Size value overflows unsigned long: " << size_str << std::endl;
