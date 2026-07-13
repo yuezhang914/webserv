@@ -1,7 +1,10 @@
 #include "RequestParser.hpp"
 #include "ServerConfig.hpp"
 #include "LocationConfig.hpp"
+#include <climits>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <string>
 
 static int g_total = 0;
@@ -54,8 +57,8 @@ static int parseRaw(const std::string& raw, const ServerConfig& server,
 函数：makeBaseServer
 用途：创建所有 Request 测试共用的最小 ServerConfig。
 参数：无。
-返回值：返回 server body limit 为 5 字节，并带两个 location 覆盖规则的配置对象。
-实现逻辑：server 默认限制设为 5；/upload/ 放宽到 10；/upload/images/ 收紧到 3，用于验证最长前缀匹配。
+返回值：返回 server body limit 为 5 字节，并带三个 location 覆盖规则的配置对象。
+实现逻辑：server 默认限制设为 5；/upload/ 放宽到 10；/upload/images/ 收紧到 3；/api 收紧到 2，用于验证最长前缀和 location 路径边界。
 */
 static ServerConfig makeBaseServer()
 {
@@ -77,6 +80,13 @@ static ServerConfig makeBaseServer()
     images.has_body_size = true;
     server.locations.push_back(images);
 
+    // 不以 / 结尾的 location，用于验证 /api 不能误匹配 /api-other。
+    LocationConfig api;
+    api.path = "/api";
+    api.max_body_size = 2;
+    api.has_body_size = true;
+    server.locations.push_back(api);
+
     return server;
 }
 
@@ -85,7 +95,7 @@ static ServerConfig makeBaseServer()
 用途：直接测试 Request.cpp 的 to_lower() 与 sanitizeRequestUri() 公共工具。
 参数：无。
 返回值：无；通过 check() 累计结果。
-实现逻辑：先验证大小写转换，再分别构造合法 query、fragment、反斜杠、原始路径穿越和百分号编码路径。
+实现逻辑：先验证大小写转换，再分别构造合法 query、fragment、反斜杠、路径穿越，以及合法和畸形 percent-encoding。
 */
 static void testStringAndUriHelpers()
 {
@@ -113,6 +123,18 @@ static void testStringAndUriHelpers()
 
     req.uri = "/safe%2Fsecret";
     check(sanitizeRequestUri(req) == REQUEST_ERROR, "编码斜杠被拒绝");
+
+    req.uri = "/safe/file%20name.txt";
+    check(sanitizeRequestUri(req) == REQUEST_OK, "合法 %20 percent-encoding 被接受");
+
+    req.uri = "/safe/file%";
+    check(sanitizeRequestUri(req) == REQUEST_ERROR, "末尾孤立百分号被拒绝");
+
+    req.uri = "/safe/file%2";
+    check(sanitizeRequestUri(req) == REQUEST_ERROR, "不足两位的 percent-encoding 被拒绝");
+
+    req.uri = "/safe/file%ZZ";
+    check(sanitizeRequestUri(req) == REQUEST_ERROR, "非十六进制 percent-encoding 被拒绝");
 
     req.uri = "http://example.com/file";
     check(sanitizeRequestUri(req) == REQUEST_ERROR, "非 / 开头的 absolute-form URI 被拒绝");
@@ -185,6 +207,40 @@ static void testRequestLineRules(const ServerConfig& server)
           "严格模式：tab 不能代替 request-line 的 SP");
     check(parseRaw("GET  / HTTP/1.1\r\nHost: localhost\r\n\r\n", server, req, consumed) == REQUEST_ERROR,
           "严格模式：request-line 多余分隔空格被拒绝");
+    check(parseRaw(" GET / HTTP/1.1\r\nHost: localhost\r\n\r\n", server, req, consumed) == REQUEST_ERROR,
+          "request-line 开头空格被拒绝");
+    check(parseRaw("GET / HTTP/1.1 \r\nHost: localhost\r\n\r\n", server, req, consumed) == REQUEST_ERROR,
+          "request-line 行尾空格被拒绝");
+}
+
+/*
+函数：testLineEndingRules
+用途：验证 request-line、header 和增量读取边界必须严格使用 CRLF。
+参数：server 是当前测试配置。
+返回值：无。
+实现逻辑：
+    1. LF-only 请求和混合 CRLF/LF 请求必须返回 REQUEST_ERROR。
+    2. header 中裸 CR 必须返回 REQUEST_ERROR。
+    3. 当前 buffer 最后只有一个 '\r' 时可能只是 CRLF 尚未收全，应返回 REQUEST_INCOMPLETE。
+*/
+static void testLineEndingRules(const ServerConfig& server)
+{
+    beginGroup("CRLF 行结束");
+    Request req;
+    size_t consumed = 0;
+
+    check(parseRaw("GET / HTTP/1.1\nHost: localhost\n\n",
+                   server, req, consumed) == REQUEST_ERROR,
+          "LF-only request 被拒绝");
+    check(parseRaw("GET / HTTP/1.1\r\nHost: localhost\n\r\n",
+                   server, req, consumed) == REQUEST_ERROR,
+          "混合 CRLF 与裸 LF 被拒绝");
+    check(parseRaw("GET / HTTP/1.1\rHost: localhost\r\n\r\n",
+                   server, req, consumed) == REQUEST_ERROR,
+          "request-line 后裸 CR 被拒绝");
+    check(parseRaw("GET / HTTP/1.1\r\nHost: localhost\r",
+                   server, req, consumed) == REQUEST_INCOMPLETE,
+          "buffer 末尾单独 CR 被视为尚未收完整");
 }
 
 /*
@@ -192,7 +248,7 @@ static void testRequestLineRules(const ServerConfig& server)
 用途：验证 Host 必填、header key 合法性、关键 header 重复检查和 value 控制字符防护。
 参数：server 是当前测试配置。
 返回值：无。
-实现逻辑：构造缺 Host、空 Host、无冒号、空 key、空格 key、重复 Host/Content-Length/Transfer-Encoding、非法 Host 和控制字符 value。
+实现逻辑：构造缺失/重复关键 header、非法 key/value，并检查 hostname、IPv4、方括号 IP literal、端口范围和危险 authority 字符。
 */
 static void testHeaderRules(const ServerConfig& server)
 {
@@ -218,6 +274,28 @@ static void testHeaderRules(const ServerConfig& server)
           "严格模式：重复 Transfer-Encoding 被拒绝");
     check(parseRaw("GET / HTTP/1.1\r\nHost: bad host\r\n\r\n", server, req, consumed) == REQUEST_ERROR,
           "严格模式：含空格的非法 Host value 被拒绝");
+    check(parseRaw("GET / HTTP/1.1\r\nHost: localhost:8080\r\n\r\n", server, req, consumed) == REQUEST_OK,
+          "Host 支持 hostname:port");
+    check(parseRaw("GET / HTTP/1.1\r\nHost: 127.0.0.1:8080\r\n\r\n", server, req, consumed) == REQUEST_OK,
+          "Host 支持 IPv4:port");
+    check(parseRaw("GET / HTTP/1.1\r\nHost: [::1]:8080\r\n\r\n", server, req, consumed) == REQUEST_OK,
+          "Host 支持方括号 IP literal 与端口");
+    check(parseRaw("GET / HTTP/1.1\r\nHost: localhost:abc\r\n\r\n", server, req, consumed) == REQUEST_ERROR,
+          "Host 非数字端口被拒绝");
+    check(parseRaw("GET / HTTP/1.1\r\nHost: localhost:0\r\n\r\n", server, req, consumed) == REQUEST_ERROR,
+          "Host 端口 0 被拒绝");
+    check(parseRaw("GET / HTTP/1.1\r\nHost: localhost:65536\r\n\r\n", server, req, consumed) == REQUEST_ERROR,
+          "Host 超范围端口被拒绝");
+    check(parseRaw("GET / HTTP/1.1\r\nHost: :8080\r\n\r\n", server, req, consumed) == REQUEST_ERROR,
+          "Host 主机部分为空被拒绝");
+    check(parseRaw("GET / HTTP/1.1\r\nHost: ::1\r\n\r\n", server, req, consumed) == REQUEST_ERROR,
+          "Host 中未加方括号的 IPv6 形式被拒绝");
+    check(parseRaw("GET / HTTP/1.1\r\nHost: example.com/path\r\n\r\n", server, req, consumed) == REQUEST_ERROR,
+          "Host 中路径字符被拒绝");
+    check(parseRaw("GET / HTTP/1.1\r\nHost: user@example.com\r\n\r\n", server, req, consumed) == REQUEST_ERROR,
+          "Host 中 userinfo 被拒绝");
+    check(parseRaw("GET / HTTP/1.1\r\nHost: [::1\r\n\r\n", server, req, consumed) == REQUEST_ERROR,
+          "Host 未闭合方括号被拒绝");
 
     std::string control = "GET / HTTP/1.1\r\nHost: localhost\r\nX-Test: a";
     control.push_back(static_cast<char>(1));
@@ -280,6 +358,17 @@ static void testContentLengthRules(const ServerConfig& server)
           "body 恰好等于 server limit 合法");
     check(parseRaw("POST /a HTTP/1.1\r\nHost: localhost\r\nContent-Length: 6\r\n\r\n", server, req, consumed) == ERROR_MAX_BODY_LENGTH,
           "Content-Length 超过 server limit 提前返回 413 状态");
+
+    ServerConfig huge = server;
+    huge.max_body_size = static_cast<unsigned long>(-1);
+    std::ostringstream max_length;
+    max_length << static_cast<size_t>(-1);
+    std::string huge_raw =
+        "POST /a HTTP/1.1\r\nHost: localhost\r\nContent-Length: ";
+    huge_raw += max_length.str();
+    huge_raw += "\r\n\r\n";
+    check(parseRaw(huge_raw, huge, req, consumed) == REQUEST_INCOMPLETE,
+          "极大 Content-Length 不会让 body_start + length 溢出并误判完整");
 }
 
 /*
@@ -287,7 +376,7 @@ static void testContentLengthRules(const ServerConfig& server)
 用途：验证 server 默认限制、location 覆盖、最长前缀 location 和 query string 去除。
 参数：server 带 /upload/ 与 /upload/images/ 两级限制。
 返回值：无。
-实现逻辑：向 /upload/ 发送 6 字节应通过；向更具体 /upload/images/ 发送 4 字节应被拒绝；带 query 仍使用 /upload/ 限制。
+实现逻辑：验证 /upload/ 与 /upload/images/ 的最长匹配、query 去除，以及不以斜杠结尾的 /api 只能匹配自身或 /api/...，不能误匹配 /api-other。
 */
 static void testEffectiveBodyLimits(const ServerConfig& server)
 {
@@ -301,6 +390,10 @@ static void testEffectiveBodyLimits(const ServerConfig& server)
           "最长前缀 /upload/images/ 的 3 字节限制优先");
     check(parseRaw("POST /upload/a?x=1 HTTP/1.1\r\nHost: localhost\r\nContent-Length: 6\r\n\r\n123456", server, req, consumed) == REQUEST_OK,
           "location 匹配会忽略 query string");
+    check(parseRaw("POST /api/item HTTP/1.1\r\nHost: localhost\r\nContent-Length: 3\r\n\r\n", server, req, consumed) == ERROR_MAX_BODY_LENGTH,
+          "/api/item 正确使用 /api 的 2 字节限制");
+    check(parseRaw("POST /api-other HTTP/1.1\r\nHost: localhost\r\nContent-Length: 3\r\n\r\nabc", server, req, consumed) == REQUEST_OK,
+          "/api 不会误匹配 /api-other");
 }
 
 /*
@@ -308,7 +401,7 @@ static void testEffectiveBodyLimits(const ServerConfig& server)
 用途：覆盖 chunked body 的正常、多 chunk、大小写十六进制、extension、trailer、不完整和错误格式。
 参数：server 是当前测试配置。
 返回值：无。
-实现逻辑：逐个构造 chunked raw request，检查解码后的 req.body、consumed、错误状态和提前 body-limit 判断。
+实现逻辑：逐个构造 chunked raw request，检查解码、framing、extension、size-line/trailer 上限、严格 CRLF、禁止 trailer 字段及长度运算溢出。
 */
 static void testChunkedRules(const ServerConfig& server)
 {
@@ -350,6 +443,55 @@ static void testChunkedRules(const ServerConfig& server)
           "trailer 未结束返回 REQUEST_INCOMPLETE");
     check(parseRaw("POST /upload/a HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nBad Trailer: x\r\n\r\n", server, req, consumed) == REQUEST_ERROR,
           "非法 trailer key 被拒绝");
+
+    std::string long_chunk_line =
+        "POST /upload/a HTTP/1.1\r\nHost: localhost\r\n"
+        "Transfer-Encoding: chunked\r\n\r\n";
+    long_chunk_line += std::string(1100, 'A');
+    check(parseRaw(long_chunk_line, server, req, consumed) == REQUEST_ERROR,
+          "未结束且超过上限的 chunk-size 行被拒绝");
+    long_chunk_line += "\r\n";
+    check(parseRaw(long_chunk_line, server, req, consumed) == REQUEST_ERROR,
+          "已经结束但超过上限的 chunk-size 行被拒绝");
+
+    check(parseRaw("POST /upload/a HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n1;bad ext\r\na\r\n0\r\n\r\n", server, req, consumed) == REQUEST_ERROR,
+          "chunk extension 中空格被拒绝");
+
+    ServerConfig huge = server;
+    huge.max_body_size = static_cast<unsigned long>(-1);
+    std::ostringstream max_chunk;
+    max_chunk << std::hex << static_cast<size_t>(-1);
+    std::string overflow_chunk =
+        "POST /a HTTP/1.1\r\nHost: localhost\r\n"
+        "Transfer-Encoding: chunked\r\n\r\n"
+        "1\r\na\r\n";
+    overflow_chunk += max_chunk.str();
+    overflow_chunk += "\r\n";
+    check(parseRaw(overflow_chunk, huge, req, consumed) == ERROR_MAX_BODY_LENGTH,
+          "累计 chunk 大小使用防溢出减法检查");
+
+    std::string long_trailer =
+        "POST /upload/a HTTP/1.1\r\nHost: localhost\r\n"
+        "Transfer-Encoding: chunked\r\n\r\n0\r\nX-Fill: ";
+    long_trailer += std::string(8300, 'a');
+    check(parseRaw(long_trailer, server, req, consumed) == REQUEST_ERROR,
+          "未结束且超过上限的 trailer 被拒绝");
+    long_trailer += "\r\n\r\n";
+    check(parseRaw(long_trailer, server, req, consumed) == REQUEST_ERROR,
+          "已结束但超过上限的 trailer 被拒绝");
+
+    check(parseRaw("POST /upload/a HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nX-Test: a\n\n", server, req, consumed) == REQUEST_ERROR,
+          "trailer 中裸 LF 被拒绝");
+    check(parseRaw("POST /upload/a HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nContent-Length: 1\r\n\r\n", server, req, consumed) == REQUEST_ERROR,
+          "trailer 不能重新定义 Content-Length");
+
+    std::string trailer_control =
+        "POST /upload/a HTTP/1.1\r\nHost: localhost\r\n"
+        "Transfer-Encoding: chunked\r\n\r\n0\r\nX-Test: a";
+    trailer_control.push_back(static_cast<char>(1));
+    trailer_control += "b\r\n\r\n";
+    check(parseRaw(trailer_control, server, req, consumed) == REQUEST_ERROR,
+          "trailer value 中控制字符被拒绝");
 }
 
 /*
@@ -397,6 +539,7 @@ int main()
     testStringAndUriHelpers();
     testValidRequestAndReset(server);
     testRequestLineRules(server);
+    testLineEndingRules(server);
     testHeaderRules(server);
     testHeaderSizeLimit(server);
     testContentLengthRules(server);
