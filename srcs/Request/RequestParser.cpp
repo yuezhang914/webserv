@@ -355,7 +355,7 @@ static int find_chunked_trailer_end(const std::string& buffer, size_t pos, size_
 	if (trailer_end == std::string::npos)
 		return REQUEST_INCOMPLETE;
 	std::istringstream trailer_stream(buffer.substr(pos, trailer_end - pos));
-	std::string line;
+	std::string line  ;
 	while (std::getline(trailer_stream, line)) {
 		if (!line.empty() && line[line.size() - 1] == '\r')
 			line.erase(line.size() - 1);
