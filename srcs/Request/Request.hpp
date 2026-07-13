@@ -51,12 +51,12 @@ struct Request {
 输入：ServerManager/ClientIO 已经读入的 raw buffer、输出 Request、当前 client 对应的 ServerConfig、已消费字节数 consumed。
 输出：REQUEST_OK、REQUEST_INCOMPLETE、REQUEST_ERROR 或 ERROR_MAX_BODY_LENGTH。
 实现逻辑：本函数不调用 recv，也不修改传入 buffer；它只判断 buffer 里是否已经包含一个完整且合法的 HTTP/1.1 request。成功时填好 req，并把 consumed 设置成本次请求占用的字节数，调用方再从自己的 _client_buffers[clientFd] 中 erase(consumed)。
-格式检查：会严格检查 request line 三段格式、Host 必填、header key 合法性、重复 Host/Content-Length、Content-Length 纯数字、Transfer-Encoding 只支持 chunked、header 总大小、URI 路径穿越、chunked trailer 与 body size。
+格式检查：会严格检查 request line 三段格式、CRLF 行结束、Host 必填及 authority 格式、header key/value、重复 Host/Content-Length/Transfer-Encoding、Content-Length 纯数字、Transfer-Encoding 只支持 chunked、header/chunk-size/trailer 大小、URI percent-encoding 与路径穿越、chunked framing 和 body size。
 状态区分：格式错误返回 REQUEST_ERROR；请求未收完整返回 REQUEST_INCOMPLETE；body 数字合法但超过当前 server/location max_body_size 时返回 ERROR_MAX_BODY_LENGTH。
 */
 int parseRequestBuffer(const std::string& buffer, Request& req, const ServerConfig* server, size_t& consumed);
 
-/* 检查 URI 是否安全：必须以 / 开头，不能有控制字符、反斜杠、%00、%2e、%2f、../ 等路径穿越风险。 */
+/* 检查 URI 是否安全：必须以 / 开头；percent-encoding 必须是 %XX；不能有控制字符、反斜杠、%00、%2e、%2f、../ 等路径穿越风险。 */
 int sanitizeRequestUri(Request& req);
 /* 把字符串转成小写。主要用于 header key 和 Host/server_name 比较，避免大小写差异导致匹配失败。 */
 std::string to_lower(const std::string& str);
