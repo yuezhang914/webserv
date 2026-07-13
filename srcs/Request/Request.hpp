@@ -3,13 +3,6 @@
 
 #include "Webserv.hpp"
 
-/*
-兼容说明：ERROR_MAX_BODY_LENGTH 是 RequestParser 返回给 ServerManager 的特殊状态。
-有些合并版本的 Defines.hpp 里还没有这个宏；这里做兜底定义，保证 Request 对外接口自洽。
-*/
-#ifndef ERROR_MAX_BODY_LENGTH
-#define ERROR_MAX_BODY_LENGTH -42
-#endif
 
 /*
 枚举：RequestStatus
@@ -40,9 +33,8 @@ struct Request {
 	std::string body;
 	/* 当前 client 连接对应的 server 配置。来源：ServerManager 的 _client_to_srv_map。 */
 	const ServerConfig* config;
-	/* 是否匹配到 location。来源：后续路由匹配函数设置；默认 false。 */
-	bool use_location;
-	/* 响应发送后是否关闭连接。来源：Connection header 和 HTTP 版本判断。 */
+	// 给 ServerManager 预留的连接控制字段；RequestParser 只初始化它，真正的设置和使用尚未在 Request 模块中完成。
+	/* 告诉 ServerManager 响应发完后是否关闭 socket。来源：Connection header 和 HTTP 版本判断。 */
 	bool closeConnection;
 };
 

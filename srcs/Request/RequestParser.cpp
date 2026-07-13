@@ -710,7 +710,6 @@ int parseRequestBuffer(const std::string& buffer, Request& req,
 	req.headers.clear();
 	req.body.clear();
 	req.config = server;
-	req.use_location = false;
 	req.closeConnection = true;
 
 	size_t header_end = buffer.find("\r\n\r\n");
