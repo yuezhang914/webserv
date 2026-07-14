@@ -215,13 +215,11 @@ bool ServerManager::isListenFd(int fd)
 void ServerManager::handleClientRead(int clientFd, size_t poll_index)
 {
     char buffer[BUFFER_SIZE];
-    
-    // 1. 🚀 直接从总账本里把这个客人的整体生命盒子引用刨出来
     Connection &conn = this->_connections[clientFd];
 
+    // 1. 🚀 强攻非阻塞 Socket，把内核缓冲区捞干净
     while (true)
     {
-        // 2. 🚀 让盒子内部自带的专属物理搬运工 io 去捞数据
         ssize_t bytes_read = conn.io.readFromNet(buffer, BUFFER_SIZE - 1);
 
         if (bytes_read == 0)
@@ -230,41 +228,63 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
             this->closeConnection(clientFd, poll_index);
             return;
         }
-
-        if (bytes_read == -1)
-        {
-            // 🟢 【无 errno 拦截】：代表内核缓冲区这轮已经吃干净了，或者发生了微小的信号打断
-            // 优雅地退出 while 循环，进入后面的边界判定
+        if (bytes_read == -1) // 🟢 EAGAIN/EINTR
             break;
-        }
-
-        if (bytes_read == -2)
+        if (bytes_read == -2) // 🔴 物理死线
         {
-            // 🔴 【无 errno 拦截】：说明对端发生了真正的物理猝死异常
-            std::cerr << "Warning: Real physical recv() exception on Client FD " << clientFd
-                      << ", forcing close." << std::endl;
             this->closeConnection(clientFd, poll_index);
             return;
         }
 
-        // 3. 🚀 拼接蓄水
         buffer[bytes_read] = '\0';
         conn.read_buffer += std::string(buffer);
     }
 
-    // 4. 🚀 边界判定（在吃干净缓冲区后，再统一处理是否有完整的 HTTP 报文边界）
-    if (conn.read_buffer.find("\r\n\r\n") != std::string::npos)
+    // 2. 🚀 【核心合龙】：调用队友的静态解析器，直接解析这一轮蓄水池里的数据
+    size_t consumed = 0;
+    
+    // 传入当前的 config 指针（假设你在 Connection 盒子里存了，或者从 _listen_socket_map 拿到了对应的配置）
+    const ServerConfig server_config = conn.getConfig(); // 或者从 ServerManager 的配置表里查到对应的 server_config
+
+    int status = RequestParser::parseBuffer(conn.read_buffer, conn.request, &server_config, consumed);
+
+    // 3. 🚀 根据解析器的物理反馈，决定大管家下一步的动作
+    if (status == REQUEST_OK)
     {
-        std::cout << "[ServerManager] HTTP Request boundary matched for FD " << clientFd << ". Transition to POLLOUT." << std::endl;
+        std::cout << "[ServerManager] Request parsed successfully for FD " << clientFd << ". Method: " 
+                  << conn.request.getMethod() << ", Path: " << conn.request.getPath() << std::endl;
 
-        // 模拟高层队友拼好的完全体物资
-        std::string mock_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 37\r\n\r\n<h1>Hello from Connection Box!</h1>\n";
+        // 🌟 卸货腾笼：从缓冲区里物理切掉这一段已经完美消费的请求字节！
+        conn.read_buffer.erase(0, consumed);
 
-        // 5. 🚀 通过盒子里的搬运工灌入写蓄水池
+        // 🎯 【这里是下一步的桥梁】：既然解析成功了，我们可以准备回包！
+        // 模拟回包（之后你们可以用一个 BuildResponse(conn.request) 函数来物理生成真正的 Response 丢给 io）
+        std::string mock_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 37\r\n\r\n<h1>Hello from Complete Engine!</h1>\n";
         conn.io.pushWriteBuffer(mock_response);
 
-        // 调转枪头，通知内核下一轮滴答立刻检查可写事件
+        // 调转枪头，通知 poll 下一轮滴答立刻检查可写事件
         this->_poll_fds[poll_index].events = POLLOUT;
+    }
+    else if (status == REQUEST_INCOMPLETE)
+    {
+        // 🟢 半包挂起：代表数据还没收完整（可能 Headers 没齐，或者 Body 还没发够长度）
+        // 此时什么都不用做，consumed 是 0，read_buffer 原封不动保留，等待下一次 poll 读就绪唤醒
+        std::cout << "[ServerManager] Request incomplete for FD " << clientFd << ". Waiting for more data..." << std::endl;
+    }
+    else
+    {
+        // 🔴 解析发生硬伤（400 Bad Request, 413 Too Large 等）
+        std::cerr << "[ServerManager] Request error (" << status << ") on FD " << clientFd << ". Sending 400 and closing." << std::endl;
+        
+        // 快速响应一个 400 Bad Request，然后关闭连接
+        std::string error_response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        conn.io.pushWriteBuffer(error_response);
+        
+        // 直接强制进入写事件，发完这个 400 立即 closeConnection
+        this->_poll_fds[poll_index].events = POLLOUT;
+        
+        // 注意：你可以给 Connection 挂一个标记 conn.close_after_write = true; 
+        // 这样在 handleClientWrite 发完数据后，发现这个标记为 true，就物理 close 它。
     }
 }
 
