@@ -1,8 +1,8 @@
 /*
 文件：srcs/Request/RequestParser.cpp
 HTTP request parser 类的静态实现。这个文件只负责从 ServerManager 已经读入的 raw buffer 中解析请求行、headers、Content-Length/chunked body，不负责网络 recv，也不负责 response 生成。
-封装方式：所有解析步骤都是 RequestParser 的 private static 成员，外部只调用 parseBuffer()。
-本版强化点：严格区分 400 与 413；request-line 只接受两个 SP；header/trailer 必须使用 CRLF；严格校验 Host authority、关键 header 重复、Content-Length、Transfer-Encoding、header/chunk-size/trailer 大小；所有长度运算先防溢出，再读取或拼接 body。
+封装方式：所有解析步骤都是 RequestParser 的 private static 成员，外部只调用唯一公开入口 parseBuffer()；本文件不保留旧自由函数或候选 server 重载。
+本版强化点：严格区分 400、413 与 505；request-line 只接受两个 SP；header/trailer 必须使用 CRLF；严格校验 Host authority、关键 header 重复、Content-Length、Transfer-Encoding、header/chunk-size/trailer 大小；所有长度运算先防溢出，再读取或拼接 body。
 */
 #include "RequestParser.hpp"
 #include "ConfigRouteUtils.hpp"
@@ -103,22 +103,9 @@ bool RequestParser::has_invalid_line_endings(const std::string& text, size_t sta
 }
 
 /*
-函数：is_hex_digit
-用途：判断字符是否为十六进制数字。
-参数来源：Host 的 percent-encoding、IP literal 等辅助校验。
-返回值：0-9、a-f、A-F 返回 true。
-*/
-bool RequestParser::is_hex_digit(char c) {
-	return (c >= '0' && c <= '9')
-		|| (c >= 'a' && c <= 'f')
-		|| (c >= 'A' && c <= 'F');
-}
-
-
-/*
 函数：has_bad_uri_char
 用途：检查 request-target 中是否含有控制字符、DEL 或反斜杠。
-参数来源：sanitize_request_uri() 传入完整 URI。
+参数来源：split_and_normalize_uri() 传入完整 request-target。
 返回值：发现危险字节时返回 true，否则返回 false。
 */
 bool RequestParser::has_bad_uri_char(const std::string& uri) {
@@ -135,7 +122,7 @@ bool RequestParser::has_bad_uri_char(const std::string& uri) {
 /*
 函数：has_invalid_percent_encoding
 用途：检查 URI 中每一个 % 是否都严格跟着两个十六进制字符。
-参数来源：sanitize_request_uri() 传入完整 request-target。
+参数来源：split_and_normalize_uri() 传入完整 request-target。
 返回值：孤立 %、长度不足或 %ZZ 这类非法编码返回 true。
 */
 bool RequestParser::has_invalid_percent_encoding(const std::string& uri) {
@@ -147,7 +134,7 @@ bool RequestParser::has_invalid_percent_encoding(const std::string& uri) {
 		}
 		if (i + 2 >= uri.size())
 			return true;
-		if (!is_hex_digit(uri[i + 1]) || !is_hex_digit(uri[i + 2]))
+		if (hex_value(uri[i + 1]) < 0 || hex_value(uri[i + 2]) < 0)
 			return true;
 		i += 3;
 	}
@@ -155,44 +142,161 @@ bool RequestParser::has_invalid_percent_encoding(const std::string& uri) {
 }
 
 /*
-函数：sanitize_request_uri
-用途：验证当前项目支持的 origin-form URI，并阻止控制字符、畸形编码和路径穿越。
-参数来源：parse_request_line() 刚从 request-line 提取出的 URI 字符串。
-返回值：安全返回 REQUEST_OK；任意格式或路径安全问题返回 REQUEST_ERROR。
-实现逻辑：
-    1. 拒绝空 URI、fragment、控制字符和反斜杠。
-    2. 每个 percent-encoding 必须严格使用 %XX。
-    3. 按 ? 分离 path；path 必须以 / 开头。
-    4. 拒绝 %00、%2e、%2f 和原始 /../、结尾 /.. 等路径穿越形式。
+函数：hex_value
+用途：把一个已经确认是十六进制数字的字符转换为 0 到 15。
+返回值：非法字符返回 -1；调用方据此拒绝畸形 percent-encoding。
 */
-int RequestParser::sanitize_request_uri(const std::string& uri) {
-	if (uri.empty())
-		return REQUEST_ERROR;
-	if (uri.find('#') != std::string::npos)
-		return REQUEST_ERROR;
-	if (has_bad_uri_char(uri))
-		return REQUEST_ERROR;
-	if (has_invalid_percent_encoding(uri))
-		return REQUEST_ERROR;
+int RequestParser::hex_value(char c) {
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
 
-	size_t query_pos = uri.find('?');
-	std::string path = uri.substr(0, query_pos);
-	if (path.empty() || path[0] != '/')
-		return REQUEST_ERROR;
+/*
+函数：decode_path
+用途：对 URI 的 path 部分执行且只执行一次 percent-decoding。
+参数来源：split_and_normalize_uri() 已经从原始 request-target 中分出的 encoded path。
+输出：decoded 接收解码后的字节序列。
+安全检查：
+    1. 每个 % 后必须有两个十六进制字符。
+    2. 解码结果不能是 NUL、ASCII 控制字符、DEL 或反斜杠。
+    3. 普通原始字符也要经过相同危险字符检查。
+说明：编码斜杠 %2F 会被解码为 '/'，之后统一参与 segment normalization；不能绕过 dot-segment 检查。
+*/
+int RequestParser::decode_path(const std::string& encoded,
+        std::string& decoded) {
+    decoded.clear();
+    size_t i = 0;
+    while (i < encoded.size()) {
+        unsigned char value;
+        if (encoded[i] == '%') {
+            if (i + 2 >= encoded.size())
+                return REQUEST_ERROR;
+            int high = hex_value(encoded[i + 1]);
+            int low = hex_value(encoded[i + 2]);
+            if (high < 0 || low < 0)
+                return REQUEST_ERROR;
+            value = static_cast<unsigned char>(high * 16 + low);
+            i += 3;
+        }
+        else {
+            value = static_cast<unsigned char>(encoded[i]);
+            ++i;
+        }
+        if (value < 32 || value == 127 || value == 0 || value == '\\')
+            return REQUEST_ERROR;
+        decoded.push_back(static_cast<char>(value));
+    }
+    return REQUEST_OK;
+}
 
-	std::string lower_path = to_lower(path);
-	if (lower_path.find("%00") != std::string::npos
-		|| lower_path.find("%2e") != std::string::npos
-		|| lower_path.find("%2f") != std::string::npos)
-		return REQUEST_ERROR;
-	if (path == "/.." || path.find("/../") != std::string::npos)
-		return REQUEST_ERROR;
-	if (path.size() >= 3
-		&& path.compare(path.size() - 3, 3, "/..") == 0)
-		return REQUEST_ERROR;
-	if (path.find("../") == 0)
-		return REQUEST_ERROR;
-	return REQUEST_OK;
+/*
+函数：normalize_path
+用途：把已经 percent-decoding 的绝对 path 统一成不含空 segment、'.' 和 '..' 的安全路径。
+实现逻辑：
+    1. path 必须以 '/' 开头。
+    2. 连续 '/' 和单点 segment 被忽略。
+    3. '..' 弹出前一个普通 segment；没有可弹出的 segment 表示试图越过根目录，直接拒绝。
+    4. 保留有意义的尾部斜杠，例如 /a/、/a/. 和 /a/b/.. 都得到目录形式。
+例子：/a//b/./c -> /a/b/c；/a/b/../c -> /a/c；/../secret -> REQUEST_ERROR。
+*/
+int RequestParser::normalize_path(const std::string& decoded,
+        std::string& normalized) {
+    normalized.clear();
+    if (decoded.empty() || decoded[0] != '/')
+        return REQUEST_ERROR;
+
+    bool keep_trailing_slash = decoded.size() > 1
+        && (decoded[decoded.size() - 1] == '/'
+            || (decoded.size() >= 2
+                && decoded.compare(decoded.size() - 2, 2, "/.") == 0)
+            || (decoded.size() >= 3
+                && decoded.compare(decoded.size() - 3, 3, "/..") == 0));
+
+    std::vector<std::string> segments;
+    size_t start = 1;
+    while (start <= decoded.size()) {
+        size_t slash = decoded.find('/', start);
+        size_t end = slash == std::string::npos ? decoded.size() : slash;
+        std::string segment = decoded.substr(start, end - start);
+        if (segment.empty() || segment == ".") {
+            /* 连续斜杠和当前目录不加入结果。 */
+        }
+        else if (segment == "..") {
+            if (segments.empty())
+                return REQUEST_ERROR;
+            segments.pop_back();
+        }
+        else
+            segments.push_back(segment);
+        if (slash == std::string::npos)
+            break;
+        start = slash + 1;
+    }
+
+    normalized = "/";
+    size_t i = 0;
+    while (i < segments.size()) {
+        if (normalized.size() > 1)
+            normalized += "/";
+        normalized += segments[i];
+        ++i;
+    }
+    if (keep_trailing_slash && normalized != "/")
+        normalized += "/";
+    return REQUEST_OK;
+}
+
+/*
+函数：split_and_normalize_uri
+用途：把原始 request-target 分成 raw query 和可安全路由的 normalized path。
+参数来源：parse_request_line() 从请求行第二段取得的原始 URI。
+输出：path 保存一次 percent-decoding + normalization 的结果；query 保存 '?' 后原始内容，不包含问号。
+实现顺序：
+    1. 拒绝空 URI、fragment、控制字符、DEL 和反斜杠。
+    2. 按第一个 '?' 分开 encoded path 与 raw query。
+    3. encoded path 必须以 '/' 开头，全部 percent-encoding 必须是 %XX。
+    4. decode_path() 后再 normalize_path()，因此编码的点或斜杠不能绕过路径安全检查。
+*/
+int RequestParser::split_and_normalize_uri(const std::string& uri,
+        std::string& path, std::string& query) {
+    path.clear();
+    query.clear();
+    if (uri.empty() || uri.find('#') != std::string::npos)
+        return REQUEST_ERROR;
+    if (has_bad_uri_char(uri) || has_invalid_percent_encoding(uri))
+        return REQUEST_ERROR;
+
+    size_t query_pos = uri.find('?');
+    std::string encoded_path = uri.substr(0, query_pos);
+    if (query_pos != std::string::npos)
+        query = uri.substr(query_pos + 1);
+    if (encoded_path.empty() || encoded_path[0] != '/')
+        return REQUEST_ERROR;
+
+    std::string decoded;
+    if (decode_path(encoded_path, decoded) != REQUEST_OK)
+        return REQUEST_ERROR;
+    return normalize_path(decoded, path);
+}
+
+/*
+函数：is_valid_http_version_syntax
+用途：区分“HTTP version 字符串本身损坏”和“语法正确但版本不受支持”。
+当前接受的语法形状严格为 HTTP/D.D，其中 D 是十进制数字。
+例子：HTTP/1.0、HTTP/2.0 语法正确；HTTX/1.1、HTTP/1.x、HTTP/11 属于格式错误。
+*/
+bool RequestParser::is_valid_http_version_syntax(
+        const std::string& version) {
+    return version.size() == 8
+        && version.compare(0, 5, "HTTP/") == 0
+        && version[5] >= '0' && version[5] <= '9'
+        && version[6] == '.'
+        && version[7] >= '0' && version[7] <= '9';
 }
 
 /*
@@ -230,7 +334,7 @@ bool RequestParser::is_valid_decimal_port(const std::string& port) {
     1. 允许字母、数字、- . _ ~ 和标准 sub-delims。
     2. % 必须后跟两个十六进制字符。
     3. 拒绝 /、?、#、@、反斜杠、冒号和控制字符。
-说明：这里只校验 Host authority 的语法边界；实际选择哪个 server_name 仍由 ServerManager 完成。
+说明：这里只校验 Host authority 的语法边界，不在 RequestParser 中做配置选择。
 */
 bool RequestParser::is_valid_reg_name(const std::string& host) {
 	if (host.empty())
@@ -255,8 +359,8 @@ bool RequestParser::is_valid_reg_name(const std::string& host) {
 		}
 		if (host[i] == '%') {
 			if (i + 2 >= host.size()
-				|| !is_hex_digit(host[i + 1])
-				|| !is_hex_digit(host[i + 2]))
+				|| hex_value(host[i + 1]) < 0
+				|| hex_value(host[i + 2]) < 0)
 				return false;
 			i += 3;
 			continue;
@@ -278,7 +382,7 @@ bool RequestParser::is_valid_ip_literal(const std::string& literal) {
 		return false;
 	size_t i = 0;
 	while (i < literal.size()) {
-		if (!is_hex_digit(literal[i]) && literal[i] != ':' && literal[i] != '.')
+		if (hex_value(literal[i]) < 0 && literal[i] != ':' && literal[i] != '.')
 			return false;
 		++i;
 	}
@@ -287,62 +391,46 @@ bool RequestParser::is_valid_ip_literal(const std::string& literal) {
 
 /*
 函数：parse_request_line
-用途：严格解析 HTTP 请求第一行，例如 GET /ping.html HTTP/1.1。
-参数来源：RequestParser::parseBuffer 从 header 部分第一行读出 request_line；req 是等待填充的 Request 对象。
-返回值：请求行格式、method、version 和 URI 都合法时返回 REQUEST_OK；否则返回 REQUEST_ERROR。
+用途：严格解析 HTTP request-line，并填充 Request 的 method、原始 URI、normalized path、query 和 version。
+返回值：
+    - REQUEST_OK：格式和 URI 合法，version 为 HTTP/1.1。
+    - REQUEST_VERSION_NOT_SUPPORTED：version 形状合法但不是 HTTP/1.1。
+    - REQUEST_ERROR：空字段、Tab、多余空格、method token、version 语法或 URI 非法。
 实现逻辑：
-    1. HTTP request-line 的三个字段只能由两个普通空格 SP 分隔，tab 不能代替 SP。
-    2. 查找第一个和第二个空格，并确认 method、URI、version 三段都不为空。
-    3. 第二个空格后不能再出现其他空格，拒绝多余字段、连续空格和行尾空格。
-    4. method 必须是合法 HTTP token。
-    5. version 必须完整等于 HTTP/1.1。
-    6. 把三段写入 Request 私有字段，再调用 sanitize_request_uri() 检查 URI 安全。
-为什么严格检查：istringstream 会自动跳过 tab 和多个空格，可能把不符合 request-line 格式的文本误当成合法请求。
+    1. request-line 只能由两个普通 SP 分隔，不能使用 Tab 或多余空格。
+    2. method 必须是合法 token。
+    3. version 先检查 HTTP/D.D 语法，再区分不支持版本。
+    4. 原始 request-target 保存在 _uri；_path 和 _query 由 split_and_normalize_uri() 生成。
 */
 int RequestParser::parse_request_line(
-    const std::string& request_line,
-    Request& req)
-{
-    if (request_line.empty())
+        const std::string& request_line, Request& req) {
+    if (request_line.empty()
+        || request_line.find('\t') != std::string::npos)
         return REQUEST_ERROR;
 
-    // 请求行只能用普通空格分隔，不能出现 Tab。
-    if (request_line.find('\t') != std::string::npos)
-        return REQUEST_ERROR;
-
-    // 找 method 后面的第一个普通空格。
     size_t first_space = request_line.find(' ');
     if (first_space == std::string::npos || first_space == 0)
         return REQUEST_ERROR;
-
-    // 找 URI 后面的第二个普通空格。
     size_t second_space = request_line.find(' ', first_space + 1);
     if (second_space == std::string::npos
-        || second_space == first_space + 1)
+        || second_space == first_space + 1
+        || second_space + 1 >= request_line.size())
         return REQUEST_ERROR;
-
-    // 第二个空格后必须有 HTTP version。
-    if (second_space + 1 >= request_line.size())
-        return REQUEST_ERROR;
-
-    // 请求行只能有两个普通空格。
-    if (request_line.find(' ', second_space + 1)
-        != std::string::npos)
+    if (request_line.find(' ', second_space + 1) != std::string::npos)
         return REQUEST_ERROR;
 
     req._method = request_line.substr(0, first_space);
-    req._uri = request_line.substr(
-        first_space + 1,
+    req._uri = request_line.substr(first_space + 1,
         second_space - first_space - 1);
     req._version = request_line.substr(second_space + 1);
 
     if (!is_valid_token(req._method))
         return REQUEST_ERROR;
-
-    if (req._version != "HTTP/1.1")
+    if (!is_valid_http_version_syntax(req._version))
         return REQUEST_ERROR;
-
-    return sanitize_request_uri(req._uri);
+    if (req._version != "HTTP/1.1")
+        return REQUEST_VERSION_NOT_SUPPORTED;
+    return split_and_normalize_uri(req._uri, req._path, req._query);
 }
 
 /*
@@ -427,6 +515,7 @@ bool RequestParser::is_valid_host_value(const std::string& value) {
     6. Host、Content-Length、Transfer-Encoding 都不允许重复，大小写不同也视为重复。
     7. Host value 必须非空，并且不能含空格、tab或控制字符。
     8. 通过检查后才写入 req._headers。
+    9. 所有行处理结束后，确认 HTTP/1.1 必需的 Host 已经存在。
 例子："Content-Length: 3" 会保存为 headers["content-length"] = "3"。
 */
 int RequestParser::parse_headers(std::istringstream& iss, Request& req) {
@@ -445,7 +534,7 @@ int RequestParser::parse_headers(std::istringstream& iss, Request& req) {
 		std::string raw_value = line.substr(colon_pos + 1);
 		if (has_invalid_header_value_char(raw_value))
 			return REQUEST_ERROR;
-		std::string lower_key = to_lower(key);
+		std::string lower_key = Request::toLowerAscii(key);
 		if ((lower_key == "content-length" || lower_key == "host"
 				|| lower_key == "transfer-encoding")
 			&& req._headers.find(lower_key) != req._headers.end())
@@ -455,36 +544,21 @@ int RequestParser::parse_headers(std::istringstream& iss, Request& req) {
 			return REQUEST_ERROR;
 		req._headers[lower_key] = value;
 	}
+	if (req._headers.find("host") == req._headers.end())
+		return REQUEST_ERROR;
 	return REQUEST_OK;
-}
-
-/*
-函数：has_required_host
-用途：检查 HTTP/1.1 请求是否带有非空 Host header。
-参数来源：RequestParser::parseBuffer 在 parse_headers 成功之后调用。
-实现逻辑：
-    1. 本项目解析阶段要求 version 为 HTTP/1.1。
-    2. HTTP/1.1 请求必须存在 Host。
-    3. Host 值去掉空白后不能为空。
-意义：server_name / virtual host 选择依赖 Host；缺少 Host 的 HTTP/1.1 请求应当作为 bad request 处理。
-*/
-bool RequestParser::has_required_host(const Request& req) {
-	std::map<std::string, std::string>::const_iterator it = req._headers.find("host");
-	if (it == req._headers.end())
-		return false;
-	return !trim_ows(it->second).empty();
 }
 
 /*
 函数：parse_content_length
 用途：严格解析 Content-Length，并区分格式错误和 body 超限。
-参数来源：RequestParser::parseBuffer 在发现 content-length header 后调用；body_limit 来自 getEffectiveBodyLimit(req._config, req._uri)。
-输出：成功时把长度写入 content_length；格式错误返回 REQUEST_ERROR；数字格式合法但超过 body_limit 或整数范围时返回 ERROR_MAX_BODY_LENGTH。
+参数来源：RequestParser::parseBuffer 在发现 content-length header 后调用；body_limit 来自 getEffectiveBodyLimit(req._config, req._path)。
+输出：成功时把长度写入 content_length；格式错误返回 REQUEST_ERROR；数字格式合法但超过 body_limit 或整数范围时返回 REQUEST_BODY_TOO_LARGE。
 实现逻辑：
     1. 先完整检查字符串：必须非空，并且每个字符都必须是十进制数字。
     2. 第一遍格式检查结束前不比较 body_limit，保证 12x、1.0、+5 等始终属于 400 格式错误，而不是被误判成 413。
     3. 第二遍手动累加数字，先检查 unsigned long 溢出。
-    4. 数字合法但计算结果超过 body_limit 时返回 ERROR_MAX_BODY_LENGTH。
+    4. 数字合法但计算结果超过 body_limit 时返回 REQUEST_BODY_TOO_LARGE。
 */
 int RequestParser::parse_content_length(const std::string& value, unsigned long body_limit, size_t& content_length) {
 	if (value.empty())
@@ -501,15 +575,15 @@ int RequestParser::parse_content_length(const std::string& value, unsigned long 
 	while (i < value.size()) {
 		unsigned long digit = static_cast<unsigned long>(value[i] - '0');
 		if (result > (max_ulong - digit) / 10)
-			return ERROR_MAX_BODY_LENGTH;
+			return REQUEST_BODY_TOO_LARGE;
 		result = result * 10 + digit;
 		if (result > body_limit)
-			return ERROR_MAX_BODY_LENGTH;
+			return REQUEST_BODY_TOO_LARGE;
 		++i;
 	}
 	const size_t max_size = static_cast<size_t>(-1);
 	if (result > static_cast<unsigned long>(max_size))
-		return ERROR_MAX_BODY_LENGTH;
+		return REQUEST_BODY_TOO_LARGE;
 	content_length = static_cast<size_t>(result);
 	return REQUEST_OK;
 }
@@ -533,7 +607,7 @@ int RequestParser::is_chunked_transfer_encoding(const Request& req, bool& has_te
 	if (it == req._headers.end())
 		return REQUEST_OK;
 	has_te = true;
-	std::string value = to_lower(trim_ows(it->second));
+	std::string value = Request::toLowerAscii(trim_ows(it->second));
 	if (value != "chunked")
 		return REQUEST_ERROR;
 	is_chunked = true;
@@ -548,7 +622,7 @@ int RequestParser::is_chunked_transfer_encoding(const Request& req, bool& has_te
     - current_body_size：已经解码并保存的 body 字节数。
     - body_limit：当前 server/location 的 effective max_body_size。
     - size：输出本次 chunk 的字节数。
-返回值：成功返回 REQUEST_OK；格式非法返回 REQUEST_ERROR；整数或累计 body 超限返回 ERROR_MAX_BODY_LENGTH。
+返回值：成功返回 REQUEST_OK；格式非法返回 REQUEST_ERROR；整数或累计 body 超限返回 REQUEST_BODY_TOO_LARGE。
 实现逻辑：
     1. 分号前必须是非空十六进制数。
     2. 若存在 extension，分号后不能为空且只能含可见 ASCII，拒绝空格和控制字符。
@@ -589,19 +663,19 @@ int RequestParser::read_chunk_size_for_buffer(const std::string& line,
 		else
 			return REQUEST_ERROR;
 		if (result > (max_ulong - digit) / 16)
-			return ERROR_MAX_BODY_LENGTH;
+			return REQUEST_BODY_TOO_LARGE;
 		result = result * 16 + digit;
 		++i;
 	}
 	const size_t max_size = static_cast<size_t>(-1);
 	if (result > static_cast<unsigned long>(max_size)
 		|| result > static_cast<unsigned long>(max_size - 2))
-		return ERROR_MAX_BODY_LENGTH;
+		return REQUEST_BODY_TOO_LARGE;
 	if (current_body_size > static_cast<size_t>(body_limit))
-		return ERROR_MAX_BODY_LENGTH;
+		return REQUEST_BODY_TOO_LARGE;
 	unsigned long current = static_cast<unsigned long>(current_body_size);
 	if (current > body_limit || result > body_limit - current)
-		return ERROR_MAX_BODY_LENGTH;
+		return REQUEST_BODY_TOO_LARGE;
 	size = static_cast<size_t>(result);
 	return REQUEST_OK;
 }
@@ -640,7 +714,7 @@ int RequestParser::validate_trailer_line(const std::string& line) {
 	std::string raw_value = line.substr(colon_pos + 1);
 	if (has_invalid_header_value_char(raw_value))
 		return REQUEST_ERROR;
-	if (is_forbidden_trailer_name(to_lower(key)))
+	if (is_forbidden_trailer_name(Request::toLowerAscii(key)))
 		return REQUEST_ERROR;
 	return REQUEST_OK;
 }
@@ -704,6 +778,7 @@ int RequestParser::find_chunked_trailer_end(const std::string& buffer,
 参数来源：
     - buffer：ServerManager 为当前 client 累积的原始字节。
     - body_start：header 结束空行后的第一个 body 字节。
+    - body_limit：parseBuffer 已按 server 和 normalized path 计算出的有效上限。
     - req：输出解析后的 body。
     - consumed：成功时输出整个 request 占用的字节数。
 返回值：成功、未完成、格式错误或 body 超限状态。
@@ -715,10 +790,10 @@ int RequestParser::find_chunked_trailer_end(const std::string& buffer,
     5. 0-size chunk 后由 find_chunked_trailer_end() 严格解析 trailer。
 */
 int RequestParser::parse_chunked_buffer(const std::string& buffer,
-		size_t body_start, Request& req, size_t& consumed) {
+		size_t body_start, unsigned long body_limit,
+        Request& req, size_t& consumed) {
 	size_t pos = body_start;
 	std::string body;
-	unsigned long body_limit = getEffectiveBodyLimit(req._config, req._uri);
 	while (true) {
 		if (pos > buffer.size())
 			return REQUEST_ERROR;
@@ -763,94 +838,81 @@ int RequestParser::parse_chunked_buffer(const std::string& buffer,
 
 /*
 函数：RequestParser::parseBuffer
-用途：把 ServerManager 已经读取并累积的 raw buffer 解析成一个完整且封装的 Request。
-输入来源：
-    - buffer：当前 client 的接收缓冲区。
-    - req：输出 Request；每次调用开始都会清空旧状态。
-    - server：当前连接初步关联的 ServerConfig。
-    - consumed：成功时输出本次 request 占用的字节数，供调用方 erase。
-返回值：
-    - REQUEST_OK：一个请求完整且合法。
-    - REQUEST_INCOMPLETE：当前字节还不足，继续等待 POLLIN。
-    - REQUEST_ERROR：请求行、header、Host、framing、chunked 或 URI 格式非法。
-    - ERROR_MAX_BODY_LENGTH：合法长度超过 effective max_body_size 或无法安全表示。
-实现逻辑：
-    1. 重置 req 和 consumed，本函数不 recv，也不修改 buffer。
-    2. 在 header 尚未结束时，提前拒绝裸 LF/裸 CR 和超过 MAX_HEADER_SIZE 的输入。
-    3. 找到 CRLFCRLF 后，再验证完整 header 区域严格使用 CRLF，并把终止空行计入大小上限。
-    4. 解析 request-line、headers 和必填 Host。
-    5. Transfer-Encoding 只允许单个 chunked；与 Content-Length 同时出现时拒绝。
-    6. 普通 body 严格解析 Content-Length，并用 content_length > available 的减法形式等待数据，避免加法溢出。
-    7. chunked body 交给 parse_chunked_buffer()。
+用途：实现 Request 模块唯一公开入口的完整解析流程。
+参数：
+    - buffer：ServerManager 已经为当前 client 累积的原始 HTTP 字节。
+    - req：输出 Request；函数开始时通过 resetForParsing() 清空旧值。
+    - server：调用方已经确定的 ServerConfig，Request 只借用该指针。
+    - consumed：成功时输出当前第一个完整 request 占用的字节数。
+返回值：REQUEST_OK、REQUEST_INCOMPLETE、REQUEST_ERROR、REQUEST_VERSION_NOT_SUPPORTED 或 REQUEST_BODY_TOO_LARGE。
+实现顺序：
+    1. 重置 Request 和 consumed。
+    2. 找到并严格检查 header 区域。
+    3. 解析 request-line、URI、headers 和必需 Host。
+    4. 判断 Content-Length 或 chunked framing，并拒绝二者同时出现。
+    5. 使用传入 server 与 normalized path 计算 effective body limit。
+    6. 解析普通 body 或 chunked body，并准确设置 consumed。
+说明：本函数直接完成完整解析，不选择 ServerConfig，也不经过其他解析入口转发。
 */
 int RequestParser::parseBuffer(const std::string& buffer, Request& req,
-		const ServerConfig* server, size_t& consumed) {
-	consumed = 0;
-	req.resetForParsing(server);
+        const ServerConfig* server, size_t& consumed) {
+    consumed = 0;
+    req.resetForParsing(server);
 
-	size_t header_end = buffer.find("\r\n\r\n");
-	if (header_end == std::string::npos) {
-		if (has_invalid_line_endings(buffer, 0, buffer.size(), true))
-			return REQUEST_ERROR;
-		if (buffer.size() > MAX_HEADER_SIZE)
-			return REQUEST_ERROR;
-		return REQUEST_INCOMPLETE;
-	}
-	size_t header_size = header_end + 4;
-	if (header_size > MAX_HEADER_SIZE)
-		return REQUEST_ERROR;
-	if (has_invalid_line_endings(buffer, 0, header_size, false))
-		return REQUEST_ERROR;
+    size_t header_end = buffer.find("\r\n\r\n");
+    if (header_end == std::string::npos) {
+        if (has_invalid_line_endings(buffer, 0, buffer.size(), true))
+            return REQUEST_ERROR;
+        if (buffer.size() > MAX_HEADER_SIZE)
+            return REQUEST_ERROR;
+        return REQUEST_INCOMPLETE;
+    }
+    size_t header_size = header_end + 4;
+    if (header_size > MAX_HEADER_SIZE)
+        return REQUEST_ERROR;
+    if (has_invalid_line_endings(buffer, 0, header_size, false))
+        return REQUEST_ERROR;
 
-	size_t body_start = header_size;
-	std::istringstream iss(buffer.substr(0, header_end));
-	std::string request_line;
-	if (!std::getline(iss, request_line))
-		return REQUEST_ERROR;
-	if (!request_line.empty()
-		&& request_line[request_line.size() - 1] == '\r')
-		request_line.erase(request_line.size() - 1);
-	if (parse_request_line(request_line, req) != REQUEST_OK)
-		return REQUEST_ERROR;
-	if (parse_headers(iss, req) != REQUEST_OK)
-		return REQUEST_ERROR;
-	if (!has_required_host(req))
-		return REQUEST_ERROR;
+    size_t body_start = header_size;
+    std::istringstream iss(buffer.substr(0, header_end));
+    std::string request_line;
+    if (!std::getline(iss, request_line))
+        return REQUEST_ERROR;
+    if (!request_line.empty()
+        && request_line[request_line.size() - 1] == '\r')
+        request_line.erase(request_line.size() - 1);
 
-	bool has_te = false;
-	bool is_chunked = false;
-	if (is_chunked_transfer_encoding(req, has_te, is_chunked)
-		!= REQUEST_OK)
-		return REQUEST_ERROR;
-	if (has_te && req._headers.count("content-length"))
-		return REQUEST_ERROR;
+    int line_status = parse_request_line(request_line, req);
+    if (line_status != REQUEST_OK)
+        return line_status;
+    if (parse_headers(iss, req) != REQUEST_OK)
+        return REQUEST_ERROR;
 
-	size_t content_length = 0;
-	unsigned long body_limit = getEffectiveBodyLimit(req._config, req._uri);
-	if (!is_chunked && req._headers.count("content-length")) {
-		int len_status = parse_content_length(
-			req._headers["content-length"], body_limit, content_length);
-		if (len_status != REQUEST_OK)
-			return len_status;
-	}
-	if (is_chunked)
-		return parse_chunked_buffer(buffer, body_start, req, consumed);
+    bool has_te = false;
+    bool is_chunked = false;
+    if (is_chunked_transfer_encoding(req, has_te, is_chunked)
+        != REQUEST_OK)
+        return REQUEST_ERROR;
+    if (has_te && req._headers.count("content-length"))
+        return REQUEST_ERROR;
 
-	size_t available = buffer.size() - body_start;
-	if (content_length > available)
-		return REQUEST_INCOMPLETE;
-	req._body = buffer.substr(body_start, content_length);
-	consumed = body_start + content_length;
-	return REQUEST_OK;
-}
+    size_t content_length = 0;
+    unsigned long body_limit = getEffectiveBodyLimit(
+        req._config, req._path);
+    if (!is_chunked && req._headers.count("content-length")) {
+        int len_status = parse_content_length(
+            req._headers["content-length"], body_limit, content_length);
+        if (len_status != REQUEST_OK)
+            return len_status;
+    }
+    if (is_chunked)
+        return parse_chunked_buffer(
+            buffer, body_start, body_limit, req, consumed);
 
-
-/*
-兼容函数：parseRequestBuffer
-用途：保留旧 ServerManager 的函数调用接口，内部统一转发到封装后的 RequestParser 类。
-参数和返回值：与 RequestParser::parseBuffer() 完全一致。
-*/
-int parseRequestBuffer(const std::string& buffer, Request& req,
-		const ServerConfig* server, size_t& consumed) {
-	return RequestParser::parseBuffer(buffer, req, server, consumed);
+    size_t available = buffer.size() - body_start;
+    if (content_length > available)
+        return REQUEST_INCOMPLETE;
+    req._body = buffer.substr(body_start, content_length);
+    consumed = body_start + content_length;
+    return REQUEST_OK;
 }
