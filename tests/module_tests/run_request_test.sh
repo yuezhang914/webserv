@@ -6,9 +6,17 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 cd "$PROJECT_ROOT"
 
-# 结构检查：RequestParser 只能有一个 class 静态入口，旧自由函数和转发层不得恢复。
+REQUEST_SOURCES="srcs/Request/Request.cpp \
+srcs/Request/RequestParser.cpp \
+srcs/Request/RequestParserRequestLine.cpp \
+srcs/Request/RequestParserUri.cpp \
+srcs/Request/RequestParserHeaders.cpp \
+srcs/Request/RequestParserBody.cpp \
+srcs/Request/RequestParserChunked.cpp"
+
+# 结构检查：仍然只有一个 class 静态入口，拆文件不能重新引入旧自由函数或中间转发层。
 if grep -R "parseRequestBuffer\|parse_buffer_internal" \
-    includes/RequestParser.hpp srcs/Request/RequestParser.cpp \
+    includes/RequestParser.hpp srcs/Request \
     tests/module_tests/request_module_test.cpp >/dev/null 2>&1; then
     echo "[FAIL] 发现旧解析入口或无意义转发层"
     exit 1
@@ -17,34 +25,46 @@ if [ "$(grep -c 'static int parseBuffer' includes/RequestParser.hpp)" -ne 1 ]; t
     echo "[FAIL] RequestParser.hpp 必须只声明一个公开 parseBuffer"
     exit 1
 fi
-if [ "$(grep -c '^int RequestParser::parseBuffer' srcs/Request/RequestParser.cpp)" -ne 1 ]; then
-    echo "[FAIL] RequestParser.cpp 必须只实现一个 parseBuffer"
+if [ "$(grep -R -h '^int RequestParser::parseBuffer' srcs/Request/*.cpp | wc -l | tr -d ' ')" -ne 1 ]; then
+    echo "[FAIL] RequestParser 必须只实现一个 parseBuffer"
+    exit 1
+fi
+
+# 文件职责检查：主文件只保留 parseBuffer；其余原有成员函数分布到职责文件，不增加新的 RequestParser 成员函数。
+if [ "$(grep -c '^\(bool\|int\|std::string\) RequestParser::' srcs/Request/RequestParser.cpp)" -ne 1 ]; then
+    echo "[FAIL] RequestParser.cpp 应只保留唯一公开入口实现"
+    exit 1
+fi
+if [ ! -f srcs/Request/RequestParserRequestLine.cpp ] \
+    || [ ! -f srcs/Request/RequestParserUri.cpp ] \
+    || [ ! -f srcs/Request/RequestParserHeaders.cpp ] \
+    || [ ! -f srcs/Request/RequestParserBody.cpp ] \
+    || [ ! -f srcs/Request/RequestParserChunked.cpp ]; then
+    echo "[FAIL] RequestParser 拆分实现文件不完整"
     exit 1
 fi
 
 # 冗余检查：解析状态统一放在 enum；Request 不保存连接生命周期；内部 lowercase 不暴露为全局函数。
 if grep -R "ERROR_MAX_BODY_LENGTH" \
     includes/Request.hpp includes/RequestParser.hpp \
-    srcs/Request/Request.cpp srcs/Request/RequestParser.cpp \
-    tests/module_tests/request_module_test.cpp >/dev/null 2>&1; then
+    srcs/Request tests/module_tests/request_module_test.cpp >/dev/null 2>&1; then
     echo "[FAIL] 仍存在旧的 ERROR_MAX_BODY_LENGTH 宏状态"
     exit 1
 fi
 if grep -R "closeConnection\|shouldCloseConnection\|setCloseConnection" \
-    includes/Request.hpp srcs/Request/Request.cpp \
+    includes/Request.hpp srcs/Request \
     tests/module_tests/request_module_test.cpp >/dev/null 2>&1; then
     echo "[FAIL] Request 仍保存不属于解析结果的连接生命周期状态"
     exit 1
 fi
 if grep -R "std::string to_lower\|to_lower(" \
-    includes/Request.hpp srcs/Request/Request.cpp \
-    srcs/Request/RequestParser.cpp tests/module_tests/request_module_test.cpp \
+    includes/Request.hpp srcs/Request tests/module_tests/request_module_test.cpp \
     >/dev/null 2>&1; then
     echo "[FAIL] Request 模块仍暴露全局 lowercase 工具"
     exit 1
 fi
 if grep -R "has_required_host" \
-    includes/RequestParser.hpp srcs/Request/RequestParser.cpp >/dev/null 2>&1; then
+    includes/RequestParser.hpp srcs/Request >/dev/null 2>&1; then
     echo "[FAIL] Host 必填检查仍存在额外转调用函数"
     exit 1
 fi
@@ -63,7 +83,8 @@ if [ -e srcs/Request/Request.hpp ] || [ -e srcs/Request/RequestParser.hpp ] \
     exit 1
 fi
 
-echo "[PASS] RequestParser 只有一个 class 静态入口"
+echo "[PASS] RequestParser 仍只有一个 class 静态入口"
+echo "[PASS] 原有函数仅按职责移动到多个 .cpp，没有恢复 wrapper 或转发层"
 echo "[PASS] Request 状态、成员和内部工具已清除旧宏与冗余接口"
 echo "[PASS] body-limit 路由辅助函数已移除重复 query 处理与 const_cast"
 echo "[PASS] Request 相关头文件只保留 includes/ 一份"
@@ -88,8 +109,7 @@ fi
 
 $CXX $CXXFLAGS $EXTRA_CXXFLAGS \
     tests/module_tests/request_module_test.cpp \
-    srcs/Request/Request.cpp \
-    srcs/Request/RequestParser.cpp \
+    $REQUEST_SOURCES \
     $CONFIG_SOURCES \
     -o "$BUILD_DIR/request_module_test"
 
