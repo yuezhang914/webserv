@@ -1,6 +1,7 @@
 /*
 文件：srcs/Request/Request.cpp
-HTTP request 基础工具实现。 Request 的通用工具、URI 安全检查和调试输出；真正的请求读取与解析流程已拆到 RequestParser.cpp。
+用途：实现 Request 类的生命周期、只读访问接口和共享字符串工具。
+说明：HTTP 语法解析、URI 安全检查和 body framing 全部封装在 RequestParser.cpp；本文件不读取 socket，也不生成 Response。
 */
 #include "Request.hpp"
 #include <cctype>
@@ -8,126 +9,160 @@ HTTP request 基础工具实现。 Request 的通用工具、URI 安全检查和
 /*
 函数：to_lower
 用途：把字符串中的英文字母统一转换成小写。
-参数来源：主要接收 HTTP header 名、Transfer-Encoding 值、URI 安全检查等字符串。
-返回值：返回转换后的小写字符串，不修改原始参数。
-实现逻辑：
-    1. 复制输入字符串到 res，避免修改原字符串。
-    2. 使用 while 逐个读取字符。
-    3. 先把字符转换成 unsigned char，再交给 std::tolower，避免有符号 char 直接传入字符分类函数产生未定义行为。
-    4. 把转换结果写回副本并返回。
-为什么需要：HTTP header 名称大小写不敏感，把 key 统一成小写后，后面可以稳定查 headers["content-length"]。
+参数来源：HTTP header 名、Transfer-Encoding、Connection、URI 安全检查或其他模块传入的字符串。
+返回值：转换后的小写副本，不修改原始参数。
+实现逻辑：复制字符串后逐字节转换；先转 unsigned char 再调用 std::tolower，避免有符号 char 导致未定义行为。
 */
-std::string to_lower(const std::string& str) {
-	std::string res = str;
-	size_t i = 0;
-	while (i < res.size()) {
-		unsigned char c = static_cast<unsigned char>(res[i]);
-		res[i] = static_cast<char>(std::tolower(c));
-		++i;
-	}
-	return res;
+std::string to_lower(const std::string &str)
+{
+    std::string result = str;
+    size_t i = 0;
+    while (i < result.size())
+    {
+        unsigned char c = static_cast<unsigned char>(result[i]);
+        result[i] = static_cast<char>(std::tolower(c));
+        ++i;
+    }
+    return result;
 }
 
 /*
-函数：has_bad_uri_char
-用途：检查 URI 中是否含有危险或非法字符。
-实现逻辑：
-    1. 遍历 uri 的每个字符。
-    2. 如果字符 ASCII 小于 32，说明是控制字符，拒绝。
-    3. 如果字符是 127，也拒绝。
-    4. 如果字符是反斜杠 \，拒绝，避免 Windows 风格路径干扰路径安全。
-    5. 全部字符安全则返回 false。
+构造函数：Request::Request
+用途：创建尚未解析任何 HTTP 报文的空 Request。
+初始化：所有 string/map 自动为空；_config 为 NULL；_closeConnection 使用安全默认 true。
 */
-static bool has_bad_uri_char(const std::string& uri) {
-	size_t i = 0;
-	while (i < uri.size()) {
-		unsigned char c = static_cast<unsigned char>(uri[i]);
-		if (c < 32 || c == 127 || c == '\\')
-			return true;
-		++i;
-	}
-	return false;
-}
-
-
-/*
-函数：is_hex_digit
-用途：判断一个字符是否是 URI percent-encoding 中允许的十六进制字符。
-参数来源：has_invalid_percent_encoding() 检查 % 后面的两个字符时传入。
-返回值：字符属于 0-9、a-f 或 A-F 时返回 true，否则返回 false。
-*/
-static bool is_hex_digit(char c) {
-	return (c >= '0' && c <= '9')
-		|| (c >= 'a' && c <= 'f')
-		|| (c >= 'A' && c <= 'F');
+Request::Request()
+    : _method(), _uri(), _version(), _headers(), _body(),
+      _config(NULL), _closeConnection(true)
+{
 }
 
 /*
-函数：has_invalid_percent_encoding
-用途：检查 URI 中每一个 % 是否都严格跟着两个十六进制字符。
-参数来源：sanitizeRequestUri() 传入完整 request-target。
-返回值：发现孤立 %、长度不足或 %ZZ 这类非法编码时返回 true。
-实现逻辑：
-    1. 从左到右扫描 URI。
-    2. 普通字符直接跳过。
-    3. 遇到 % 时，确认后面至少还有两个字符。
-    4. 两个字符必须都是十六进制数字；合法后一次跳过整组 %XX。
-为什么需要：避免不同模块对畸形 percent-encoding 产生不同解释，也避免后续 URI 解码越界。
+拷贝构造函数：Request::Request
+用途：创建另一个 Request 的完整副本。
+参数来源：src 通常来自测试、容器或后续模块需要保留解析结果时传入。
+所有权说明：_config 只是非拥有型指针，复制地址但不复制或接管 ServerConfig。
 */
-static bool has_invalid_percent_encoding(const std::string& uri) {
-	size_t i = 0;
-	while (i < uri.size()) {
-		if (uri[i] != '%') {
-			++i;
-			continue;
-		}
-		if (i + 2 >= uri.size())
-			return true;
-		if (!is_hex_digit(uri[i + 1]) || !is_hex_digit(uri[i + 2]))
-			return true;
-		i += 3;
-	}
-	return false;
+Request::Request(const Request &src)
+    : _method(src._method), _uri(src._uri), _version(src._version),
+      _headers(src._headers), _body(src._body), _config(src._config),
+      _closeConnection(src._closeConnection)
+{
 }
 
 /*
-函数：sanitizeRequestUri
-用途：检查 Request.uri 是否安全，防止非法路径、控制字符、fragment 和路径穿越。
-参数来源：parseRequestBuffer 内部的 parse_request_line 已经把请求行中的 URI 写进 req.uri；URI 可能带 query，例如 /search?q=a。
-实现逻辑：
-    1. URI 不能为空，不能包含 HTTP fragment 标记 #，因为 fragment 不应该出现在 HTTP request target 中。
-    2. 先按 ? 分离 path 和 query；路径安全检查只针对 path，避免 query 干扰 /.. 结尾判断。
-    3. path 必须以 / 开头。
-    4. 对完整 URI 调用 has_bad_uri_char，拒绝控制字符和反斜杠。
-    5. 检查所有 % 是否严格使用 %XX 十六进制格式，拒绝孤立 % 和 %ZZ。
-    6. 对 path 的小写版本检查 %00、%2e、%2f，防止编码后的空字符、点和斜杠绕过路径检查。
-    7. 对 path 检查 /../、path == /..、结尾 /..、开头 ../ 等路径穿越形式。
-    8. 全部通过返回 REQUEST_OK，否则返回 REQUEST_ERROR。
-后续影响：如果这里失败，parseRequestBuffer 会返回 REQUEST_ERROR，ServerManager 会生成错误响应或关闭连接。
+赋值运算符：Request::operator=
+用途：把 rhs 的解析结果复制到已经存在的 Request。
+实现逻辑：先防止自赋值，再复制所有标准容器、字符串、非拥有型 config 指针和连接策略。
+返回值：返回当前对象引用，支持连续赋值。
 */
-int sanitizeRequestUri(Request& req) {
-	if (req.uri.empty())
-		return REQUEST_ERROR;
-	if (req.uri.find('#') != std::string::npos)
-		return REQUEST_ERROR;
-	if (has_bad_uri_char(req.uri))
-		return REQUEST_ERROR;
-	if (has_invalid_percent_encoding(req.uri))
-		return REQUEST_ERROR;
+Request &Request::operator=(const Request &rhs)
+{
+    if (this != &rhs)
+    {
+        _method = rhs._method;
+        _uri = rhs._uri;
+        _version = rhs._version;
+        _headers = rhs._headers;
+        _body = rhs._body;
+        _config = rhs._config;
+        _closeConnection = rhs._closeConnection;
+    }
+    return *this;
+}
 
-	size_t query_pos = req.uri.find('?');
-	std::string path = req.uri.substr(0, query_pos);
-	if (path.empty() || path[0] != '/')
-		return REQUEST_ERROR;
+/*
+析构函数：Request::~Request
+用途：销毁 Request。
+资源说明：string 和 map 会自动释放内部内存；_config 由 Config/ServerManager 拥有，因此这里绝不能 delete。
+*/
+Request::~Request()
+{
+}
 
-	std::string lower_path = to_lower(path);
-	if (lower_path.find("%00") != std::string::npos || lower_path.find("%2e") != std::string::npos || lower_path.find("%2f") != std::string::npos)
-		return REQUEST_ERROR;
-	if (path == "/.." || path.find("/../") != std::string::npos)
-		return REQUEST_ERROR;
-	if (path.size() >= 3 && path.compare(path.size() - 3, 3, "/..") == 0)
-		return REQUEST_ERROR;
-	if (path.find("../") == 0)
-		return REQUEST_ERROR;
-	return REQUEST_OK;
+/*
+函数：Request::resetForParsing
+用途：在解析一个新 request 前，清除旧解析结果并绑定当前 server 上下文。
+参数来源：server 来自 RequestParser::parseBuffer() 的第三个参数。
+访问限制：本函数是 private，只能由友元 RequestParser 调用。
+*/
+void Request::resetForParsing(const ServerConfig *server)
+{
+    _method.clear();
+    _uri.clear();
+    _version.clear();
+    _headers.clear();
+    _body.clear();
+    _config = server;
+    _closeConnection = true;
+}
+
+/* 函数：getMethod；返回解析后的 HTTP method 只读引用。 */
+const std::string &Request::getMethod() const
+{
+    return _method;
+}
+
+/* 函数：getUri；返回原始 request-target 只读引用。 */
+const std::string &Request::getUri() const
+{
+    return _uri;
+}
+
+/* 函数：getVersion；返回解析后的 HTTP version 只读引用。 */
+const std::string &Request::getVersion() const
+{
+    return _version;
+}
+
+/* 函数：getHeaders；返回完整 header map 的 const 引用，供只读遍历。 */
+const Request::HeaderMap &Request::getHeaders() const
+{
+    return _headers;
+}
+
+/* 函数：getBody；返回二进制安全 body 的只读引用。 */
+const std::string &Request::getBody() const
+{
+    return _body;
+}
+
+/* 函数：getConfig；返回当前请求借用的 ServerConfig 指针，不转移所有权。 */
+const ServerConfig *Request::getConfig() const
+{
+    return _config;
+}
+
+/*
+函数：Request::getHeader
+用途：大小写不敏感地读取一个请求头，同时明确区分“字段不存在”和“字段存在但值为空”。
+参数：name 是查询名称；value 是输出字符串。
+返回值：找到返回 true；未找到返回 false 并清空 value。
+*/
+bool Request::getHeader(const std::string &name, std::string &value) const
+{
+    HeaderMap::const_iterator it = _headers.find(to_lower(name));
+    if (it == _headers.end())
+    {
+        value.clear();
+        return false;
+    }
+    value = it->second;
+    return true;
+}
+
+/* 函数：shouldCloseConnection；返回响应发送完成后是否关闭 client。 */
+bool Request::shouldCloseConnection() const
+{
+    return _closeConnection;
+}
+
+/*
+函数：setCloseConnection
+用途：允许 ServerManager 在解析完成后写入最终 keep-alive/close 策略。
+限制：本函数只能修改连接策略，不能篡改已经解析完成的 HTTP 数据。
+*/
+void Request::setCloseConnection(bool closeConnection)
+{
+    _closeConnection = closeConnection;
 }
