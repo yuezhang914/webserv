@@ -216,12 +216,12 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
 {
     char buffer[BUFFER_SIZE];
     
-    // 1. 🚀【全新并轨】：直接从总账本里把这个客人的整体生命盒子引用刨出来
+    // 1. 🚀 直接从总账本里把这个客人的整体生命盒子引用刨出来
     Connection &conn = this->_connections[clientFd];
 
     while (true)
     {
-        // 2. 🚀【解耦调用】：让盒子内部自带的专属物理搬运工 io 去捞热乎的裸字节
+        // 2. 🚀 让盒子内部自带的专属物理搬运工 io 去捞数据
         ssize_t bytes_read = conn.io.readFromNet(buffer, BUFFER_SIZE - 1);
 
         if (bytes_read == 0)
@@ -231,41 +231,36 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
             return;
         }
 
-        if (bytes_read < 0)
+        if (bytes_read == -1)
         {
-            // 🟢 【黄金防线】：必须把这三个非阻塞正常抖动全部无伤拦截！
-            if (errno == EAGAIN || errno == EWOULDBLOCK)
-            {
-                // 代表内核缓冲区这轮已经吃干净了，优雅 break 退出 while 循环，绝对不是报错！
-                break;
-            }
-            if (errno == EINTR)
-            {
-                // 被系统某些微小的信号临时打断，原汁原味继续强攻
-                continue;
-            }
+            // 🟢 【无 errno 拦截】：代表内核缓冲区这轮已经吃干净了，或者发生了微小的信号打断
+            // 优雅地退出 while 循环，进入后面的边界判定
+            break;
+        }
 
-            // 🔴 只有走到这里，才说明是真的物理断线（如 ECONNRESET 猝死）
+        if (bytes_read == -2)
+        {
+            // 🔴 【无 errno 拦截】：说明对端发生了真正的物理猝死异常
             std::cerr << "Warning: Real physical recv() exception on Client FD " << clientFd
-                      << ", errno: " << errno << ", forcing close." << std::endl;
+                      << ", forcing close." << std::endl;
             this->closeConnection(clientFd, poll_index);
             return;
         }
 
-        // 3. 🚀【拼接蓄水】：直接追加到它自己身上的 read_buffer 抽屉里
+        // 3. 🚀 拼接蓄水
         buffer[bytes_read] = '\0';
         conn.read_buffer += std::string(buffer);
     }
 
-    // 4. 🚀【边界判定】：退出异步吞噬循环后，直接核验自己盒子里的 read_buffer 边界
+    // 4. 🚀 边界判定（在吃干净缓冲区后，再统一处理是否有完整的 HTTP 报文边界）
     if (conn.read_buffer.find("\r\n\r\n") != std::string::npos)
     {
         std::cout << "[ServerManager] HTTP Request boundary matched for FD " << clientFd << ". Transition to POLLOUT." << std::endl;
 
-        // 【通关测试硬编码】：模拟高层队友拼好的完全体物资
+        // 模拟高层队友拼好的完全体物资
         std::string mock_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 37\r\n\r\n<h1>Hello from Connection Box!</h1>\n";
 
-        // 5. 🚀【注资接口】：通过盒子里的搬运工灌入写蓄水池
+        // 5. 🚀 通过盒子里的搬运工灌入写蓄水池
         conn.io.pushWriteBuffer(mock_response);
 
         // 调转枪头，通知内核下一轮滴答立刻检查可写事件
@@ -399,27 +394,26 @@ void ServerManager::acceptNewConnection(int listenFd)
 
     // 1. 调用 accept(listenFd, ...) 顺藤摸瓜捞出全新的客户端 clientFd
     int clientFd = accept(listenFd, (struct sockaddr *)&client_addr, &client_len);
+    
+    // 🎯 零 errno 物理屏障：只要返回 -1，无论什么原因（EAGAIN、EWOULDBLOCK、EINTR）
+    // 我们都直接、安静地 return，把机会留给下一次 poll 轮询，彻底消灭 errno！
     if (clientFd < 0)
     {
-        // 2. 检查非阻塞状态下的正常抖动
-        if (errno == EAGAIN || errno == EWOULDBLOCK)
-            return;
-        std::cerr << "Warning: accept failed on listen FD " << listenFd << std::endl;
         return;
     }
 
-    // 3. 打印迎宾日志
+    // 2. 打印迎宾日志
     std::cout << "[ServerManager] Accepted new connection from "
               << inet_ntoa(client_addr.sin_addr) << ":" << ntohs(client_addr.sin_port)
               << " -> Allocated Client FD: " << clientFd << std::endl;
 
-    // 4. 将新诞生的 clientFd 强行剥夺其阻塞特权
+    // 3. 将新诞生的 clientFd 强行剥夺其阻塞特权
     this->setNonBlocking(clientFd);
 
-    //直接把所有人格属性打包成一个盒子塞进账本
+    // 直接把所有人格属性打包成一个盒子塞进账本
     this->_connections[clientFd] = Connection(clientFd, this->_listen_socket_map[listenFd]);
 
-    // 挂载进 poll 阵列
+    // 4. 挂载进 poll 阵列
     struct pollfd pfd;
     pfd.fd = clientFd;
     pfd.events = POLLIN;
@@ -433,6 +427,9 @@ void ServerManager::run()
         return;
     std::cout << "[ServerManager] Main loop started. Entering the matrix..." << std::endl;
 
+    // 🎯 1. 引入局部计数器，用来物理平替 EINTR 的判断
+    int poll_error_retries = 0;
+
     while (true)
     {
         //【收割车间】：在每次呼叫 poll 之前，把上一轮标记为 -1 的死线统一清理掉
@@ -441,7 +438,6 @@ void ServerManager::run()
             if (this->_poll_fds[i].fd == -1)
             {
                 this->_poll_fds.erase(this->_poll_fds.begin() + i);
-                // 注意：由于后面的人往前迈了一步，i 不要递增，原地继续检查即可！
             }
             else
             {
@@ -451,12 +447,23 @@ void ServerManager::run()
 
         // 此时 _poll_fds 里的内存干净无瑕，呼叫系统调用死等
         int ret = poll(&this->_poll_fds[0], this->_poll_fds.size(), -1);
+        
+        // 🎯 2. 零 errno 处理 poll 失败
         if (ret < 0)
         {
-            if (errno == EINTR)
+            // 如果连续报错小于 3 次，我们“盲猜”它是信号中断（EINTR），
+            // 累加计数器，然后安全 continue 重新唤醒 poll
+            if (poll_error_retries < 3)
+            {
+                poll_error_retries++;
                 continue;
+            }
+            // 如果连续 3 次都失败，说明真的发生了致命系统故障，熔断退出循环
             break;
         }
+
+        // 🎯 3. 一旦 poll 成功（ret >= 0），立刻物理清空累加器，等待下一次循环
+        poll_error_retries = 0;
 
         // 倒序安全扫描
         for (size_t i = this->_poll_fds.size(); i > 0; --i)
