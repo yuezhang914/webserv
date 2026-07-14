@@ -20,3 +20,8 @@ void Connection::clear()
     this->io.clear(); // 物理释放 5MB 的 string 虚胖容量
     // 未来可以在这里重置队友的 HTTPParser 状态机
 }
+
+const ServerConfig& Connection::getConfig()const
+{
+    return this->config;
+}

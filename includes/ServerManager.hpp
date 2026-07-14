@@ -4,6 +4,7 @@
 #include "ServerConfig.hpp"
 #include "ClientIO.hpp"
 #include "Connection.hpp"
+#include "RequestParser.hpp"
 
 class ServerManager
 {
