@@ -44,13 +44,42 @@ static void check(bool condition, const std::string& name)
 函数：parseRaw
 用途：用测试准备好的 raw HTTP 字符串直接调用 Request 模块唯一入口。
 参数：raw 是原始 HTTP 字节；server 是当前请求使用的配置；req 和 consumed 接收解析结果。
-返回值：原样返回 parseRequestBuffer() 的状态。
-实现逻辑：把 server 地址传入 parser；本函数不做网络读取，也不修改 raw。
+返回值：原样返回 RequestParser::parseBuffer() 的状态。
+实现逻辑：调用 RequestParser 类的静态公开入口；本函数不做网络读取，也不修改 raw。
 */
 static int parseRaw(const std::string& raw, const ServerConfig& server,
                     Request& req, size_t& consumed)
 {
-    return parseRequestBuffer(raw, req, &server, consumed);
+    return RequestParser::parseBuffer(raw, req, &server, consumed);
+}
+
+
+/*
+函数：headerEquals
+用途：通过 Request 的只读 getHeader() 接口检查某个 header 是否存在且等于预期值。
+参数：req 是已经解析的 Request；name 是查询名称；expected 是期望值。
+返回值：header 存在且值相等时返回 true。
+*/
+static bool headerEquals(const Request& req, const std::string& name,
+                         const std::string& expected)
+{
+    std::string value;
+    return req.getHeader(name, value) && value == expected;
+}
+
+/*
+函数：parseTarget
+用途：把单独的 URI 测试值包装成完整 HTTP/1.1 GET request，再交给真实 RequestParser 检查。
+参数：target 是待测 request-target；其余参数用于解析和接收结果。
+返回值：原样返回 RequestParser::parseBuffer() 的状态。
+为什么这样测试：URI 安全函数已经封装为 RequestParser 私有成员，测试不再绕过 request-line 直接改写 Request 私有字段。
+*/
+static int parseTarget(const std::string& target, const ServerConfig& server,
+                       Request& req, size_t& consumed)
+{
+    std::string raw = "GET " + target + " HTTP/1.1\r\n"
+                      "Host: localhost\r\n\r\n";
+    return parseRaw(raw, server, req, consumed);
 }
 
 /*
@@ -92,52 +121,42 @@ static ServerConfig makeBaseServer()
 
 /*
 函数：testStringAndUriHelpers
-用途：直接测试 Request.cpp 的 to_lower() 与 sanitizeRequestUri() 公共工具。
-参数：无。
+用途：验证共享 to_lower()，并通过完整 request-line 测试已经封装到 RequestParser 私有成员中的 URI 安全逻辑。
+参数：server 是 parseTarget() 使用的当前测试配置。
 返回值：无；通过 check() 累计结果。
-实现逻辑：先验证大小写转换，再分别构造合法 query、fragment、反斜杠、路径穿越，以及合法和畸形 percent-encoding。
+实现逻辑：不直接修改 Request 私有字段；每个 URI 都包装成合法 HTTP/1.1 GET 请求后交给 RequestParser::parseBuffer()。
 */
-static void testStringAndUriHelpers()
+static void testStringAndUriHelpers(const ServerConfig& server)
 {
-    beginGroup("Request.cpp 字符串与 URI 安全");
+    beginGroup("Request 字符串与 URI 安全");
     check(to_lower("HoSt-X") == "host-x", "to_lower 正确转换大小写");
 
     Request req;
-    req.uri = "/safe/file.txt?name=Tom";
-    check(sanitizeRequestUri(req) == REQUEST_OK, "合法 path + query 通过 URI 检查");
-
-    req.uri = "/file#fragment";
-    check(sanitizeRequestUri(req) == REQUEST_ERROR, "URI fragment 被拒绝");
-
-    req.uri = "/dir\\file";
-    check(sanitizeRequestUri(req) == REQUEST_ERROR, "反斜杠路径被拒绝");
-
-    req.uri = "/../secret";
-    check(sanitizeRequestUri(req) == REQUEST_ERROR, "原始路径穿越被拒绝");
-
-    req.uri = "/..?x=1";
-    check(sanitizeRequestUri(req) == REQUEST_ERROR, "带 query 的 /.. 路径穿越被拒绝");
-
-    req.uri = "/safe/%2E%2e/secret";
-    check(sanitizeRequestUri(req) == REQUEST_ERROR, "大小写混合的编码点被拒绝");
-
-    req.uri = "/safe%2Fsecret";
-    check(sanitizeRequestUri(req) == REQUEST_ERROR, "编码斜杠被拒绝");
-
-    req.uri = "/safe/file%20name.txt";
-    check(sanitizeRequestUri(req) == REQUEST_OK, "合法 %20 percent-encoding 被接受");
-
-    req.uri = "/safe/file%";
-    check(sanitizeRequestUri(req) == REQUEST_ERROR, "末尾孤立百分号被拒绝");
-
-    req.uri = "/safe/file%2";
-    check(sanitizeRequestUri(req) == REQUEST_ERROR, "不足两位的 percent-encoding 被拒绝");
-
-    req.uri = "/safe/file%ZZ";
-    check(sanitizeRequestUri(req) == REQUEST_ERROR, "非十六进制 percent-encoding 被拒绝");
-
-    req.uri = "http://example.com/file";
-    check(sanitizeRequestUri(req) == REQUEST_ERROR, "非 / 开头的 absolute-form URI 被拒绝");
+    size_t consumed = 0;
+    check(parseTarget("/safe/file.txt?name=Tom", server, req, consumed) == REQUEST_OK,
+          "合法 path + query 通过 URI 检查");
+    check(parseTarget("/file#fragment", server, req, consumed) == REQUEST_ERROR,
+          "URI fragment 被拒绝");
+    check(parseTarget("/dir\\file", server, req, consumed) == REQUEST_ERROR,
+          "反斜杠路径被拒绝");
+    check(parseTarget("/../secret", server, req, consumed) == REQUEST_ERROR,
+          "原始路径穿越被拒绝");
+    check(parseTarget("/..?x=1", server, req, consumed) == REQUEST_ERROR,
+          "带 query 的 /.. 路径穿越被拒绝");
+    check(parseTarget("/safe/%2E%2e/secret", server, req, consumed) == REQUEST_ERROR,
+          "大小写混合的编码点被拒绝");
+    check(parseTarget("/safe%2Fsecret", server, req, consumed) == REQUEST_ERROR,
+          "编码斜杠被拒绝");
+    check(parseTarget("/safe/file%20name.txt", server, req, consumed) == REQUEST_OK,
+          "合法 %20 percent-encoding 被接受");
+    check(parseTarget("/safe/file%", server, req, consumed) == REQUEST_ERROR,
+          "末尾孤立百分号被拒绝");
+    check(parseTarget("/safe/file%2", server, req, consumed) == REQUEST_ERROR,
+          "不足两位的 percent-encoding 被拒绝");
+    check(parseTarget("/safe/file%ZZ", server, req, consumed) == REQUEST_ERROR,
+          "非十六进制 percent-encoding 被拒绝");
+    check(parseTarget("http://example.com/file", server, req, consumed) == REQUEST_ERROR,
+          "非 / 开头的 absolute-form URI 被拒绝");
 }
 
 /*
@@ -162,12 +181,12 @@ static void testValidRequestAndReset(const ServerConfig& server)
         "abc";
     int status = parseRaw(post, server, req, consumed);
     check(status == REQUEST_OK, "合法 POST 返回 REQUEST_OK");
-    check(req.method == "POST", "method 正确保存");
-    check(req.uri == "/upload/a.txt", "uri 正确保存");
-    check(req.version == "HTTP/1.1", "version 正确保存");
-    check(req.headers["host"] == "localhost", "Host key 小写且 value 去掉 OWS");
-    check(req.headers["x-test"] == "value", "普通 header value 去掉两端空白");
-    check(req.body == "abc", "Content-Length body 正确保存");
+    check(req.getMethod() == "POST", "method 正确保存");
+    check(req.getUri() == "/upload/a.txt", "uri 正确保存");
+    check(req.getVersion() == "HTTP/1.1", "version 正确保存");
+    check(headerEquals(req, "HOST", "localhost"), "Host 可通过大小写不敏感 getter 读取");
+    check(headerEquals(req, "X-Test", "value"), "普通 header value 去掉两端空白并只读访问");
+    check(req.getBody() == "abc", "Content-Length body 正确保存");
     check(consumed == post.size(), "consumed 等于完整 POST 长度");
 
     const std::string get =
@@ -176,10 +195,80 @@ static void testValidRequestAndReset(const ServerConfig& server)
         "\r\n";
     status = parseRaw(get, server, req, consumed);
     check(status == REQUEST_OK, "同一个 Request 可再次解析 GET");
-    check(req.body.empty(), "再次解析前会清空旧 body");
-    check(req.headers.find("x-test") == req.headers.end(), "再次解析前会清空旧 headers");
-    check(req.config == &server, "req.config 指向传入 ServerConfig");
-    check(req.closeConnection == true, "parser 初始化 closeConnection 为 true，等待 ServerManager 再决定策略");
+    check(req.getBody().empty(), "再次解析前会清空旧 body");
+    check(req.getHeaders().find("x-test") == req.getHeaders().end(), "再次解析前会清空旧 headers");
+    check(req.getConfig() == &server, "req.getConfig() 指向传入 ServerConfig");
+    check(req.shouldCloseConnection() == true, "parser 初始化 closeConnection 为 true，等待 ServerManager 再决定策略");
+}
+
+/*
+函数：testRequestClassInterface
+用途：验证 Request 已改为封装 class 后的构造、只读 getter、拷贝语义和受控连接策略接口。
+参数：server 是解析合法请求时使用的配置。
+返回值：无。
+实现逻辑：
+    1. 检查默认对象为空、config 为 NULL、close 默认为 true。
+    2. 通过 RequestParser 填充对象，再用 getter 读取，证明外部不需要直接访问私有字段。
+    3. 检查拷贝构造和赋值运算保留全部解析结果。
+    4. 检查 setCloseConnection() 只能受控修改连接策略。
+*/
+static void testRequestClassInterface(const ServerConfig& server)
+{
+    beginGroup("Request class 封装接口");
+
+    Request empty;
+    check(empty.getMethod().empty() && empty.getUri().empty()
+              && empty.getVersion().empty() && empty.getHeaders().empty()
+              && empty.getBody().empty(),
+          "Request 构造函数创建空解析结果");
+    check(empty.getConfig() == NULL, "默认 Request 不绑定 ServerConfig");
+    check(empty.shouldCloseConnection(), "默认连接策略为响应后关闭");
+
+    Request parsed;
+    size_t consumed = 0;
+    const std::string raw =
+        "POST /copy HTTP/1.1\r\n"
+        "Host: localhost\r\n"
+        "Content-Length: 3\r\n\r\nabc";
+    check(parseRaw(raw, server, parsed, consumed) == REQUEST_OK,
+          "RequestParser 可以写入 Request 私有字段");
+    check(parsed.getMethod() == "POST" && parsed.getUri() == "/copy"
+              && parsed.getBody() == "abc" && parsed.getConfig() == &server,
+          "外部模块通过 const getter 读取解析结果");
+
+    std::string missing = "old-value";
+    check(!parsed.getHeader("X-Missing", missing) && missing.empty(),
+          "getHeader 能区分缺失字段并清空输出值");
+
+    Request compatibility;
+    size_t compatibility_consumed = 0;
+    check(parseRequestBuffer(raw, compatibility, &server,
+                             compatibility_consumed) == REQUEST_OK
+              && compatibility.getUri() == "/copy",
+          "旧 parseRequestBuffer 接口仍可转发到 RequestParser class");
+
+    Request copied(parsed);
+    check(copied.getMethod() == parsed.getMethod()
+              && copied.getUri() == parsed.getUri()
+              && copied.getHeaders() == parsed.getHeaders()
+              && copied.getBody() == parsed.getBody()
+              && copied.getConfig() == parsed.getConfig(),
+          "Request 拷贝构造复制全部解析字段");
+
+    Request assigned;
+    assigned = parsed;
+    check(assigned.getMethod() == parsed.getMethod()
+              && assigned.getUri() == parsed.getUri()
+              && assigned.getHeaders() == parsed.getHeaders()
+              && assigned.getBody() == parsed.getBody()
+              && assigned.getConfig() == parsed.getConfig(),
+          "Request 赋值运算复制全部解析字段");
+
+    assigned.setCloseConnection(false);
+    check(!assigned.shouldCloseConnection(),
+          "ServerManager 可通过受控 setter 修改连接策略");
+    check(parsed.shouldCloseConnection(),
+          "修改副本连接策略不会污染原 Request");
 }
 
 /*
@@ -420,7 +509,7 @@ static void testChunkedRules(const ServerConfig& server)
         "X-Trailer: done\r\n\r\n";
     status = parseRaw(multi, server, req, consumed);
     check(status == REQUEST_OK, "多 chunk + extension + trailer 解析成功");
-    check(req.body == "hello", "多个 chunk 被合并为 hello");
+    check(req.getBody() == "hello", "多个 chunk 被合并为 hello");
     check(consumed == multi.size(), "trailer 被完整计入 consumed");
 
     check(parseRaw("POST /upload/a HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\nA\r\n0123456789\r\n0\r\n\r\n", server, req, consumed) == REQUEST_OK,
@@ -514,14 +603,14 @@ static void testBinaryAndPipeline(const ServerConfig& server)
     binary.append("a\0b", 3);
     int status = parseRaw(binary, server, req, consumed);
     check(status == REQUEST_OK, "含 NUL 的二进制 body 解析成功");
-    check(req.body.size() == 3 && req.body[0] == 'a' && req.body[1] == '\0' && req.body[2] == 'b',
+    check(req.getBody().size() == 3 && req.getBody()[0] == 'a' && req.getBody()[1] == '\0' && req.getBody()[2] == 'b',
           "二进制 body 不会在 NUL 处截断");
 
     const std::string first = "GET /one HTTP/1.1\r\nHost: localhost\r\n\r\n";
     const std::string second = "GET /two HTTP/1.1\r\nHost: localhost\r\n\r\n";
     status = parseRaw(first + second, server, req, consumed);
     check(status == REQUEST_OK, "一个 buffer 含两个 request 时先解析第一个");
-    check(req.uri == "/one", "pipeline 第一次得到第一个 URI");
+    check(req.getUri() == "/one", "pipeline 第一次得到第一个 URI");
     check(consumed == first.size(), "pipeline consumed 不吞掉第二个 request");
 }
 
@@ -536,8 +625,9 @@ int main()
 {
     ServerConfig server = makeBaseServer();
 
-    testStringAndUriHelpers();
+    testStringAndUriHelpers(server);
     testValidRequestAndReset(server);
+    testRequestClassInterface(server);
     testRequestLineRules(server);
     testLineEndingRules(server);
     testHeaderRules(server);
