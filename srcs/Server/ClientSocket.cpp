@@ -37,14 +37,23 @@ void ClientSocket::setNonBlocking()
 
 ssize_t ClientSocket::read(char *buf, size_t size) const
 {
+    // 1. 正常尝试从网线中捞取数据
     ssize_t bytes = recv(this->_fd, buf, size, 0);
+
     if (bytes == 0)
-        return 0; // EOF
+        return 0; // EOF（客户端优雅拔线）
+
     if (bytes < 0)
     {
-        // 过滤非阻塞抖动
-        if (errno == EAGAIN || errno == EWOULDBLOCK)
-            return -1;
+        // 【零 errno 物理测谎】：利用 MSG_PEEK 偷偷瞄一眼内核缓冲区
+        char dummy;
+        ssize_t peek_bytes = recv(this->_fd, &dummy, 1, MSG_PEEK);
+        // 如果偷看也返回 -1：内核里真的没数据了
+        if (peek_bytes < 0)
+        {
+            return -1; // 优雅返回 -1，通知大管家跳出吞噬循环
+        }
+        // 否则，说明连接已经发生不可逆的物理死亡
         return -2; // 致命断连
     }
     return bytes;
@@ -54,25 +63,7 @@ ssize_t ClientSocket::write(const std::string &data) const
 {
     if (data.empty())
         return 0;
-
-    // 🚀 【抓脏打印仪】：看看这多出来的 375 字节到底是在哪一步被塞进 string 的！
-    std::cout << "[DEBUG_WRITE] Client FD: " << this->_fd
-              << " | data.size() = " << data.size() << std::endl;
-
-    if (data.size() > 50)
-    {
-        std::cout << "[DEBUG_WRITE] Header prefix: " << data.substr(0, 50) << std::endl;
-        std::cout << "[DEBUG_WRITE] Tail suffix: " << data.substr(data.size() - 50) << std::endl;
-    }
-    else
-    {
-        std::cout << "[DEBUG_WRITE] Content: " << data << std::endl;
-    }
-
     ssize_t bytes = send(this->_fd, data.data(), data.size(), 0);
-
-    std::cout << "[DEBUG_WRITE] Actually sent by kernel: " << bytes << " bytes" << std::endl;
-
     if (bytes < 0)
         return -1;
     return bytes;
