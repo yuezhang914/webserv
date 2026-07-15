@@ -22,6 +22,7 @@
 #include <fstream>
 #include <sstream>
 #include <sys/types.h>
+#include <errno.h>
 
 
 // 3. 业务平坦化组装
@@ -30,10 +31,12 @@
 #include "LocationConfig.hpp"
 #include "ConfigParser.hpp"
 #include "ServerManager.hpp"
-#include "ClientIO.hpp"
+
 #include "Signal.hpp"
-#include "ClientIO.hpp"
+
 #include "Connection.hpp"
+#include "ServerSocket.hpp"
+#include "ClientSocket.hpp"
 
 // ...
 #endif
