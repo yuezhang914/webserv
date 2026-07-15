@@ -38,5 +38,7 @@
 #include "ServerSocket.hpp"
 #include "ClientSocket.hpp"
 
+#include "CgiHandler.hpp"
+
 // ...
 #endif
