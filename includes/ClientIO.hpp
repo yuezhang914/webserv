@@ -33,6 +33,9 @@ public:
     // 资产暴露：获取底层物理 FD
     int getFd() const;
 
+    const std::string& getWriteBuf() const;
+    std::string& getWriteBuf();
+
 
 };
 

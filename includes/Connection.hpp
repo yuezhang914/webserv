@@ -13,6 +13,7 @@ private:
     std::string read_buffer;
     ClientIO io;
     Request request;
+    bool close_after_write; 
 
     // 🎫 唯独对大管家和解析器开放绝对特权
     friend class ServerManager;

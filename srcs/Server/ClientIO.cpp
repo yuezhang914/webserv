@@ -61,25 +61,29 @@ ClientIO::~ClientIO()
  *     - 若返回 -1：代表发生抖动（非阻塞满或被信号中断），需由大管家深入核验 errno 进行分流。
  */
 // 🚀 在 ClientIO.cpp 中：
-ssize_t ClientIO::readFromNet(char* buffer, size_t max_len) {
+ssize_t ClientIO::readFromNet(char *buffer, size_t max_len)
+{
     // 1. 发起接收请求
     ssize_t bytes_read = recv(this->_fd, buffer, max_len, 0);
 
-    if (bytes_read == 0) {
+    if (bytes_read == 0)
+    {
         return 0; // 物理 EOF
     }
 
-    if (bytes_read < 0) {
+    if (bytes_read < 0)
+    {
         // 🎯 秘密武器：无 errno 测谎仪（窥探读状态）
         char c;
         ssize_t r = recv(this->_fd, &c, 1, MSG_PEEK | MSG_DONTWAIT);
-        
-        if (r == 0) {
+
+        if (r == 0)
+        {
             return -2; // 🔴 对端彻底死机/强行拔网线（真实的物理死局）
         }
-        
+
         // 🟢 其他情况，说明连接活着，仅仅是数据读空了（EAGAIN/EWOULDBLOCK 等）
-        return -1; 
+        return -1;
     }
 
     return bytes_read; // 正常读到的字节数
@@ -114,16 +118,16 @@ ssize_t ClientIO::writeToNet()
         // 尝试非阻塞、不消耗缓冲区地读 1 个字节
         char c;
         ssize_t r = recv(this->_fd, &c, 1, MSG_PEEK | MSG_DONTWAIT);
-        
+
         if (r == 0)
         {
             // 🎯 如果 recv 返回 0，说明对端已经彻底关闭了物理连接（EOF）！
             // 这时我们终于有十足的把握，安全、自信地返回 -1 销毁连接
             return -1;
         }
-        
+
         // 🎯 否则，说明连接依然活着，只是发送缓冲区满了（EAGAIN），返回 0 等待下次可写
-        return 0; 
+        return 0;
     }
 
     if (bytes_sent > 0)
@@ -143,7 +147,7 @@ ssize_t ClientIO::writeToNet()
  *     1. 物理流向追加：执行 `this->_write_buf += response_str`。将外部扔过来的新物资，极其安全地焊接到属于该客人的专属本地写蓄水池末尾。
  * 后续影响：本地写蓄水池的 size() 被扩充，`isWriteFinished()` 自动变为 false 状态，从而激活后续大管家的 POLLOUT 写关注轮询流。
  */
-void ClientIO::pushWriteBuffer(const std::string& response_str)
+void ClientIO::pushWriteBuffer(const std::string &response_str)
 {
     this->_write_buf += response_str;
 }
@@ -165,7 +169,7 @@ bool ClientIO::isWriteFinished() const
 
 void ClientIO::clear()
 {
-    this->_write_buf.clear(); // 物理清空写缓存，防止残余字节干扰下一轮
+    std::string().swap(this->_write_buf);
 }
 
 /**
@@ -179,3 +183,13 @@ int ClientIO::getFd() const
     return this->_fd;
 }
 
+const std::string &ClientIO::getWriteBuf() const
+{
+    return _write_buf;
+}
+
+// 🟢 通道 2：可写版本（当大管家确实需要动手修改、裁剪写缓冲区时调用）
+std::string &ClientIO::getWriteBuf()
+{
+    return _write_buf;
+}
