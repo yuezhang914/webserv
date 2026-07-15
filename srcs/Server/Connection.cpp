@@ -7,7 +7,7 @@ Connection::Connection() : socket(NULL), close_after_write(false)
 Connection::Connection(int clientFd, const ServerConfig &srv_cfg)
     : socket(new ClientSocket(clientFd)), config(srv_cfg), close_after_write(false)
 {
-    // 诞生的第一秒，让 socket 成员自己执行非阻塞自洗，大管家再也不用操心了！
+    // 诞生的第一秒，让 socket 成员自己执行非阻塞设置
     this->socket->setNonBlocking();
 }
 
@@ -23,14 +23,13 @@ Connection &Connection::operator=(const Connection &other)
 {
     if (this != &other)
     {
-        delete this->socket; // 释放旧的
+        delete this->socket;
         this->socket = other.socket;
         this->config = other.config;
         this->read_buffer = other.read_buffer;
         this->write_buffer = other.write_buffer;
         this->request = other.request;
         this->close_after_write = other.close_after_write;
-
         // 剥夺被拷贝对象的所有权
         const_cast<Connection &>(other).socket = NULL;
     }
