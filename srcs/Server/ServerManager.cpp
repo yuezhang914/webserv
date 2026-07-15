@@ -242,16 +242,13 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
 
     // 2. 🚀 【核心合龙】：调用队友的静态解析器，直接解析这一轮蓄水池里的数据
     size_t consumed = 0;
-    
-    // 传入当前的 config 指针（假设你在 Connection 盒子里存了，或者从 _listen_socket_map 拿到了对应的配置）
-    const ServerConfig server_config = conn.getConfig(); // 或者从 ServerManager 的配置表里查到对应的 server_config
 
-    int status = RequestParser::parseBuffer(conn.read_buffer, conn.request, &server_config, consumed);
+    int status = RequestParser::parseBuffer(conn.read_buffer, conn.request, &conn.config, consumed);
 
     // 3. 🚀 根据解析器的物理反馈，决定大管家下一步的动作
     if (status == REQUEST_OK)
     {
-        std::cout << "[ServerManager] Request parsed successfully for FD " << clientFd << ". Method: " 
+        std::cout << "[ServerManager] Request parsed successfully for FD " << clientFd << ". Method: "
                   << conn.request.getMethod() << ", Path: " << conn.request.getPath() << std::endl;
 
         // 🌟 卸货腾笼：从缓冲区里物理切掉这一段已经完美消费的请求字节！
@@ -275,15 +272,15 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
     {
         // 🔴 解析发生硬伤（400 Bad Request, 413 Too Large 等）
         std::cerr << "[ServerManager] Request error (" << status << ") on FD " << clientFd << ". Sending 400 and closing." << std::endl;
-        
+
         // 快速响应一个 400 Bad Request，然后关闭连接
         std::string error_response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         conn.io.pushWriteBuffer(error_response);
-        
+
         // 直接强制进入写事件，发完这个 400 立即 closeConnection
         this->_poll_fds[poll_index].events = POLLOUT;
-        
-        // 注意：你可以给 Connection 挂一个标记 conn.close_after_write = true; 
+
+        // 注意：你可以给 Connection 挂一个标记 conn.close_after_write = true;
         // 这样在 handleClientWrite 发完数据后，发现这个标记为 true，就物理 close 它。
     }
 }
@@ -414,7 +411,7 @@ void ServerManager::acceptNewConnection(int listenFd)
 
     // 1. 调用 accept(listenFd, ...) 顺藤摸瓜捞出全新的客户端 clientFd
     int clientFd = accept(listenFd, (struct sockaddr *)&client_addr, &client_len);
-    
+
     // 🎯 零 errno 物理屏障：只要返回 -1，无论什么原因（EAGAIN、EWOULDBLOCK、EINTR）
     // 我们都直接、安静地 return，把机会留给下一次 poll 轮询，彻底消灭 errno！
     if (clientFd < 0)
@@ -452,7 +449,7 @@ void ServerManager::run()
 
     while (true)
     {
-        //【收割车间】：在每次呼叫 poll 之前，把上一轮标记为 -1 的死线统一清理掉
+        // 【收割车间】：在每次呼叫 poll 之前，把上一轮标记为 -1 的死线统一清理掉
         for (size_t i = 0; i < this->_poll_fds.size();)
         {
             if (this->_poll_fds[i].fd == -1)
@@ -467,7 +464,7 @@ void ServerManager::run()
 
         // 此时 _poll_fds 里的内存干净无瑕，呼叫系统调用死等
         int ret = poll(&this->_poll_fds[0], this->_poll_fds.size(), -1);
-        
+
         // 🎯 2. 零 errno 处理 poll 失败
         if (ret < 0)
         {

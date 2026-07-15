@@ -21,7 +21,4 @@ void Connection::clear()
     // 未来可以在这里重置队友的 HTTPParser 状态机
 }
 
-const ServerConfig& Connection::getConfig()const
-{
-    return this->config;
-}
+
