@@ -21,7 +21,6 @@ private:
 
     // 3. 内部私有工具函数
     void setupSockets();                                     // 砸开所有配置的物理端口
-    void setNonBlocking(int fd);                             // 将套接字设为非阻塞
     bool isListenFd(int fd);                                 // 判别是监听端口还是普通客户连接
     void acceptNewConnection(int listenFd);                  // 诞生新客户并挂载上网
     void handleClientRead(int clientFd, size_t poll_index);  // 读取客户端请求

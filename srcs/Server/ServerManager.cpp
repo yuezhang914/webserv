@@ -23,39 +23,6 @@ void ServerManager::init()
     this->setupSockets();
 }
 
-/**
- * 函数：ServerManager::setNonBlocking
- * 用途：将指定的套接字（Socket）文件描述符强制设置为非阻塞（O_NONBLOCK）模式。
- * 参数来源：fd 来自本类内部的监听初始化阶段（setupSockets 产生的 listenFd）或运行时接受新连接阶段（acceptNewConnection 产生的 clientFd）。
- * 变量解释：
- *     - fd：需要修改状态旗帜的目标套接字文件描述符。
- *     - flags：临时变量，通过 fcntl 获取的当前套接字拥有的全部内核状态属性。
- * 实现逻辑：
- *     1. 调用 fcntl(fd, F_GETFL, 0) 捞出该套接字当前在内核中所有的属性旗帜，若失败则打印错误并熔断。
- *     2. 采用位运算“或（|）”操作，在原有旗帜的基础上追加 O_NONBLOCK 非阻塞属性。
- *     3. 调用 fcntl(fd, F_SETFL, ...) 将改版后的全新属性旗帜重新插回内核中以使其生效。
- * 后续影响：被处理的套接字在进行 read()/recv() 或 write()/send() 操作时将永远不会阻塞（Block）主线程。
- *           若无数据可读或发送缓冲区满，系统调用会立刻返回 -1 并设置 errno 为 EAGAIN，
- *           从而确保底层的 poll 大循环能以极速串行、永不卡死的状态持续驱动高并发网络流。
- */
-void ServerManager::setNonBlocking(int fd)
-{
-    // 1. 调用 fcntl(fd, F_GETFL, 0) 捞出该套接字当前在内核中所有的属性旗帜
-    int flags = fcntl(fd, F_GETFL, 0);
-    if (flags < 0)
-    {
-        std::cerr << "Error: fcntl F_GETFL failed for fd " << fd << std::endl;
-        return;
-    }
-
-    // 2. 采用位运算“或（|）”操作，在原有旗帜的基础上追加 O_NONBLOCK 非阻塞属性
-    // 3. 调用 fcntl(fd, F_SETFL, ...) 将改版后的全新属性旗帜重新插回内核中
-    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0)
-    {
-        std::cerr << "Error: fcntl F_SETFL O_NONBLOCK failed for fd " << fd << std::endl;
-    }
-}
-
 void ServerManager::setupSockets()
 {
     std::vector<int> handled_ports;
@@ -171,9 +138,9 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
             this->closeConnection(clientFd, poll_index);
             return;
         }
-        if (bytes_read == -1) // 🟢 正常的非阻塞读空，安全 break，绝对不往下走！
+        if (bytes_read == -1) // 正常的非阻塞读空，安全 break，绝对不往下走！
             break;
-        if (bytes_read == -2) // 🔴 物理崩溃，强行断开
+        if (bytes_read == -2) // 物理崩溃，强行断开
         {
             this->closeConnection(clientFd, poll_index);
             return;
@@ -195,7 +162,7 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
     {
         std::cout << "[ServerManager] Request parsed successfully for FD " << clientFd << std::endl;
 
-        // 🌟 卡尺精准裁剪
+        // 卡尺精准裁剪
         conn.read_buffer.erase(0, consumed);
 
         // 🚀 动态拼装 Body，物理对齐 Content-Length
@@ -217,12 +184,12 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
     }
     else if (status == REQUEST_INCOMPLETE)
     {
-        // 🟢 半包挂起：不裁剪 buffer，consumed 应该为 0。等待下一次 poll 读就绪唤醒。
+        // 半包挂起：不裁剪 buffer，consumed 应该为 0。等待下一次 poll 读就绪唤醒。
         std::cout << "[ServerManager] Request incomplete for FD " << clientFd << ". Waiting for more data..." << std::endl;
     }
     else
     {
-        // 🔴 解析发生硬伤（400, 413, 505 等）
+        // 解析发生硬伤（400, 413, 505 等）
         std::cerr << "[ServerManager] Request error (" << status << ") on FD " << clientFd << ". Pre-writing 400 response." << std::endl;
 
         // 1. 关键防线：给当前连接打上“死缓”标签
@@ -272,23 +239,23 @@ void ServerManager::handleClientWrite(int clientFd, size_t poll_index)
     ssize_t bytes_sent = conn.socket->write(conn.write_buffer);
 
     // 🚨 物理测谎判定
-    if (bytes_sent == -2) // 🔴 致命故障（如客户端强行断开且引发了 EPIPE 等，返回 -2）
+    if (bytes_sent == -2) // 致命故障（如客户端强行断开且引发了 EPIPE 等，返回 -2）
     {
         this->closeConnection(clientFd, poll_index);
         return;
     }
-    if (bytes_sent == -1) // 🟢 正常的非阻塞写阻碍（缓冲区满了，直接返回等待下一轮 POLLOUT）
+    if (bytes_sent == -1) // 正常的非阻塞写阻碍（缓冲区满了，直接返回等待下一轮 POLLOUT）
     {
         return;
     }
 
-    // 🚀 【核心修复 1】：物理滑动卡尺！发出了多少，就从发件箱里切掉多少！
+    // 【核心修复 1】：物理滑动卡尺！发出了多少，就从发件箱里切掉多少！
     if (bytes_sent > 0)
     {
         conn.write_buffer.erase(0, bytes_sent);
     }
 
-    // 2. 🚀 【核心修复 2】：只有当这一轮的写缓冲区被彻底排空
+    // 2. 【核心修复 2】：只有当这一轮的写缓冲区被彻底排空
     if (conn.write_buffer.empty())
     {
         // C++98 彻底释放内存空间防止虚胖
@@ -378,25 +345,21 @@ void ServerManager::acceptNewConnection(int listenFd)
     // 1. 调用 accept(listenFd, ...) 顺藤摸瓜捞出全新的客户端 clientFd
     int clientFd = accept(listenFd, (struct sockaddr *)&client_addr, &client_len);
 
-    // 🎯 零 errno 物理屏障：只要返回 -1，无论什么原因（EAGAIN、EWOULDBLOCK、EINTR）
-    // 我们都直接、安静地 return，把机会留给下一次 poll 轮询，彻底消灭 errno！
+    // 零 errno 物理屏障：非阻塞下捞空或被信号中断时优雅退回 poll
     if (clientFd < 0)
     {
         return;
     }
 
-    // 2. 打印迎宾日志
+    // 2. 打印物理迎宾日志
     std::cout << "[ServerManager] Accepted new connection from "
               << inet_ntoa(client_addr.sin_addr) << ":" << ntohs(client_addr.sin_port)
               << " -> Allocated Client FD: " << clientFd << std::endl;
 
-    // 3. 将新诞生的 clientFd 强行剥夺其阻塞特权
-    this->setNonBlocking(clientFd);
-
-    // 直接把所有人格属性打包成一个盒子塞进账本
+    // 3.【物理并轨】：直接打包塞进账本（Connection 内部会安全地把 clientFd 剥夺阻塞特权）
     this->_connections[clientFd] = Connection(clientFd, this->_listen_socket_map[listenFd]);
 
-    // 4. 挂载进 poll 阵列
+    // 4. 挂载进 poll 阵列，静待第一轮 POLLIN 读数据
     struct pollfd pfd;
     pfd.fd = clientFd;
     pfd.events = POLLIN;
@@ -410,7 +373,7 @@ void ServerManager::run()
         return;
     std::cout << "[ServerManager] Main loop started. Entering the matrix..." << std::endl;
 
-    // 🎯 1. 引入局部计数器，用来物理平替 EINTR 的判断
+    // 1. 引入局部计数器，用来物理平替 EINTR 的判断
     int poll_error_retries = 0;
 
     while (true)
@@ -431,7 +394,7 @@ void ServerManager::run()
         // 此时 _poll_fds 里的内存干净无瑕，呼叫系统调用死等
         int ret = poll(&this->_poll_fds[0], this->_poll_fds.size(), -1);
 
-        // 🎯 2. 零 errno 处理 poll 失败
+        // 2. 零 errno 处理 poll 失败
         if (ret < 0)
         {
             // 如果连续报错小于 3 次，我们“盲猜”它是信号中断（EINTR），
@@ -445,7 +408,7 @@ void ServerManager::run()
             break;
         }
 
-        // 🎯 3. 一旦 poll 成功（ret >= 0），立刻物理清空累加器，等待下一次循环
+        // 3. 一旦 poll 成功（ret >= 0），立刻物理清空累加器，等待下一次循环
         poll_error_retries = 0;
 
         // 倒序安全扫描

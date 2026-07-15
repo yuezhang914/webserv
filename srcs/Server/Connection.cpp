@@ -11,14 +11,14 @@ Connection::Connection(int clientFd, const ServerConfig &srv_cfg)
     this->socket->setNonBlocking();
 }
 
-// 🚀 核心救星 1：拷贝构造函数（转移 socket 指针所有权，防止被临时对象析构销毁）
+// 核心救星 1：拷贝构造函数（转移 socket 指针所有权，防止被临时对象析构销毁）
 Connection::Connection(const Connection &other) : socket(other.socket), config(other.config), read_buffer(other.read_buffer), write_buffer(other.write_buffer), request(other.request), close_after_write(other.close_after_write)
 {
     // 强制类型转换，将源对象的指针设为 NULL（放弃所有权）
     const_cast<Connection &>(other).socket = NULL;
 }
 
-// 🚀 核心救星 2：赋值运算符
+// 核心救星 2：赋值运算符
 Connection &Connection::operator=(const Connection &other)
 {
     if (this != &other)
