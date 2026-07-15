@@ -6,6 +6,12 @@ ServerManager::ServerManager(const std::vector<ServerConfig> &configs) : _server
 
 ServerManager::~ServerManager()
 {
+    // RAII 机制：遍历 delete 这些套接字指针时，
+    // 它们自己的析构函数会自动优雅地 close 掉它们持有的物理 FD！
+    for (size_t i = 0; i < this->_listen_sockets.size(); ++i)
+    {
+        delete this->_listen_sockets[i];
+    }
 }
 
 /**
@@ -50,34 +56,8 @@ void ServerManager::setNonBlocking(int fd)
     }
 }
 
-/**
- * 函数：ServerManager::setupSockets
- * 用途：拉起物理端口监听大网，创建、绑定并激活所有不重复端口的监听套接字。
- * 参数来源：内部数据成员 _server_configs（由构造函数接收的已通过校验的全量配置账本）。
- * 变量解释：
- *     - handled_ports：临时变量，记录哪些物理端口已经被成功执行过 bind 操作，防止重复绑定。
- *     - listenFd：新创建的物理监听套接字文件描述符。
- *     - port：当前遍历到的虚拟主机所期望监听的物理端口（如 80）。
- *     - host：当前虚拟主机配置绑定的 IP 地址字符串（如 "127.0.0.1"）。
- *     - port_duplicate：布尔旗帜，标记当前端口是否与已绑定端口重复。
- *     - reuse：整型开关，传递给 setsockopt 的参数，开启端口地址复用。
- *     - addr：sockaddr_in 网络地址结构体，用于封装绑定的协议族、IP 与端口号。
- *     - SOMAXCONN_BACKLOG：在头文件中定义的宏（值为 128），指定内核连接队列的最大积压上限。
- * 实现逻辑：
- *     1. 建立 handled_ports 登记簿，遍历配置账本，利用循环对比检查当前端口是否已被绑定过。
- *     2. 若检测到端口重复（port_duplicate 为 true），则直接跳过物理 bind 流程，留待运行时通过 Host 请求头实现多域名分流映射。
- *     3. 呼叫 socket() 系统调用创建流式套接字 listenFd。
- *     4. 注入 SO_REUSEADDR 属性，强力防止服务器意外重启时物理端口被内核扣留两分钟的 TIME_WAIT 闪退惨剧。
- *     5. 调用本类成员 setNonBlocking()，强行将新建的 listenFd 洗牌为非阻塞安全状态。
- *     6. 组装 sockaddr_in 结构体，执行 bind() 将套接字锁死在指定的 Host 和 Port 上。
- *     7. 调用 listen(listenFd, SOMAXCONN_BACKLOG) 开启监听，拒绝任何硬编码数值，打通全连接队列。
- *     8. 将成功激活的物理 listenFd 写入 _listen_socket_map 快捷映射表，并组装标准 pollfd 挂载进核心 _poll_fds 监听大阵列。
- * 后续影响：底层 poll 大循环自此拥有了捕获外部客户端连接（三次握手第一步）的物理入口。
- *           当有新浏览器访问对应端口时，该 listenFd 对应的 poll 节点会精准触发 POLLIN 事件。
- */
 void ServerManager::setupSockets()
 {
-    // 临时防重登记簿：用来记录哪些端口（如 80, 8080）已经被 bind 过了
     std::vector<int> handled_ports;
 
     for (size_t i = 0; i < _server_configs.size(); ++i)
@@ -85,7 +65,7 @@ void ServerManager::setupSockets()
         int port = _server_configs[i].port;
         std::string host = _server_configs[i].host;
 
-        // 🔒 【战术去重拦截】：如果这个端口已经砸开过了，直接复用，绝不 bind 两次！
+        // 【战术去重拦截】：
         bool port_duplicate = false;
         for (size_t p = 0; p < handled_ports.size(); ++p)
         {
@@ -98,75 +78,26 @@ void ServerManager::setupSockets()
 
         if (port_duplicate)
         {
-            // 虽然不重新 bind，但这个虚拟主机的配置必须能通过未来的 clientFd 关联到。
-            // 我们可以在大循环诞生连接时，再统一做多域名匹配。现在先跳过物理 bind
             std::cout << "[ServerManager] Multi-server configuration detected for port " << port << " (Skipping duplicate bind)" << std::endl;
             continue;
         }
 
-        // 1. 创建 socket
-        int listenFd = socket(AF_INET, SOCK_STREAM, 0);
-        if (listenFd < 0)
-        {
-            std::cerr << "Error: Cannot create socket for port " << port << std::endl;
-            exit(1);
-        }
+        // 1. 工厂化生产：实例化一个独立的、安全的套接字对象
+        ServerSocket *srv_sock = new ServerSocket(host, port);
 
-        // 2. 开启 SO_REUSEADDR（防止服务器重启时端口被内核扣留 2 分钟的 TIME_WAIT 惨剧）
-        int reuse = 1;
-        if (setsockopt(listenFd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0)
-        {
-            std::cerr << "Error: setsockopt(SO_REUSEADDR) failed" << std::endl;
-            close(listenFd);
-            exit(1);
-        }
+        // 2. 扔给它自己初始化（socket -> reuse -> non-block -> bind -> listen）
+        srv_sock->setup();
 
-        // 3. 强制设置为 O_NONBLOCK 非阻塞（42 铁律：所有 socket 必须非阻塞）
-        this->setNonBlocking(listenFd);
-
-        // 4. 绑定物理地址
-        struct sockaddr_in addr;
-        std::memset(&addr, 0, sizeof(addr));
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(port);
-        // 🎯 物理对齐：不再使用 INADDR_ANY，而是使用 host 的真实 IP 绑定
-        if (host == "localhost" || host == "127.0.0.1")
-        {
-            addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-        }
-        else if (host == "0.0.0.0" || host.empty())
-        {
-            addr.sin_addr.s_addr = htonl(INADDR_ANY);
-        }
-        else
-        {
-            addr.sin_addr.s_addr = inet_addr(host.c_str());
-        }
-
-        if (bind(listenFd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
-        {
-            std::cerr << "Error: Cannot bind to " << host << ":" << port << std::endl;
-            close(listenFd);
-            exit(1);
-        }
-
-        // 5. 开始监听
-        if (listen(listenFd, SOMAXCONN_BACKLOG) < 0) // SOMMAXCONN_BACKLOG 为全连接队列大小上限
-        {
-            std::cerr << "Error: Listen failed on port " << port << std::endl;
-            close(listenFd);
-            exit(1);
-        }
-
+        int listenFd = srv_sock->getFd();
         std::cout << "[ServerManager] Successfully listening on " << host << ":" << port << " (FD: " << listenFd << ")" << std::endl;
 
-        // 6. 核心资产入库
+        // 3. 大管家只做登记工作
+        this->_listen_sockets.push_back(srv_sock);
         handled_ports.push_back(port);
 
-        // 将生成的真实物理 listenFd 反向锁进快捷映射表中
         _listen_socket_map[listenFd] = _server_configs[i];
 
-        // 组装标准 pollfd，挂载进大阵列，开始关注读事件（POLLIN：代表有人来连接）
+        // 4. 组装标准 pollfd，挂载进大阵列
         struct pollfd pfd;
         pfd.fd = listenFd;
         pfd.events = POLLIN;
@@ -232,44 +163,56 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
     // 1. 强攻非阻塞 Socket，把内核缓冲区捞干净
     while (true)
     {
-        ssize_t bytes_read = conn.io.readFromNet(buffer, BUFFER_SIZE - 1);
+        ssize_t bytes_read = conn.socket->read(buffer, BUFFER_SIZE - 1);
 
-        if (bytes_read == 0)
+        if (bytes_read == 0) // EOF（客户端优雅断开）
         {
             std::cout << "[ServerManager] Client FD " << clientFd << " closed connection (EOF)." << std::endl;
             this->closeConnection(clientFd, poll_index);
             return;
         }
-        if (bytes_read == -1) // 🟢 EAGAIN/EINTR
+        if (bytes_read == -1) // 🟢 正常的非阻塞读空，安全 break，绝对不往下走！
             break;
-        if (bytes_read == -2) // 🔴 物理死线
+        if (bytes_read == -2) // 🔴 物理崩溃，强行断开
         {
             this->closeConnection(clientFd, poll_index);
             return;
         }
 
-        buffer[bytes_read] = '\0';
-        conn.read_buffer += std::string(buffer);
+        // 🎯 【黄金防火墙】：只有当 bytes_read 严格大于 0 时，才允许操作 buffer！
+        if (bytes_read > 0)
+        {
+            buffer[bytes_read] = '\0';                   // 绝对安全的边界截断
+            conn.read_buffer.append(buffer, bytes_read); // 🚀 工业级安全追加：指明长度，绝不发生越界字符串扫描！
+        }
     }
 
-    // 2. 🚀 【核心合龙】：调用队友的静态解析器，直接解析这一轮蓄水池里的数据
+    // 2. 解析蓄水池里的数据
     size_t consumed = 0;
     int status = RequestParser::parseBuffer(conn.read_buffer, conn.request, &conn.config, consumed);
 
-    // 3. 根据解析器的物理反馈，决定大管家下一步的动作
     if (status == REQUEST_OK)
     {
-        std::cout << "[ServerManager] Request parsed successfully for FD " << clientFd << ". Method: "
-                  << conn.request.getMethod() << ", Path: " << conn.request.getPath() << std::endl;
+        std::cout << "[ServerManager] Request parsed successfully for FD " << clientFd << std::endl;
 
-        // 🌟 【卡尺生效】：从缓冲区里物理切掉这一段已经完美消费的请求字节！
+        // 🌟 卡尺精准裁剪
         conn.read_buffer.erase(0, consumed);
 
-        // 模拟回包（之后你们可以用一个 BuildResponse(conn.request) 函数来物理生成真正的 Response 丢给 io）
-        std::string mock_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 37\r\n\r\n<h1>Hello from Complete Engine!</h1>\n";
-        conn.io.pushWriteBuffer(mock_response);
+        // 🚀 动态拼装 Body，物理对齐 Content-Length
+        std::string body = "<h1>Hello from Complete Engine!</h1>\n";
+        std::stringstream ss;
+        ss << "HTTP/1.1 200 OK\r\n"
+           << "Content-Type: text/html\r\n"
+           << "Content-Length: " << body.size() << "\r\n"
+           << "Connection: keep-alive\r\n"
+           << "\r\n"
+           << body;
 
-        // 调转枪头，通知 poll 下一轮滴答立刻检查可写事件
+        // 🚀 彻底清洗发件箱，注入新响应
+        std::string().swap(conn.write_buffer);
+        conn.write_buffer = ss.str();
+
+        // 调转枪头关注写事件
         this->_poll_fds[poll_index].events = POLLOUT;
     }
     else if (status == REQUEST_INCOMPLETE)
@@ -287,7 +230,8 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
 
         // 2. 快速响应一个 400 Bad Request 灌入写缓冲区，物理保留 Connection 活口
         std::string error_response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-        conn.io.pushWriteBuffer(error_response);
+        // 直接把 400 报错报文追加到连接自己的写缓冲区（发件箱）中
+        conn.write_buffer += error_response;
 
         // 3. 调转枪头，去 poll 监听可写事件，等 400 真正送出网线后再执行制裁
         this->_poll_fds[poll_index].events = POLLOUT;
@@ -320,33 +264,51 @@ void ServerManager::handleClientWrite(int clientFd, size_t poll_index)
 {
     Connection &conn = this->_connections[clientFd];
 
+    // 🚨 防御：如果发件箱本来就是空的，直接返回
+    if (conn.write_buffer.empty())
+        return;
+
     // 1. 调用之前改好的零 errno 物理发送，推进缓冲区队列
-    ssize_t bytes_sent = conn.io.writeToNet();
-    
-    if (bytes_sent < 0)
+    ssize_t bytes_sent = conn.socket->write(conn.write_buffer);
+
+    // 🚨 物理测谎判定
+    if (bytes_sent == -2) // 🔴 致命故障（如客户端强行断开且引发了 EPIPE 等，返回 -2）
     {
-        // 发送过程遇到不可逆崩溃直接强关
         this->closeConnection(clientFd, poll_index);
         return;
     }
-
-    // 2. 🎯 【秋后算账】：只有当这一轮的写缓冲区彻底排空（所有字节已送上物理网线）
-    if (conn.io.getWriteBuf().empty())
+    if (bytes_sent == -1) // 🟢 正常的非阻塞写阻碍（缓冲区满了，直接返回等待下一轮 POLLOUT）
     {
-        // 3. 🚀 检查是否有延时自毁标签
+        return;
+    }
+
+    // 🚀 【核心修复 1】：物理滑动卡尺！发出了多少，就从发件箱里切掉多少！
+    if (bytes_sent > 0)
+    {
+        conn.write_buffer.erase(0, bytes_sent);
+    }
+
+    // 2. 🚀 【核心修复 2】：只有当这一轮的写缓冲区被彻底排空
+    if (conn.write_buffer.empty())
+    {
+        // C++98 彻底释放内存空间防止虚胖
+        std::string().swap(conn.write_buffer);
+
+        // 3. 检查是否有延时自毁标签
         if (conn.close_after_write)
         {
             std::cout << "[ServerManager] Sent response completely. Now safely closing Client FD " << clientFd << std::endl;
-            // 优雅、干净地收尸，零丢失！
             this->closeConnection(clientFd, poll_index);
             return;
         }
 
-        // 4. 正常情况下（Keep-Alive 连接），发完回包后重新将 events 改回读（POLLIN），等待下一个请求到达
+        // 4. 重洗 Request 智囊大脑，干干净净迎接下一个请求
+        conn.clearRequest();
+
+        // 5. 正常情况下（Keep-Alive 连接），发完回包后重新将 events 改回读（POLLIN），等待下一个请求到达
         this->_poll_fds[poll_index].events = POLLIN;
     }
 }
-
 /**
  * 函数：ServerManager::closeConnection
  * 用途：当客户端主动断开连接、HTTP 发送完毕或连接发生底层致命错误时，调用该函数安全关闭文件描述符，并在物理内存中全量注销该客人的所有资产，防止内存与 FD（文件描述符）泄漏。

@@ -2,9 +2,9 @@
 #define SERVER_MANAGER_HPP
 
 #include "ServerConfig.hpp"
-#include "ClientIO.hpp"
 #include "Connection.hpp"
 #include "RequestParser.hpp"
+#include "ServerSocket.hpp"
 
 class ServerManager
 {
@@ -12,10 +12,11 @@ private:
     // 1. 核心网络资产
     std::vector<ServerConfig> _server_configs; // 配置账本备份
     std::vector<struct pollfd> _poll_fds;      // poll 监听大阵列
+    std::vector<ServerSocket *> _listen_sockets; // 统一管理所有创建的套接字指针
 
     // 2. 运行时高效映射表
     std::map<int, ServerConfig> _listen_socket_map; // listenFd -> ServerConfig
-    std::map<int, ClientIO> _ios;                   // key: 客人的物理套接字 clientFd, value: 为这个客人量身定做的物理搬运工 (ClientIO 实例)
+                 
     std::map<int, Connection> _connections;         // 一个 key 对应一个完整的生命盒子
 
     // 3. 内部私有工具函数

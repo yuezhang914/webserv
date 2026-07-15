@@ -1,29 +1,31 @@
 #ifndef CONNECTION_HPP
 #define CONNECTION_HPP
 
-#include "ClientIO.hpp"     // 物理搬运工被包裹在内
-#include "ServerConfig.hpp" // serverConfig
+#include "ClientSocket.hpp"
 #include "Request.hpp"
 
 class Connection
 {
 private:
-    int fd;
+    ClientSocket *socket; // RAII 持有客户端底层物理套接字！
     ServerConfig config;
     std::string read_buffer;
-    ClientIO io;
+    std::string write_buffer;
     Request request;
-    bool close_after_write; 
+    bool close_after_write;
 
-    // 🎫 唯独对大管家和解析器开放绝对特权
     friend class ServerManager;
     friend class RequestParser;
 
 public:
     Connection();
     Connection(int clientFd, const ServerConfig &srv_cfg);
+    Connection(const Connection &other);
+    Connection &operator=(const Connection &other);
     ~Connection();
+
     void clear();
+    void clearRequest();
 };
 
 #endif
