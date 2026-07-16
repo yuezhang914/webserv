@@ -1,7 +1,4 @@
-#include "CgiEnv.hpp"
-#include <cstring>
-#include <cstdlib>
-#include <sstream>
+#include "Webserv.hpp"
 
 /*
 函数：CgiEnv带参数的构造函数
