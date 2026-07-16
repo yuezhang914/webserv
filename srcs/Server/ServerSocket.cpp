@@ -91,7 +91,18 @@ void ServerSocket::setup()
     // 2. 开启 SO_REUSEADDR 地址复用
     int reuse = 1;
     if (setsockopt(this->_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0)
-    {
+    {/**
+ * @brief 析构函数：践行 RAII 哲学，物理释放套接字系统资源
+ * 
+ * @details 
+ * 当 ServerSocket 对象的生命周期结束（销毁或进程退出）时，自动触发此析构函数：
+ * - 黄金探测：检查物理文件描述符 `_fd` 是否有效 (>= 0)。
+ * - 物理销毁：若有效，则打印安全释放日志，并优雅调用系统函数 close() 释放该监听套接字。
+ * 
+ * @note 
+ * 这确保了无论服务器是在正常运转下退出，还是由于异常熔断而自杀，
+ * 系统套接字描述符都会被 100% 物理闭环回收，绝不给操作系统留下一丝 FD 泄漏隐患。
+ */
         std::cerr << "Error: setsockopt(SO_REUSEADDR) failed" << std::endl;
         close(this->_fd);
         exit(1);
