@@ -24,9 +24,31 @@ std::string CgiResponse::serialize(const std::string &cgi_raw_output)
                            cgi_raw_output.find("\n\n") != std::string::npos);
     if (has_cgi_header)
     {
+        size_t header_end = cgi_raw_output.find("\r\n\r\n");
+        size_t delimiter_len = 4;
+        if (header_end == std::string::npos)
+        {
+            header_end = cgi_raw_output.find("\n\n");
+            delimiter_len = 2;
+        }
+
+        // 剥离出脚本自带的头部和真正的 Body
+        std::string script_headers = cgi_raw_output.substr(0, header_end);
+        std::string body = cgi_raw_output.substr(header_end + delimiter_len);
+
+        // 用 C++98 稳健计算 Body 长度
+        std::stringstream ss;
+        ss << body.size();
+
+        // 强行把 Content-Length 拼装进响应报文中，并用 Connection: close 或 keep-alive 封口
         http_response = "HTTP/1.1 200 OK\r\n"
-                        "Server: Webserv/1.0\r\n";
-        http_response += cgi_raw_output;
+                        "Server: Webserv/1.0\r\n" +
+                        script_headers + "\r\n"
+                                         "Content-Length: " +
+                        ss.str() + "\r\n"
+                                   "Connection: keep-alive\r\n"
+                                   "\r\n" +
+                        body;
     }
     else
     {
