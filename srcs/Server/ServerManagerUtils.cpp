@@ -100,10 +100,10 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
             std::string real_script_path = "srv/www" + path; // 拼装出 "srv/www/cgi-bin/login.py"
             std::cout << "[ServerManager] Executing real local CGI path: " << real_script_path << std::endl;
 
-            CgiHandler cgi(conn.request, real_script_path); // 把拼好的真实物理路径喂给执行官！
             // 1. 实例化我们刚刚千锤百炼打磨好的 CGI 执行官
             // 传入当前请求的智囊大脑，以及脚本在服务器本地的真实物理路径
-           
+            CgiHandler cgi(conn.request, real_script_path);
+
             // 2. 执行物理一写一读，父子管道对流，拿到子进程 Python 吐出来的原始结晶
             std::string cgi_raw_output = cgi.execute();
 
