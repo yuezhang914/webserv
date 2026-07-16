@@ -2,6 +2,15 @@
 
 #include "Webserv.hpp"
 
+CgiHandler::CgiHandler(const Request &request, const std::string &script_path)
+    : _request(request), _script_path(script_path)
+{
+}
+
+CgiHandler::~CgiHandler()
+{
+}
+
 // 在 CgiHandler.cpp 内部初始化环境变量账本
 void CgiHandler::_buildEnv()
 {
@@ -103,7 +112,7 @@ std::string CgiHandler::execute()
     if (pipe(child_to_parent) < 0)
     {
         std::cerr << "[CGI Error] Failed to create child_to_parent pipe." << std::endl;
-        // 🚨 黄金防御：第二根管道失败了，必须把刚才已经成功打开的第一根管道关掉，防止 FD 泄漏！
+        //  黄金防御：第二根管道失败了，必须把刚才已经成功打开的第一根管道关掉，防止 FD 泄漏！
         close(parent_to_child[0]);
         close(parent_to_child[1]);
         return "";
@@ -122,7 +131,7 @@ std::string CgiHandler::execute()
         return "";
     }
 
-    if (pid == 0) // 🟢 2. 子进程车间（由 fork 繁衍出的独立平行世界）
+    if (pid == 0) // 2. 子进程车间（由 fork 繁衍出的独立平行世界）
     {
         // 1. 移花接木：把标准输入 (0) 绑到管道 A 的读端
         // 子进程从这里物理读取父进程喂进来的 POST Body 数据
@@ -137,6 +146,8 @@ std::string CgiHandler::execute()
         {
             _exit(1);
         }
+
+        dup2(child_to_parent[1], STDERR_FILENO); // 🚀 把标准错误也绑到管道上！这样 Python 的崩溃报错我们
 
         // 3. 彻底卸载子进程手里原先拿着的 4 个原始管道端点
         // 它们已经被 dup2 成功复制到了 0 和 1，原先的 FD 编号必须关闭，否则会发生物理阻塞死锁！
@@ -157,7 +168,17 @@ std::string CgiHandler::execute()
         // 6. 物理变身！子进程在此金蝉脱壳
         execve(args[0], args, envp);
 
-        // 7. 🚨 熔断：如果代码走到了这一行，100% 说明 execve 失败了（比如脚本无执行权限或路径打错）
+        // 超级探针】：如果 execve 成功，绝对不会执行到这里！
+        //  走到这里，说明变身失败。我们绕过管道，强行往操作系统的标准错误（终端控制台）上打印真相：
+        std::cerr
+            << "\n[🚨 CGI CHILD EMERGENCY] execve failed!" << std::endl;
+        std::cerr << "-> Executable path tried: [" << args[0] << "]" << std::endl;
+        std::cerr << "-> Arg[0]: [" << (args[0] ? args[0] : "NULL") << "]" << std::endl;
+        std::cerr << "-> Arg[1]: [" << (args[1] ? args[1] : "NULL") << "]" << std::endl;
+        std::cerr << "-> System Reason (errno): " << strerror(errno) << " (code: " << errno << ")\n"
+                  << std::endl;
+
+        // 7. 熔断：如果代码走到了这一行，100% 说明 execve 失败了（比如脚本无执行权限或路径打错）
         // 我们在外面把它的 envp 堆内存清掉，然后用 _exit(1) 当场冷酷抹杀，绝对防止它回头夺舍 Webserv 主进程！
         this->_clearEnv(envp); // 顺便调用我们之前提过的清理函数
         _exit(1);
@@ -238,7 +259,7 @@ std::string CgiHandler::execute()
 std::string CgiHandler::buildHttpResponse(const std::string &cgi_output) const
 {
     std::string http_response;
-    
+
     // 1. 物理检查：子进程是不是偷懒，完全没吐出任何数据？
     if (cgi_output.empty())
     {
@@ -251,12 +272,12 @@ std::string CgiHandler::buildHttpResponse(const std::string &cgi_output) const
     }
 
     // 2. 测谎判定：检查子进程吐出来的数据里，有没有自带 "\r\n\r\n" 或 "\n\n"（说明它自己写了 Header）
-    bool has_cgi_header = (cgi_output.find("\r\n\r\n") != std::string::npos || 
+    bool has_cgi_header = (cgi_output.find("\r\n\r\n") != std::string::npos ||
                            cgi_output.find("\n\n") != std::string::npos);
 
     if (has_cgi_header)
     {
-        // 🟢 情况 A：脚本自己带了头（比如带了 Content-Type: text/html）
+        // 情况 A：脚本自己带了头（比如带了 Content-Type: text/html）
         // 我们只需要在最前面贴上 HTTP/1.1 200 OK 状态行和 Server 标签，然后和原产物严丝合缝拼起来！
         http_response = "HTTP/1.1 200 OK\r\n"
                         "Server: Webserv/1.0\r\n";
@@ -264,9 +285,9 @@ std::string CgiHandler::buildHttpResponse(const std::string &cgi_output) const
     }
     else
     {
-        // 🟡 情况 B：脚本只吐了纯肉（纯 HTML 正文）
+        // 情况 B：脚本只吐了纯肉（纯 HTML 正文）
         // 大管家必须亲自出马，替它把所有的衣服（Header）穿戴整齐：
-        
+
         // C++98 稳健计算正文物理长度
         std::stringstream ss;
         ss << cgi_output.size();
@@ -274,9 +295,10 @@ std::string CgiHandler::buildHttpResponse(const std::string &cgi_output) const
         http_response = "HTTP/1.1 200 OK\r\n"
                         "Server: Webserv/1.0\r\n"
                         "Content-Type: text/html\r\n" // 默认当做 html 网页处理
-                        "Content-Length: " + ss.str() + "\r\n"
-                        "\r\n"                         // 铁打不动的黄金空行分隔符！
-                        + cgi_output;                  // 塞入正文
+                        "Content-Length: " +
+                        ss.str() + "\r\n"
+                                   "\r\n" // 铁打不动的黄金空行分隔符！
+                        + cgi_output;     // 塞入正文
     }
 
     return http_response;

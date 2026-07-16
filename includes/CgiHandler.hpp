@@ -15,6 +15,8 @@ public:
     // 2. 核心对外物理接口：执行 CGI 并返回子进程吐出来的完整 HTTP 响应体/Body
     std::string execute();
 
+    std::string buildHttpResponse(const std::string &cgi_output) const;
+
 private:
     const Request &_request;  // 绑定当前请求
     std::string _script_path; // 物理脚本路径（比如 "./cgi-bin/login.py"）
@@ -31,7 +33,6 @@ private:
     用途：物理抹杀由 _initEnv 动态开辟的二维指针阵列与字符串。
     */
     void _clearEnv(char **envp) const;
-    std::string buildHttpResponse(const std::string &cgi_output) const;
 };
 
 #endif
