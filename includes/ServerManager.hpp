@@ -5,6 +5,7 @@
 #include "Connection.hpp"
 #include "RequestParser.hpp"
 #include "ServerSocket.hpp"
+#include "CgiHandler.hpp"
 
 class ServerManager
 {

@@ -22,7 +22,8 @@
 #include <fstream>
 #include <sstream>
 #include <sys/types.h>
-#include <errno.h>
+#include <unistd.h>   // 物理引入 fork, pipe, dup2, close 等系统调用
+#include <sys/wait.h> // 物理引入 waitpid
 
 
 // 3. 业务平坦化组装
@@ -37,6 +38,11 @@
 #include "Connection.hpp"
 #include "ServerSocket.hpp"
 #include "ClientSocket.hpp"
+
+#include "CgiHandler.hpp"
+#include "CgiEnv.hpp"
+#include "CgiProcess.hpp"
+#include "CgiResponse.hpp"
 
 // ...
 #endif

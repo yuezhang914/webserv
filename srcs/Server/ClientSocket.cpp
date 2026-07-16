@@ -63,7 +63,7 @@ ssize_t ClientSocket::write(const std::string &data) const
 {
     if (data.empty())
         return 0;
-    ssize_t bytes = send(this->_fd, data.data(), data.size(), 0);
+    ssize_t bytes = send(this->_fd, data.data(), data.size(), MSG_NOSIGNAL);
     if (bytes < 0)
         return -1;
     return bytes;
