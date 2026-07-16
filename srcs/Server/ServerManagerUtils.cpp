@@ -89,34 +89,28 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
         // 卡尺精准裁剪，把已经解析掉的请求头部从蓄水池里切掉
         conn.read_buffer.erase(0, consumed);
 
-        // 🚀【核心并轨点】：动态判定这次请求是不是要走 CGI 脚本
+        // 动态判定这次请求是不是要走 CGI 脚本
         std::string path = conn.request.getPath();
-
         if (path.find("/cgi-bin/") != std::string::npos || path.find(".py") != std::string::npos)
         {
             std::cout << "[ServerManager] ROUTING TO CGI WORKSHOP: " << path << std::endl;
-
-            // 🚀 请物理修正为拼好 root 的“硬核本地相对路径”：
+            // 修正为拼好 root 的“硬核本地相对路径”：
             std::string real_script_path = "srv/www" + path; // 拼装出 "srv/www/cgi-bin/login.py"
             std::cout << "[ServerManager] Executing real local CGI path: " << real_script_path << std::endl;
-
             // 1. 实例化我们刚刚千锤百炼打磨好的 CGI 执行官
             // 传入当前请求的智囊大脑，以及脚本在服务器本地的真实物理路径
             CgiHandler cgi(conn.request, real_script_path);
-
             // 2. 执行物理一写一读，父子管道对流，拿到子进程 Python 吐出来的原始结晶
             std::string cgi_raw_output = cgi.execute();
-
             // 3. 扔进包装工厂，智能穿上 HTTP 状态行和必要的 Headers 外壳
             std::string final_http_packet = cgi.buildHttpResponse(cgi_raw_output);
-
             // 4. 彻底清洗发件箱，注入全新出炉的 CGI 动态响应报文
             std::string().swap(conn.write_buffer);
             conn.write_buffer = final_http_packet;
         }
         else
         {
-            // 🟢【动态静态资源流控车间】：去磁盘上找真正的文件
+            // 去磁盘上找真正的文件
             // 1. 物理路径拼接：root + path -> "srv/www/index.html"
             // 注意：如果 path 只是 "/"，我们需要自动帮它对齐到默认的 index.html
             std::string request_path = conn.request.getPath();
@@ -127,15 +121,12 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
 
             // 假设你的配置类里能拿到 root 字符串，拼出磁盘物理路径
             std::string file_path = "srv/www" + request_path;
-
             // 2. 强攻磁盘：用二进制模式打开文件，防止图片或文本损毁
             std::ifstream file(file_path.c_str(), std::ios::binary);
-
             if (!file.is_open())
             {
-                // 🛑 404 防御熔断：如果磁盘上根本没有这个文件，赶紧回 404
+                // 如果磁盘上根本没有这个文件，赶紧回 404
                 std::cout << "[ServerManager] 404 File Not Found: " << file_path << std::endl;
-
                 std::string error_body = "<h1>404 Not Found</h1>\n<p>Webserv can't find this file.</p>";
                 std::stringstream ss;
                 ss << "HTTP/1.1 404 Not Found\r\n"
@@ -144,20 +135,17 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
                    << "Connection: keep-alive\r\n"
                    << "\r\n"
                    << error_body;
-
                 std::string().swap(conn.write_buffer);
                 conn.write_buffer = ss.str();
             }
             else
             {
-                // 📜 3. 顺畅抽空文件：把磁盘文件内容倒进内存 body 盒子里
+                // 3.把磁盘文件内容存入body
                 std::stringstream file_content;
                 file_content << file.rdbuf();
                 file.close(); // 读完立刻关闭文件描述符，防泄漏
-
                 std::string body = file_content.str();
-
-                // 4. 智能判断 Content-Type 衣服（简单做个后缀对齐，防止浏览器乱码）
+                // 4. 判断 Content-Type （简单做个后缀对齐，防止浏览器乱码）
                 std::string content_type = "text/html";
                 if (file_path.find(".css") != std::string::npos)
                     content_type = "text/css";
@@ -167,7 +155,6 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
                     content_type = "image/png";
                 else if (file_path.find(".jpg") != std::string::npos || file_path.find(".jpeg") != std::string::npos)
                     content_type = "image/jpeg";
-
                 // 5. 动态拼装回包头部
                 std::stringstream ss;
                 ss << "HTTP/1.1 200 OK\r\n"
@@ -177,8 +164,7 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
                    << "Connection: keep-alive\r\n"
                    << "\r\n"
                    << body;
-
-                // 6. 灌入连接发件箱
+                // 6. 存入连接发件箱
                 std::string().swap(conn.write_buffer);
                 conn.write_buffer = ss.str();
                 std::cout << "[ServerManager] Successfully served dynamic static file: " << file_path << " (" << body.size() << " bytes)" << std::endl;

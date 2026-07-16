@@ -36,3 +36,8 @@ std::string CgiHandler::buildHttpResponse(const std::string &cgi_output) const
 {
     return CgiResponse::serialize(cgi_output);
 }
+/*
+函数：CgiHandler::execute
+用途：运行CGI， 获得CGI 运行后的原生response
+实现逻辑： 通过CgiEnv 获得环境参数数列， 通过CgiProcess获得原生response
+*/
