@@ -11,7 +11,7 @@ void CgiHandler::_buildEnv()
     // 2. Path (带参数的 URL) ──► 映射为 QUERY_STRING
     // 如果 URL 是 /cgi-bin/test.py?name=wy
     // 那么我们要提取出 "?" 后面的 "name=wy" 塞进 QUERY_STRING 中
-    // this->_env["QUERY_STRING"] = this->_request.getQueryString();
+    this->_env["QUERY_STRING"] = this->_request.getQuery();
 
     // 3. File Name (具体执行的脚本物理路径) ──► 映射为 SCRIPT_FILENAME
     this->_env["SCRIPT_FILENAME"] = this->_script_path; // 比如 "/var/www/cgi-bin/test.py"
