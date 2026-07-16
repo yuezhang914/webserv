@@ -1,5 +1,4 @@
-#include "CgiResponse.hpp"
-#include <sstream>
+#include "Webserv.hpp"
 
 /*
 函数：CgiResponse::serialize
