@@ -21,7 +21,6 @@ private:
 public:
     CgiEnv(const Request &request, const std::string &script_path);
     ~CgiEnv();
-
     char** getEnvp() const;
 };
 
