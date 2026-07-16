@@ -110,7 +110,7 @@ void ServerManager::dispatchEvents()
 
         int activeFd = this->_poll_fds[idx].fd;
 
-        // A. 拦截致命异常（学姐之前的纠错版完美并轨）
+        // A. 拦截致命异常
         if (this->_poll_fds[idx].revents & (POLLERR | POLLHUP | POLLNVAL))
         {
             if (this->isListenFd(activeFd))
