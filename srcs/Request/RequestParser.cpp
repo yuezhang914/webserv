@@ -2,7 +2,7 @@
 /*
 文件：srcs/Request/RequestParser.cpp
 用途：只实现 RequestParser 唯一公开入口 parseBuffer()，负责串联 request-line、headers、body framing 与 consumed。
-拆分说明：本次只移动原有函数定义，不拆函数、不增加转发层，也不改变公开接口或解析逻辑。
+修改说明：保持公开接口不变；新增 NULL server 防御，其余流程仍按 request-line、headers、framing 顺序执行。
 */
 #include "RequestParser.hpp"
 #include "ConfigRouteUtils.hpp"
@@ -15,11 +15,11 @@ static const size_t MAX_HEADER_SIZE = 8192;
 参数：
     - buffer：ServerManager 已经为当前 client 累积的原始 HTTP 字节。
     - req：输出 Request；函数开始时通过 resetForParsing() 清空旧值。
-    - server：调用方已经确定的 ServerConfig，Request 只借用该指针。
+    - server：调用方已经确定的非 NULL ServerConfig；Request 只借用该指针。
     - consumed：成功时输出当前第一个完整 request 占用的字节数。
 返回值：REQUEST_OK、REQUEST_INCOMPLETE、REQUEST_ERROR、REQUEST_VERSION_NOT_SUPPORTED 或 REQUEST_BODY_TOO_LARGE。
 实现顺序：
-    1. 重置 Request 和 consumed。
+    1. 重置 Request 和 consumed，并拒绝 NULL server，避免后续 body-limit 查询解引用空指针。
     2. 找到并严格检查 header 区域。
     3. 解析 request-line、URI、headers 和必需 Host。
     4. 判断 Content-Length 或 chunked framing，并拒绝二者同时出现。
@@ -31,6 +31,8 @@ int RequestParser::parseBuffer(const std::string& buffer, Request& req,
         const ServerConfig* server, size_t& consumed) {
     consumed = 0;
     req.resetForParsing(server);
+    if (server == NULL)
+        return REQUEST_ERROR;
 
     size_t header_end = buffer.find("\r\n\r\n");
     if (header_end == std::string::npos) {

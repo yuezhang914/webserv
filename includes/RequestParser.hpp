@@ -32,6 +32,9 @@ private:
     static bool is_valid_http_version_syntax(const std::string &version);
     static bool is_valid_decimal_port(const std::string &port);
     static bool is_valid_reg_name(const std::string &host);
+    static bool is_valid_ipv4_address(const std::string &address);
+    static bool count_ipv6_side_groups(const std::string &side,
+        bool allow_ipv4, size_t &group_count);
     static bool is_valid_ip_literal(const std::string &literal);
     static int parse_request_line(const std::string &request_line,
         Request &req);
@@ -42,6 +45,13 @@ private:
         unsigned long body_limit, size_t &content_length);
     static int is_chunked_transfer_encoding(const Request &req,
         bool &has_te, bool &is_chunked);
+    static void skip_chunk_ows(const std::string &line, size_t &pos);
+    static bool read_chunk_extension_token(const std::string &line,
+        size_t &pos);
+    static bool read_chunk_extension_quoted_string(const std::string &line,
+        size_t &pos);
+    static bool is_valid_chunk_extensions(const std::string &line,
+        size_t extension_start);
     static int read_chunk_size_for_buffer(const std::string &line,
         size_t current_body_size, unsigned long body_limit, size_t &size);
     static bool is_forbidden_trailer_name(const std::string &lower_key);
@@ -59,7 +69,7 @@ public:
     参数：
         - buffer：当前已累计的原始字节，本函数不修改它。
         - req：接收解析结果；每次调用开始会清空旧数据。
-        - server：调用方确定的 ServerConfig，Request 只借用该指针。
+        - server：调用方确定的非 NULL ServerConfig，Request 只借用该指针。
         - consumed：成功时返回第一个完整 request 占用的字节数。
     返回：RequestStatus 中定义的五种状态。
     */
