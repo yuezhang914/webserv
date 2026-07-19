@@ -160,7 +160,6 @@ void ServerManager::enableClientWriteEvent(int clientFd)
     {
         if (this->_poll_fds[i].fd == clientFd)
         {
-            // 🚀 【拉下大闸】：按位或追加写监听标志，通知操作系统：“这家伙有货要发了，能写时叫我！”
             this->_poll_fds[i].events |= POLLOUT;
             break;
         }
@@ -180,7 +179,7 @@ void ServerManager::enableClientWriteEvent(int clientFd)
 */
 bool ServerManager::isCgiPipeFd(int fd)
 {
-    // 🎯 直接利用红黑树雷达一枪锁死，效率 O(log N) 极高！
+    // 直接利用红黑树雷达一枪锁死，效率 O(log N) 极高！
     return this->_cgi_fd_to_client_map.find(fd) != this->_cgi_fd_to_client_map.end();
 }
 
@@ -221,11 +220,11 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
         }
         else if (bytesRead == 0)
         {
-            // 🏁 【大功告成：子进程吐货完毕（EOF）】
+            // 子进程吐货完毕
             std::cout << "[CGI Reader] Reached EOF for pipe fd " << cgiReadFd << "." << std::endl;
 
             // ============================================================
-            // ✨ ✨ ✨ 🚀 黄金清洗并网安全车间 🚀 ✨ ✨ ✨
+            //                  黄金清洗并网安全车间 
             // ============================================================
             // 1. 先把当前完全抽干的原生 CGI 脏报文提取出来
             std::string cgi_raw_data = conn->write_buffer;
@@ -233,7 +232,7 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
             // 2. 扔进整形清洗车间，让它去剥离 Status、自动丈量 Content-Length
             this->parseAndFormatCgiResponse(cgi_raw_data);
 
-            // 3. 🎯 【物理净化隔离】：清空发件箱，把整形完的高级满血报文一次性安全灌入！
+            // 3. 清空发件箱，把整形完的高级满血报文一次性安全灌入！
             std::string().swap(conn->write_buffer); // 强力清空旧内存
             conn->write_buffer = cgi_raw_data;      // 换装新资产
 
@@ -242,7 +241,7 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
             this->_poll_fds.erase(this->_poll_fds.begin() + poll_idx);
             this->_cgi_fd_to_client_map.erase(it);
 
-            // 🚀 货齐了，拉起客户端写事件，下一轮大循环完美发货！
+            // 货齐了，拉起客户端写事件，下一轮大循环完美发货！
             this->enableClientWriteEvent(clientFd);
 
             // 清理 POST 写端管道的残留资产
@@ -268,11 +267,11 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
                 conn->cgi_pid = -1;
             }
             conn->is_cgi = false;
-            return; // 🎯 清场完毕，优雅退出
+            return; 
         }
         else
         {
-            // 🚨 bytesRead == -1：遇到了底层的分水岭
+            // bytesRead == -1：遇到了底层的分水岭
             if (errno == EAGAIN || errno == EWOULDBLOCK)
             {
                 break; // 内核缓冲区抽干，正常退出，等下一次数据来
@@ -325,7 +324,7 @@ void ServerManager::parseAndFormatCgiResponse(std::string &cgiOutput)
         delimiter_len = 2;
     }
 
-    // 🚨 极端安全防线：如果子进程吐出来的内容里连个空行都没有，说明是个完全畸形的输出
+    // 如果子进程吐出来的内容里连个空行都没有，说明是个完全畸形的输出
     if (header_end == std::string::npos)
     {
         // 强行把它当作纯 Body 或者是残缺报文，为其全量兜底打包 200
@@ -359,7 +358,7 @@ void ServerManager::parseAndFormatCgiResponse(std::string &cgiOutput)
         if (line.empty())
             continue;
 
-        // 🎯 降维打击拦截：如果发现了 "Status:" 特权头（大小写模糊匹配防线）
+        // 如果发现了 "Status:" 特权头（大小写模糊匹配防线）
         if (line.size() >= 7 && (line.substr(0, 7) == "Status:" || line.substr(0, 7) == "status:"))
         {
             size_t value_start = line.find_first_not_of(" \t", 7);
@@ -376,7 +375,7 @@ void ServerManager::parseAndFormatCgiResponse(std::string &cgiOutput)
         }
     }
 
-    // 4. 🚀 【满血回炉再造】：将所有资产按照国际航空级 HTTP 规范重新装订并网！
+    // 4. 将所有资产按照国际航空级 HTTP 规范重新装订并网！
     std::stringstream final_packet;
     final_packet << status_line << "\r\n";     // 1. 标准 HTTP 状态首行
     final_packet << "Server: Webserv/1.0\r\n"; // 2. 大管家系统内政头
@@ -462,7 +461,7 @@ void ServerManager::handleCgiPipeWrite(int cgiWriteFd, size_t poll_idx)
                 return; // 被系统信号打断，不算错，撤退等下一轮
             }
 
-            // ❌ 发生真正的底层管道破裂（如 EPIPE，说明子进程提前崩了拒绝收货）
+            // 发生真正的底层管道破裂（如 EPIPE，说明子进程提前崩了拒绝收货）
             std::cerr << "[CGI Writer] Fatal write error on pipe fd " << cgiWriteFd << ", breaking conduit." << std::endl;
             goto ERROR_FUSE;
         }
@@ -474,7 +473,7 @@ void ServerManager::handleCgiPipeWrite(int cgiWriteFd, size_t poll_idx)
     CLOSE_WRITE_Conduit:
         std::cout << "[CGI Writer] Finished feeding all POST body (" << body.size() << " bytes). Closing write pipe." << std::endl;
 
-        // 🚀 【核心大闸】：物理关闭子进程的输入端管道！
+        // 物理关闭子进程的输入端管道！
         // 这样子进程的标准输入（stdin）就会读到一个完美的 EOF。
         // 绝大多数 CGI 脚本（如 Python 里的 sys.stdin.read()）只有读到 EOF 才会停止挂起、开始疯狂计算并返回结果！
         ::close(cgiWriteFd);
@@ -535,7 +534,7 @@ void ServerManager::dispatchEvents()
         short revents = this->_poll_fds[idx].revents;
 
         // ============================================================
-        // 🚨 🔍 【天眼雷达大闸门】：在所有业务分流前，原地全量还原最真实的内核世界！
+        //            在所有业务分流前，原地全量还原最真实的内核世界！
         // ============================================================
         std::cout << "[Radar] --- TICK TRIGGER ---" << std::endl;
         std::cout << "[Radar] FD: " << activeFd 
@@ -546,7 +545,7 @@ void ServerManager::dispatchEvents()
                   << " | revents: " << revents 
                   << std::endl;
 
-        // ==================== 🔴 1. 异常事件挂起 (POLLERR / POLLHUP) ====================
+        // ====================  1. 异常事件挂起 (POLLERR / POLLHUP) ====================
         if (revents & (POLLERR | POLLHUP | POLLNVAL))
         {
             if (this->isCgiPipeFd(activeFd))
@@ -568,7 +567,7 @@ void ServerManager::dispatchEvents()
             continue; 
         }
 
-        // ==================== 🟢 2. 读事件就绪 (POLLIN) ====================
+        // ====================  2. 读事件就绪 (POLLIN) ====================
         if (revents & POLLIN)
         {
             if (this->isCgiPipeFd(activeFd))
@@ -589,7 +588,7 @@ void ServerManager::dispatchEvents()
             }
         }
 
-        // ==================== 🟢 3. 写事件就绪 (POLLOUT) ====================
+        // ==================== 3. 写事件就绪 (POLLOUT) ====================
         if (revents & POLLOUT)
         {
             if (idx >= this->_poll_fds.size() || this->_poll_fds[idx].fd != activeFd)

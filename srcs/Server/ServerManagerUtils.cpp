@@ -55,18 +55,15 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
     char buffer[BUFFER_SIZE];
     Connection *conn = this->_connections[clientFd];
 
-    // 1. 强攻非阻塞 Socket，把内核缓冲区捞干净
-    int loop_counter = 0; // 🛡️ 物理计数器
+    int loop_counter = 0; // 物理计数器
     // 1. 强攻非阻塞 Socket，把内核缓冲区捞干净
     while (true)
     {
-        loop_counter++;
-        std::cout << "[🔬 Read Loop] Loop #" << loop_counter << " | Calling socket->read()..." << std::endl;
+        
 
         ssize_t bytes_read = this->_connections[clientFd]->socket->read(buffer, BUFFER_SIZE - 1);
 
-        std::cout << "[🔬 Read Loop] Loop #" << loop_counter << " | socket->read() returned: " << bytes_read << std::endl;
-
+      
         if (bytes_read == 0) // EOF（客户端优雅断开）
         {
             std::cout << "[ServerManager] Client FD " << clientFd << " closed connection (EOF)." << std::endl;
@@ -75,7 +72,7 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
         }
         if (bytes_read == -1) // 正常的非阻塞读空，安全 break
         {
-            std::cout << "[🔬 Read Loop] Safely broke out of loop on -1 (EAGAIN)." << std::endl;
+          
             break;
         }
         if (bytes_read == -2) // 物理崩溃，强行断开
@@ -92,25 +89,22 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
         // 🛡️ 极端防卫：如果空转了超过 1000 次还没退出来，强制熔断，防止卡死主线程！
         if (loop_counter > 1000)
         {
-            std::cerr << "[🚨 CRITICAL] DEAD LOOP DETECTED IN READ VALVE! Force breaking..." << std::endl;
+            std::cerr << "DEAD LOOP DETECTED IN READ VALVE! Force breaking..." << std::endl;
             break;
         }
     }
 
     // 2. 解析蓄水池里的数据
     size_t consumed = 0;
-    std::cout << "[🔬 Debug Trace] Entering RequestParser::parseBuffer for FD " << clientFd << "..." << std::endl;
+    
     int status = RequestParser::parseBuffer(conn->read_buffer, conn->request, &conn->config, consumed);
-    std::cout << "[🔬 Debug Trace] Exited RequestParser. Status: " << status << " | Consumed: " << consumed << std::endl;
+   
     if (status == REQUEST_OK)
     {
         std::cout << "[ServerManager] Request parsed successfully for FD " << clientFd << std::endl;
-        conn->read_buffer.erase(0, consumed);
-
-        std::cout << "[🔬 Debug Trace] Entering buildResponse..." << std::endl;
-        Response res = buildResponse(this->_connections[clientFd]->request);
-        std::cout << "[🔬 Debug Trace] Exited buildResponse successfully." << std::endl;
-        // 🚀 ✨ ✨ 物理闭环通电：检查这到底是不是一个隐藏的 CGI 弹射请求 ✨ ✨ 🚀
+        conn->read_buffer.erase(0, consumed);      
+        Response res = buildResponse(this->_connections[clientFd]->request);  
+        // 检查这到底是不是一个隐藏的 CGI 请求
         std::string script_path;
         if (res.getHeader("X-Internal-CGI-Path", script_path))
         {
@@ -143,11 +137,11 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
         }
         else
         {
-            // 🚀 【降维打击落地】：静态、重定向、404/403 资产完美化一，直接并网导出！
+            //静态、重定向、404/403 资产完美化一，直接并网导出！
             conn->write_buffer = res.responseToString();
         }
 
-        // 5. 🟢 【特权拉闸】：温和地为当前客户端追加 POLLOUT，原有的 POLLIN 读雷达依然全天候保持警惕！
+        // 5. 为当前客户端追加 POLLOUT，原有的 POLLIN 读雷达依然全天候保持警惕！
         this->enableClientWriteEvent(clientFd);
     }
     else if (status == REQUEST_INCOMPLETE)
@@ -162,7 +156,7 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
         std::string error_response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         conn->write_buffer += error_response;
 
-        // 🟢 【安全挂载】：同样使用大闸工具，在保持原有读管道监控的同时，追加写事件发货 400 报错
+        // 在保持原有读管道监控的同时，追加写事件400 报错
         this->enableClientWriteEvent(clientFd);
     }
 }
@@ -298,11 +292,6 @@ void ServerManager::acceptNewConnection(int listenFd)
         std::cerr << "[Acceptor] Error: accept() failed on Listen FD " << listenFd << std::endl;
         return;
     }
-
-    // ============================================================
-    // 🛡️ ⚔️ 【金刚石非阻塞防御大闸门】 ⚔️ 🛡️
-    // ============================================================
-    // 必须死死盯住当前传入的是 clientFd，而不是 listenFd！
     int flags = ::fcntl(clientFd, F_GETFL, 0);
     if (flags < 0)
     {
@@ -318,11 +307,10 @@ void ServerManager::acceptNewConnection(int listenFd)
         ::close(clientFd);
         return;
     }
-
-    // 1. 🚀 孵化底层物理 Socket
+    // 1. 创建ClientSocket
     ClientSocket *p_socket = new ClientSocket(clientFd);
 
-    // 2. 🟢 【指针流派绝对并网】：在堆上满血开辟一条 Connection 专属契约！
+    // 2. 创建Connection 指针
     Connection *conn = new Connection();
     conn->socket = p_socket;
 

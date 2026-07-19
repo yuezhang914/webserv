@@ -25,7 +25,7 @@ CgiFds CgiHandler::async_launch()
         return fds;
     }
 
-    // 🚀 防御线 A：将主进程留下的管道读写端追加为【非阻塞】与【执行时关闭】
+    // 将主进程留下的管道读写端追加为【非阻塞】与【执行时关闭】
     int fl1 = fcntl(pipe_to_parent[0], F_GETFL, 0);
     fcntl(pipe_to_parent[0], F_SETFL, fl1 | O_NONBLOCK);
     fcntl(pipe_to_parent[0], F_SETFD, FD_CLOEXEC);
@@ -34,7 +34,7 @@ CgiFds CgiHandler::async_launch()
     fcntl(pipe_to_child[1], F_SETFL, fl2 | O_NONBLOCK);
     fcntl(pipe_to_child[1], F_SETFD, FD_CLOEXEC);
 
-    // 2. 细胞裂变
+    // 2.子进程
     fds.pid = fork();
     if (fds.pid < 0)
     {
@@ -45,9 +45,9 @@ CgiFds CgiHandler::async_launch()
         return fds;
     }
 
-    if (fds.pid == 0) // ================== 子进程车间 ==================
+    if (fds.pid == 0) // ================== 子进程==================
     {
-        // 1. 精准条件焊接与原生临时变量释放，预防管道正好分配到 0 或 1 时的幽灵自杀 bug
+        // 1. 精准条件焊接与原生临时变量释放，预防管道正好分配到 0 或 1 时的bug
         if (pipe_to_child[0] != STDIN_FILENO)
         {
             dup2(pipe_to_child[0], STDIN_FILENO);
@@ -65,8 +65,8 @@ CgiFds CgiHandler::async_launch()
         if (pipe_to_child[1] > STDERR_FILENO)
             close(pipe_to_child[1]);
 
-        // 🚀 【双保险清道夫】：在内核自带的 FD_CLOEXEC 自动清洗之外，
-        // 暴力循环 3 以上的所有遗漏 FD，确保子进程去跑 Python 前绝对净空
+        // 在内核自带的 FD_CLOEXEC 自动清洗之外，
+        // 循环 3 以上的所有遗漏 FD，确保子进程去跑 Python 前绝对净空
         long fd_limit = sysconf(_SC_OPEN_MAX);
         if (fd_limit < 0)
         {
@@ -79,7 +79,7 @@ CgiFds CgiHandler::async_launch()
             ++current_fd;
         }
 
-        // 3. 环境与斩仙剑发射
+        // 3. 环境
         char **env = _buildEnvironment();
         if (env == NULL)
         {
@@ -101,7 +101,7 @@ CgiFds CgiHandler::async_launch()
     close(pipe_to_child[0]);
     close(pipe_to_parent[1]);
 
-    // 🎯 装填多路复用总线核心资产
+    // 装填多路复用总线核心资产
     fds.read_fd = pipe_to_parent[0];
     fds.write_fd = pipe_to_child[1];
 
