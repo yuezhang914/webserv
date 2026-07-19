@@ -21,6 +21,7 @@ private:
     int cgi_read_fd;  // 子进程吐数据的管道读端
     int cgi_write_fd; // 主进程喂数据的管道写端（如果是POST）
     pid_t cgi_pid;
+    size_t cgi_body_bytes_sent;
 
     friend class ServerManager;
     friend class RequestParser;

@@ -66,31 +66,27 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
             this->closeConnection(clientFd, poll_index);
             return;
         }
-        if (bytes_read == -1) // 正常的非阻塞读空，安全 break，绝对不往下走！
+        if (bytes_read == -1) // 正常的非阻塞读空，安全 break
             break;
         if (bytes_read == -2) // 物理崩溃，强行断开
         {
             this->closeConnection(clientFd, poll_index);
             return;
         }
-        // 只有当 bytes_read 严格大于 0 时，才允许操作 buffer！
         if (bytes_read > 0)
         {
-            buffer[bytes_read] = '\0';                   // 绝对安全的边界截断
-            conn.read_buffer.append(buffer, bytes_read); // 指明长度，绝不发生越界字符串扫描！
+            buffer[bytes_read] = '\0';                   
+            conn.read_buffer.append(buffer, bytes_read); 
         }
     }
+
     // 2. 解析蓄水池里的数据
     size_t consumed = 0;
     int status = RequestParser::parseBuffer(conn.read_buffer, conn.request, &conn.config, consumed);
     if (status == REQUEST_OK)
     {
         std::cout << "[ServerManager] Request parsed successfully for FD " << clientFd << std::endl;
-        // 卡尺精准裁剪，把已经解析掉的请求头部从蓄水池里切掉
         conn.read_buffer.erase(0, consumed);
-
-        // 动态判定这次请求是不是要走 CGI 脚本
-        std::string path = conn.request.getPath();
 
         Response res = buildResponse(this->_connections[clientFd].request);
 
@@ -98,30 +94,24 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
         std::string script_path;
         if (res.getHeader("X-Internal-CGI-Path", script_path))
         {
-            // 1. 拿到刚才在 Response 舱里拼好的纯正磁盘绝对路径，交由孵化舱发射！
             CgiHandler cgi(this->_connections[clientFd].request, script_path);
             CgiFds fds = cgi.async_launch();
 
             if (fds.pid < 0 || fds.read_fd < 0 || fds.write_fd < 0)
             {
-                // 管道开凿失败的极端情况，原地降级回 500
                 this->_connections[clientFd].response.createResponse(500, "CGI Spawn Failed", this->_connections[clientFd].config.error_pages);
-                this->enableClientWriteEvent(clientFd);
+                this->enableClientWriteEvent(clientFd); // 🟢 采用高级特权操控，追加写事件
                 return;
             }
 
-            // 2. 签订我们推演的因果契约
             this->_cgi_fd_to_client_map[fds.read_fd] = clientFd;
 
-            // 3. 将子进程的动态数据源，注入 Connection 账本统一看管
             this->_connections[clientFd].is_cgi = true;
             this->_connections[clientFd].cgi_pid = fds.pid;
             this->_connections[clientFd].cgi_read_fd = fds.read_fd;
 
-            // 4. 安全送入延迟并网暂存箱，大循环绝不低头卡顿！
             this->registerFdToPoll(fds.read_fd, POLLIN);
 
-            // 5. 如果是 POST，把写端也挂载上网准备分批、异步往里灌 Body
             if (this->_connections[clientFd].request.getMethod() == "POST")
             {
                 this->_connections[clientFd].cgi_write_fd = fds.write_fd;
@@ -129,90 +119,31 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
             }
 
             std::cout << "[⚡ WebServ Core] Client " << clientFd << " successfully split into CGI pipeline (FD: " << fds.read_fd << ") under PID " << fds.pid << std::endl;
-            return; // 🎯 完美交接！大管家拍拍屁股去处理别的连接
+            return; 
         }
         else
         {
-            // 去磁盘上找真正的文件
-            // 1. 物理路径拼接：root + path -> "srv/www/index.html"
-            // 注意：如果 path 只是 "/"，我们需要自动帮它对齐到默认的 index.html
-            std::string request_path = conn.request.getPath();
-            if (request_path == "/")
-            {
-                request_path = "/index.html";
-            }
-
-            // 假设你的配置类里能拿到 root 字符串，拼出磁盘物理路径
-            std::string file_path = "srv/www" + request_path;
-            // 2. 强攻磁盘：用二进制模式打开文件，防止图片或文本损毁
-            std::ifstream file(file_path.c_str(), std::ios::binary);
-            if (!file.is_open())
-            {
-                // 如果磁盘上根本没有这个文件，赶紧回 404
-                std::cout << "[ServerManager] 404 File Not Found: " << file_path << std::endl;
-                std::string error_body = "<h1>404 Not Found</h1>\n<p>Webserv can't find this file.</p>";
-                std::stringstream ss;
-                ss << "HTTP/1.1 404 Not Found\r\n"
-                   << "Content-Type: text/html\r\n"
-                   << "Content-Length: " << error_body.size() << "\r\n"
-                   << "Connection: keep-alive\r\n"
-                   << "\r\n"
-                   << error_body;
-                std::string().swap(conn.write_buffer);
-                conn.write_buffer = ss.str();
-            }
-            else
-            {
-                // 3.把磁盘文件内容存入body
-                std::stringstream file_content;
-                file_content << file.rdbuf();
-                file.close(); // 读完立刻关闭文件描述符，防泄漏
-                std::string body = file_content.str();
-                // 4. 判断 Content-Type （简单做个后缀对齐，防止浏览器乱码）
-                std::string content_type = "text/html";
-                if (file_path.find(".css") != std::string::npos)
-                    content_type = "text/css";
-                else if (file_path.find(".js") != std::string::npos)
-                    content_type = "application/javascript";
-                else if (file_path.find(".png") != std::string::npos)
-                    content_type = "image/png";
-                else if (file_path.find(".jpg") != std::string::npos || file_path.find(".jpeg") != std::string::npos)
-                    content_type = "image/jpeg";
-                // 5. 动态拼装回包头部
-                std::stringstream ss;
-                ss << "HTTP/1.1 200 OK\r\n"
-                   << "Server: Webserv/1.0\r\n"
-                   << "Content-Type: " << content_type << "\r\n"
-                   << "Content-Length: " << body.size() << "\r\n" // 物理对齐动态文件的真实大小
-                   << "Connection: keep-alive\r\n"
-                   << "\r\n"
-                   << body;
-                // 6. 存入连接发件箱
-                std::string().swap(conn.write_buffer);
-                conn.write_buffer = ss.str();
-                std::cout << "[ServerManager] Successfully served dynamic static file: " << file_path << " (" << body.size() << " bytes)" << std::endl;
-            }
+            // 🚀 【降维打击落地】：静态、重定向、404/403 资产完美化一，直接并网导出！
+            conn.write_buffer = res.responseToString();
         }
-        // 5. 统一调转枪头关注写事件！让大循环的 POLLOUT 下一轮进来把写缓冲区送出网线
-        this->_poll_fds[poll_index].events = POLLOUT;
+        
+        // 5. 🟢 【特权拉闸】：温和地为当前客户端追加 POLLOUT，原有的 POLLIN 读雷达依然全天候保持警惕！
+        this->enableClientWriteEvent(clientFd);
     }
     else if (status == REQUEST_INCOMPLETE)
     {
-        // 半包挂起：不裁剪 buffer，consumed 应该为 0。等待下一次 poll 读就绪唤醒。
         std::cout << "[ServerManager] Request incomplete for FD " << clientFd << ". Waiting for more data..." << std::endl;
     }
     else
     {
-        // 解析发生硬伤（400, 413, 505 等）
         std::cerr << "[ServerManager] Request error (" << status << ") on FD " << clientFd << ". Pre-writing 400 response." << std::endl;
-        // 1. 关键防线：给当前连接打上“死缓”标签
         conn.close_after_write = true;
-        // 2. 快速响应一个 400 Bad Request 灌入写缓冲区，物理保留 Connection 活口
+        
         std::string error_response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-        // 直接把 400 报错报文追加到连接自己的写缓冲区（发件箱）中
         conn.write_buffer += error_response;
-        // 3. 调转枪头，去 poll 监听可写事件，等 400 真正送出网线后再执行制裁
-        this->_poll_fds[poll_index].events = POLLOUT;
+        
+        // 🟢 【安全挂载】：同样使用大闸工具，在保持原有读管道监控的同时，追加写事件发货 400 报错
+        this->enableClientWriteEvent(clientFd);
     }
 }
 
