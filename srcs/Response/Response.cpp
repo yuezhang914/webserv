@@ -162,13 +162,10 @@ Response buildResponse(const Request &request)
     // 4. 【安全第四关】：合成磁盘物理路径（利用刚才 EffectiveRoute 优秀的 joinPaths 工艺）
     int pathStatus = route.createEffectivePath(request.getPath(), action);
 
-    // =================================================================
-    // 🚀 ✨ ✨ ✨ 【大结局级：CGI 终点站并网特权通道】 ✨ ✨ ✨ 🚀
-    // =================================================================
     // 在这里截获符合 CGI 后缀的文件。此时路径已经拼好（存在 route.targetPath 中），且方法合规
     if (isCGIRequest(location, request.getPath()))
     {
-        // 🚨 【核心防御】：无论 GET 还是 POST，CGI 脚本在执行前必须确保物理文件真实存在！
+        // 无论 GET 还是 POST，CGI 脚本在执行前必须确保物理文件真实存在！
         struct stat cgiStat;
         if (::stat(route.targetPath.c_str(), &cgiStat) != 0)
         {
@@ -188,7 +185,7 @@ Response buildResponse(const Request &request)
         cgiResponse.setStatus(200);
         cgiResponse.setManagedHeader("X-Internal-CGI-Path", route.targetPath);
 
-        return cgiResponse; // 🏎️ 瞬间异步离场！
+        return cgiResponse;
     }
 
     // 5. 【常规静态发货】：只有非 CGI 的普通静态文件请求，才去遵从 isValidPath 的静态规则
