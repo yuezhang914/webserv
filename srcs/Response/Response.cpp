@@ -119,25 +119,19 @@ Response buildResponse(const Request &request)
 
     const LocationConfig *location =
         findMatchingLocation(request.getPath(), server->locations);
-    if (isCGIRequest(location, request.getPath()))
-    {
-        response.createResponse(501,
-            "CGI execution is not implemented yet.", server->error_pages);
-        return response;
-    }
 
     EffectiveRoute route;
     bool routeReady = location != NULL
-        ? route.createEffectiveRoute(server, location)
-        : route.createEffectiveRoute(server);
+                          ? route.createEffectiveRoute(server, location)
+                          : route.createEffectiveRoute(server);
     if (!routeReady)
     {
         response.createResponse(500, "", server->error_pages);
         return response;
     }
 
-    if (location != NULL && route.redirect_status >= 300
-        && route.redirect_status <= 399 && !route.redirect_url.empty())
+    // 1. 【安全第一关】：优先处理 3xx 重定向拦截
+    if (location != NULL && route.redirect_status >= 300 && route.redirect_status <= 399 && !route.redirect_url.empty())
     {
         response.setStatus(route.redirect_status);
         response.setHeader("Location", route.redirect_url);
@@ -149,12 +143,15 @@ Response buildResponse(const Request &request)
         return response;
     }
 
+    // 2. 【安全第二关】：检测方法是否支持 (501)
     RequestAction action = requestActionFromMethod(request.getMethod());
     if (action == ACTION_UNSUPPORTED)
     {
         response.createResponse(501, "", route.server->error_pages);
         return response;
     }
+
+    // 3. 【安全第三关】：检测该 Location 块是否有权运行此方法 (405)
     if (!isMethodAllowed(action, route.allow_methods))
     {
         response.createResponse(405, "", route.server->error_pages);
@@ -162,7 +159,39 @@ Response buildResponse(const Request &request)
         return response;
     }
 
+    // 4. 【安全第四关】：合成磁盘物理路径（利用刚才 EffectiveRoute 优秀的 joinPaths 工艺）
     int pathStatus = route.createEffectivePath(request.getPath(), action);
+
+    // =================================================================
+    // 🚀 ✨ ✨ ✨ 【大结局级：CGI 终点站并网特权通道】 ✨ ✨ ✨ 🚀
+    // =================================================================
+    // 在这里截获符合 CGI 后缀的文件。此时路径已经拼好（存在 route.targetPath 中），且方法合规
+    if (isCGIRequest(location, request.getPath()))
+    {
+        // 🚨 【核心防御】：无论 GET 还是 POST，CGI 脚本在执行前必须确保物理文件真实存在！
+        struct stat cgiStat;
+        if (::stat(route.targetPath.c_str(), &cgiStat) != 0)
+        {
+            // 文件不存在，一枪回绝 404，拒绝执行无效弹射
+            response.createResponse(404, "", route.server->error_pages);
+            return response;
+        }
+        if (S_ISDIR(cgiStat.st_mode))
+        {
+            // 如果它是个文件夹而不是个文件，回绝 403 Forbidden
+            response.createResponse(403, "", route.server->error_pages);
+            return response;
+        }
+
+        // 🎯 完好无损，封装特权响应，用正确的 `route.targetPath` 传递火种给大管家！
+        Response cgiResponse(request);
+        cgiResponse.setStatus(200);
+        cgiResponse.setManagedHeader("X-Internal-CGI-Path", route.targetPath);
+
+        return cgiResponse; // 🏎️ 瞬间异步离场！
+    }
+
+    // 5. 【常规静态发货】：只有非 CGI 的普通静态文件请求，才去遵从 isValidPath 的静态规则
     if (pathStatus != PATH_OK)
     {
         response.createResponse(pathStatus, "", route.server->error_pages);
@@ -313,8 +342,7 @@ void Response::setStatus(int statusCode)
 */
 void Response::setHeader(const std::string &name, const std::string &value)
 {
-    if (!isValidHeaderName(name) || !isValidHeaderValue(value)
-        || isManagedHeader(name))
+    if (!isValidHeaderName(name) || !isValidHeaderValue(value) || isManagedHeader(name))
         return;
     _headers[canonicalHeaderName(name)] = value;
 }
@@ -433,25 +461,41 @@ void Response::setCloseConnection(bool closeConnection)
 void Response::createResponse(unsigned int code, const std::string &bodyText,
                               const ErrorPageMap &errorPages)
 {
+    // 1. 全盘洗涤旧资产，腾出干净的舱位
     _headers.clear();
     _body.clear();
+    
+    // 2. 注入状态码并联动触发底层状态语义自重组
     setStatus(static_cast<int>(code));
+    
+    // 3. 🟢 【规范化注入】：使用规范的直接写入，不留大小写隐患
     if (statusMayHaveBody(_statusCode) && !bodyText.empty())
     {
         _body = bodyText;
-        _headers["Content-Type"] = "text/plain";
+        // 采用统一的系统特权写入，确保键名经过 canonical 规整装订！
+        setManagedHeader("Content-Type", "text/plain");
     }
 
+    // 4. 【页面覆盖与兜底】：如果是错误状态，尝试加载客制化好的人脸页面
     if (isErrorStatusCode(_statusCode))
     {
+        // 💡 提示：如果 loadCustomErrorPage 成功，它会把 _body 替换为 HTML 内容
+        // 并自动调用 setManagedHeader("Content-Type", "text/html") 进行升级
         if (!loadCustomErrorPage(errorPages))
+        {
+            // 如果配了自定义页面但读取失败，或者压根没配，走应急草图兜底
             setDefaultErrorPage();
+        }
     }
+    
+    // 5. 【协议边界死守】：如果 RFC 规定这个状态码绝对不准带 Body（如 240/304），强行清空
     if (!statusMayHaveBody(_statusCode))
     {
         _body.clear();
-        _headers.erase("Content-Type");
+        _headers.erase(canonicalHeaderName("Content-Type")); // 规范清除
     }
+    
+    // 6. 重新拉起连接大闸，丈量最终的报文尺寸
     updateConnectionHeader();
     updateContentLength();
 }
@@ -533,32 +577,58 @@ std::string Response::statusMessageFor(int statusCode)
 {
     switch (statusCode)
     {
-        case 200: return "OK";
-        case 201: return "Created";
-        case 204: return "No Content";
-        case 300: return "Multiple Choices";
-        case 301: return "Moved Permanently";
-        case 302: return "Found";
-        case 303: return "See Other";
-        case 304: return "Not Modified";
-        case 307: return "Temporary Redirect";
-        case 308: return "Permanent Redirect";
-        case 400: return "Bad Request";
-        case 403: return "Forbidden";
-        case 404: return "Not Found";
-        case 405: return "Method Not Allowed";
-        case 408: return "Request Timeout";
-        case 409: return "Conflict";
-        case 411: return "Length Required";
-        case 413: return "Payload Too Large";
-        case 414: return "URI Too Long";
-        case 415: return "Unsupported Media Type";
-        case 423: return "Locked";
-        case 431: return "Request Header Fields Too Large";
-        case 500: return "Internal Server Error";
-        case 501: return "Not Implemented";
-        case 504: return "Gateway Timeout";
-        case 505: return "HTTP Version Not Supported";
+    case 200:
+        return "OK";
+    case 201:
+        return "Created";
+    case 204:
+        return "No Content";
+    case 300:
+        return "Multiple Choices";
+    case 301:
+        return "Moved Permanently";
+    case 302:
+        return "Found";
+    case 303:
+        return "See Other";
+    case 304:
+        return "Not Modified";
+    case 307:
+        return "Temporary Redirect";
+    case 308:
+        return "Permanent Redirect";
+    case 400:
+        return "Bad Request";
+    case 403:
+        return "Forbidden";
+    case 404:
+        return "Not Found";
+    case 405:
+        return "Method Not Allowed";
+    case 408:
+        return "Request Timeout";
+    case 409:
+        return "Conflict";
+    case 411:
+        return "Length Required";
+    case 413:
+        return "Payload Too Large";
+    case 414:
+        return "URI Too Long";
+    case 415:
+        return "Unsupported Media Type";
+    case 423:
+        return "Locked";
+    case 431:
+        return "Request Header Fields Too Large";
+    case 500:
+        return "Internal Server Error";
+    case 501:
+        return "Not Implemented";
+    case 504:
+        return "Gateway Timeout";
+    case 505:
+        return "HTTP Version Not Supported";
     }
     if (statusCode >= 300 && statusCode <= 399)
         return "Redirect";
@@ -586,8 +656,7 @@ bool Response::isErrorStatusCode(int statusCode)
 */
 bool Response::statusMayHaveBody(int statusCode)
 {
-    return !((statusCode >= 100 && statusCode < 200)
-        || statusCode == 204 || statusCode == 304);
+    return !((statusCode >= 100 && statusCode < 200) || statusCode == 204 || statusCode == 304);
 }
 
 /*
@@ -682,13 +751,16 @@ bool Response::isValidHeaderName(const std::string &name)
 {
     if (name.empty())
         return false;
-    const std::string symbols("!#$%&'*+-.^_`|~");
+
+    // 🟢 【黄金站位】：把下划线 '_' 放进来，同时把连字符 '-' 强行死死钉在最末尾！
+    // 这样任何 C++ 编译器都绝对不可能再把它误判为“范围减号”了！
+    const std::string symbols("!#$%&'*+.^`|~_-");
+
     size_t i = 0;
     while (i < name.size())
     {
         unsigned char c = static_cast<unsigned char>(name[i]);
-        if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z')
-            || (c >= 'a' && c <= 'z') || symbols.find(c) != std::string::npos))
+        if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || symbols.find(c) != std::string::npos))
             return false;
         ++i;
     }
@@ -760,22 +832,22 @@ void Response::updateConnectionHeader()
     {
         switch (_statusCode)
         {
-            case 400:
-            case 408:
-            case 409:
-            case 411:
-            case 413:
-            case 414:
-            case 431:
-            case 505:
-                _closeConnection = true;
-                break;
-            default:
-                break;
+        case 400:
+        case 408:
+        case 409:
+        case 411:
+        case 413:
+        case 414:
+        case 431:
+        case 505:
+            _closeConnection = true;
+            break;
+        default:
+            break;
         }
     }
     setManagedHeader("Connection",
-        _closeConnection ? "close" : "keep-alive");
+                     _closeConnection ? "close" : "keep-alive");
 }
 
 /*
