@@ -25,7 +25,7 @@ private:
 
     // 2. 运行时高效映射表
     std::map<int, ServerConfig> _listen_socket_map; // listenFd -> ServerConfig
-    std::map<int, Connection> _connections;         // clientFd -> Connection
+    std::map<int, Connection*> _connections;         // clientFd -> Connection
 
     // 🚀 【CGI 并网资产】：逆向雷达与延迟追加队列
     std::map<int, int> _cgi_fd_to_client_map; // cgi_read_fd -> clientFd
