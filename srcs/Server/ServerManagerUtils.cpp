@@ -91,22 +91,45 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
 
         // 动态判定这次请求是不是要走 CGI 脚本
         std::string path = conn.request.getPath();
-        if (path.find("/cgi-bin/") != std::string::npos || path.find(".py") != std::string::npos)
+
+        Response res = buildResponse(this->_connections[clientFd].request);
+
+        // 🚀 ✨ ✨ 物理闭环通电：检查这到底是不是一个隐藏的 CGI 弹射请求 ✨ ✨ 🚀
+        std::string script_path;
+        if (res.getHeader("X-Internal-CGI-Path", script_path))
         {
-            std::cout << "[ServerManager] ROUTING TO CGI WORKSHOP: " << path << std::endl;
-            // 修正为拼好 root 的“硬核本地相对路径”：
-            std::string real_script_path = "srv/www" + path; // 拼装出 "srv/www/cgi-bin/login.py"
-            std::cout << "[ServerManager] Executing real local CGI path: " << real_script_path << std::endl;
-            // 1. 实例化我们刚刚千锤百炼打磨好的 CGI 执行官
-            // 传入当前请求的智囊大脑，以及脚本在服务器本地的真实物理路径
-            CgiHandler cgi(conn.request, real_script_path);
-            // 2. 执行物理一写一读，父子管道对流，拿到子进程 Python 吐出来的原始结晶
-            std::string cgi_raw_output = cgi.execute();
-            // 3. 扔进包装工厂，智能穿上 HTTP 状态行和必要的 Headers 外壳
-            std::string final_http_packet = cgi.buildHttpResponse(cgi_raw_output);
-            // 4. 彻底清洗发件箱，注入全新出炉的 CGI 动态响应报文
-            std::string().swap(conn.write_buffer);
-            conn.write_buffer = final_http_packet;
+            // 1. 拿到刚才在 Response 舱里拼好的纯正磁盘绝对路径，交由孵化舱发射！
+            CgiHandler cgi(this->_connections[clientFd].request, script_path);
+            CgiFds fds = cgi.async_launch();
+
+            if (fds.pid < 0 || fds.read_fd < 0 || fds.write_fd < 0)
+            {
+                // 管道开凿失败的极端情况，原地降级回 500
+                this->_connections[clientFd].response.createResponse(500, "CGI Spawn Failed", this->_connections[clientFd].config.error_pages);
+                this->enableClientWriteEvent(clientFd);
+                return;
+            }
+
+            // 2. 签订我们推演的因果契约
+            this->_cgi_fd_to_client_map[fds.read_fd] = clientFd;
+
+            // 3. 将子进程的动态数据源，注入 Connection 账本统一看管
+            this->_connections[clientFd].is_cgi = true;
+            this->_connections[clientFd].cgi_pid = fds.pid;
+            this->_connections[clientFd].cgi_read_fd = fds.read_fd;
+
+            // 4. 安全送入延迟并网暂存箱，大循环绝不低头卡顿！
+            this->registerFdToPoll(fds.read_fd, POLLIN);
+
+            // 5. 如果是 POST，把写端也挂载上网准备分批、异步往里灌 Body
+            if (this->_connections[clientFd].request.getMethod() == "POST")
+            {
+                this->_connections[clientFd].cgi_write_fd = fds.write_fd;
+                this->registerFdToPoll(fds.write_fd, POLLOUT);
+            }
+
+            std::cout << "[⚡ WebServ Core] Client " << clientFd << " successfully split into CGI pipeline (FD: " << fds.read_fd << ") under PID " << fds.pid << std::endl;
+            return; // 🎯 完美交接！大管家拍拍屁股去处理别的连接
         }
         else
         {

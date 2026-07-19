@@ -51,6 +51,7 @@ ServerSocket::~ServerSocket()
  */
 void ServerSocket::setNonBlocking()
 {
+    // 1. ⚡ 注入 O_NONBLOCK（非阻塞流，大循环不卡死的基本尊严）
     int flags = fcntl(this->_fd, F_GETFL, 0);
     if (flags < 0)
     {
@@ -60,6 +61,21 @@ void ServerSocket::setNonBlocking()
     if (fcntl(this->_fd, F_SETFL, flags | O_NONBLOCK) < 0)
     {
         std::cerr << "Error: fcntl F_SETFL O_NONBLOCK failed for fd " << this->_fd << std::endl;
+        exit(1);
+    }
+
+    // 🚀 2. 注入 FD_CLOEXEC（物理过河拆桥锁，彻底掐灭子进程偷渡 FD 的隐患）
+    // 先通过 F_GETFD 捞出当前的描述符标志位
+    int fd_flags = fcntl(this->_fd, F_GETFD, 0);
+    if (fd_flags < 0)
+    {
+        std::cerr << "Error: fcntl F_GETFD failed for fd " << this->_fd << std::endl;
+        exit(1);
+    }
+    // 使用 | 运算符，安全地把 FD_CLOEXEC 特权标志叠加进去，再用 F_SETFD 写回
+    if (fcntl(this->_fd, F_SETFD, fd_flags | FD_CLOEXEC) < 0)
+    {
+        std::cerr << "Error: fcntl F_SETFD FD_CLOEXEC failed for fd " << this->_fd << std::endl;
         exit(1);
     }
 }

@@ -44,5 +44,6 @@
 #include "CgiProcess.hpp"
 #include "CgiResponse.hpp"
 
+#include "Response.hpp"
 // ...
 #endif

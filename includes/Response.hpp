@@ -20,12 +20,12 @@ public:
     typedef std::map<int, std::string> ErrorPageMap;
 
 private:
-    std::string _version;          /* 状态行使用的 HTTP 版本，固定为 HTTP/1.1。 */
-    int _statusCode;               /* HTTP 状态码；默认是可直接序列化的 200。 */
-    std::string _statusMessage;    /* 与状态码对应的标准短语。 */
-    HeaderMap _headers;            /* 使用规范化名称保存的 response headers。 */
-    std::string _body;             /* 二进制安全的 response body。 */
-    bool _closeConnection;         /* response 发送完成后是否关闭连接。 */
+    std::string _version;       /* 状态行使用的 HTTP 版本，固定为 HTTP/1.1。 */
+    int _statusCode;            /* HTTP 状态码；默认是可直接序列化的 200。 */
+    std::string _statusMessage; /* 与状态码对应的标准短语。 */
+    HeaderMap _headers;         /* 使用规范化名称保存的 response headers。 */
+    std::string _body;          /* 二进制安全的 response body。 */
+    bool _closeConnection;      /* response 发送完成后是否关闭连接。 */
 
     static std::string statusMessageFor(int statusCode);
     static bool isErrorStatusCode(int statusCode);
@@ -38,8 +38,6 @@ private:
     static bool isValidHeaderValue(const std::string &value);
     static bool requestWantsClose(const Request &request);
 
-    void setManagedHeader(const std::string &name,
-                          const std::string &value);
     void updateContentLength();
     void updateConnectionHeader();
     bool loadCustomErrorPage(const ErrorPageMap &errorPages);
@@ -88,6 +86,9 @@ public:
 
     /* 把状态行、headers、空行和二进制 body 序列化为完整 HTTP 文本。 */
     std::string responseToString() const;
+
+    void setManagedHeader(const std::string &name,
+                          const std::string &value);
 };
 
 /* 把已经通过 RequestParser 的 Request 分发成普通 HTTP Response。 */

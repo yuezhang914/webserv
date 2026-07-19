@@ -288,6 +288,8 @@ Response handleGet(const Request &request, EffectiveRoute &route)
     return response;
 }
 
+
+
 /*
 函数用途：当请求的目标是目录时，按照配置优先级寻找默认的首页文件（如 index.html）。
 参数与变量：
@@ -334,6 +336,7 @@ static Response handleIndex(const EffectiveRoute &route,
 
         struct stat fileInfo;
         if (fstat(fd, &fileInfo) != 0)
+    // 4. 终极装配：注入标准的 200 OK 头盔，并通过你的 getMimeType 动态剥离后缀名给浏览器下发指令
         {
             close(fd);
             response.createResponse(500, "", route.server->error_pages);
@@ -803,6 +806,58 @@ std::string FileOperation::generateUniqueFilename(
 3. 将精简后的纯净类型字符串与系统支持清单（二进制、表单数据、JSON及纯文本）进行强匹配比对。
 4. 匹配成功返回 OK；如果客户端提交的是目前尚未具备解析能力的复杂格式（如 multipart 表单），则拒绝之并返回 ERROR 标识。
 */
+// static Response createAutoIndexResponse(const EffectiveRoute &route,
+//                                         const std::string &requestPath,
+//                                         bool closeConnection)
+// {
+//     Response response(closeConnection);
+//     DIR *directory = opendir(route.targetPath.c_str());
+//     if (directory == NULL)
+//     {
+//         response.createResponse(500, "", route.server->error_pages);
+//         return response;
+//     }
+
+//     std::string displayPath = requestPath.empty() ? "/" : requestPath;
+//     if (displayPath[displayPath.size() - 1] != '/')
+//         displayPath += '/';
+//     std::string body = "<!DOCTYPE html>\n<html>\n<head><title>Index of ";
+//     body += escapeHtml(displayPath);
+//     body += "</title></head>\n<body>\n<h1>Index of ";
+//     body += escapeHtml(displayPath);
+//     body += "</h1>\n<ul>\n";
+
+//     struct dirent *entry = NULL;
+//     while ((entry = readdir(directory)) != NULL)
+//     {
+//         std::string name = entry->d_name;
+//         if (name == ".")
+//             continue;
+//         struct stat pathInfo;
+//         std::string currentPath = joinPaths(route.targetPath, name);
+//         if (stat(currentPath.c_str(), &pathInfo) != 0)
+//             continue;
+//         bool isDirectory = S_ISDIR(pathInfo.st_mode);
+//         if (!isDirectory && !S_ISREG(pathInfo.st_mode))
+//             continue;
+//         std::string displayName = isDirectory ? name + "/" : name;
+//         std::string href = encodePathSegment(name);
+//         if (isDirectory)
+//             href += "/";
+//         body += "<li><a href=\"";
+//         body += escapeHtml(href);
+//         body += "\">";
+//         body += escapeHtml(displayName);
+//         body += "</a></li>\n";
+//     }
+//     closedir(directory);
+//     body += "</ul>\n</body>\n</html>\n";
+
+//     response.setStatus(200);
+//     response.setHeader("Content-Type", "text/html");
+//     response.setBody(body);
+//     return response;
+// }
 int FileOperation::checkContentType(const std::string &contentType) const
 {
     std::string value = toLowerAscii(contentType);
