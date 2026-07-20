@@ -944,7 +944,7 @@ void Response::parseCgiOutput(const std::string &cgiOutput)
         delimiter_len = 2;
     }
 
-    // 🛡️ 极端兜底：如果子进程吐出来的内容里连个空行都没有，说明是个完全畸形的输出
+    // 极端兜底：如果子进程吐出来的内容里连个空行都没有，说明是个完全畸形的输出
     if (header_end == std::string::npos)
     {
         this->_status_line = "HTTP/1.1 200 OK";
@@ -982,7 +982,7 @@ void Response::parseCgiOutput(const std::string &cgiOutput)
         }
         else
         {
-            // 🎯 核心并网修正：提取普通头键值对，直接调用你已有的核心防御设置接口
+            // 核心并网修正：提取普通头键值对，直接调用你已有的核心防御设置接口
             size_t colon = line.find(':');
             if (colon != std::string::npos)
             {
