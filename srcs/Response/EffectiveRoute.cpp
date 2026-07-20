@@ -3,6 +3,10 @@
 用途：构造 EffectiveRoute，并合并 server 与 location 配置，得到当前请求最终使用的路由规则。
 拆分说明：真实路径生成和 stat 验证已移动到 EffectivePath.cpp；配置继承逻辑保持不变。
 */
+/*
+包含：EffectiveRoute.hpp
+用途：取得 EffectiveRoute、ServerConfig、LocationConfig 和成员函数声明。
+*/
 #include "EffectiveRoute.hpp"
 
 /*

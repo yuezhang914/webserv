@@ -3,8 +3,22 @@
 用途：解析 Request 的 Connection token，并根据请求策略和响应错误状态维护 Connection header。
 拆分说明：相关函数从原 Response.cpp 原样移动，不改变 HTTP/1.1 默认 keep-alive 或强制关闭状态集合。
 */
+/*
+包含：Response.hpp
+用途：实现 Response 的连接策略和内部 Connection header 同步。
+*/
 #include "Response.hpp"
+
+/*
+包含：Request.hpp
+用途：读取请求 HTTP 版本和 Connection header。
+*/
 #include "Request.hpp"
+
+/*
+包含：ResponseInternal.hpp
+用途：向 CGI 解析共享 responseTrimOws() 声明。
+*/
 #include "ResponseInternal.hpp"
 
 /*

@@ -3,10 +3,28 @@
 用途：验证 DELETE 目标文件名、执行普通文件删除，并把 stat/unlink errno 映射成稳定 HTTP 响应。
 拆分说明：删除相关函数从原 RequestHandler.cpp 原样移动，不允许删除目录或非普通文件。
 */
+/*
+包含：RequestHandlerInternal.hpp
+用途：使用 FileOperation、EffectiveRoute、Request 和 Response 内部声明。
+*/
 #include "RequestHandlerInternal.hpp"
 
+/*
+包含：<cerrno>
+用途：保存 stat()/unlink() 失败原因并映射 DELETE 状态码。
+*/
 #include <cerrno>
+
+/*
+包含：<sys/stat.h>
+用途：使用 stat() 与 S_ISREG 验证 DELETE 目标是普通文件。
+*/
 #include <sys/stat.h>
+
+/*
+包含：<unistd.h>
+用途：使用 unlink() 删除经过验证的普通文件。
+*/
 #include <unistd.h>
 
 /*

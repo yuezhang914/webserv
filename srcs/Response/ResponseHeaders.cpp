@@ -3,6 +3,10 @@
 用途：实现响应 header 的读取、设置、删除、名称规范化、合法性验证和受控 header 保护。
 拆分说明：Content-Length 和 Connection 仍只能由 Response 内部维护；连接 token 解析独立放入 ResponseConnection.cpp。
 */
+/*
+包含：Response.hpp
+用途：实现 Response header 查询、写入、删除、规范化和合法性检查。
+*/
 #include "Response.hpp"
 
 /*

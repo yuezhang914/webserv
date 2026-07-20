@@ -1,16 +1,78 @@
 /*
 文件：srcs/Response/ResponseBuilder.cpp
-用途：实现一次请求的顶层响应分发，负责合并路由、处理重定向、校验方法与 CGI 目标，并把普通请求交给对应 handler。
-拆分说明：函数从原 Response.cpp 按“请求分发”职责原样移动，不改变 buildResponse() 的公开接口或分支顺序。
+用途：实现项目唯一的顶层响应分发，负责 Session 虚拟路由、配置合并、重定向、方法权限、CGI 目标和普通文件请求。
+拆分说明：所有请求都必须传入 ServerManager 长期持有的共享 SessionStore，不再保留可能绕过 Session 的旧入口。
+*/
+/*
+包含：Response.hpp
+用途：使用 Response 类型以及唯一的带共享 SessionStore 的 buildResponse() 声明。
 */
 #include "Response.hpp"
+
+/*
+包含：ConfigRouteUtils.hpp
+用途：查找最长匹配 location，并复用配置路由辅助函数。
+*/
 #include "ConfigRouteUtils.hpp"
+
+/*
+包含：EffectiveRoute.hpp
+用途：合并 server/location 规则，生成真实路径和 RequestAction。
+*/
 #include "EffectiveRoute.hpp"
+
+/*
+包含：Request.hpp
+用途：通过只读 getter 获取 method、path、config 和连接策略。
+*/
 #include "Request.hpp"
+
+/*
+包含：RequestHandler.hpp
+用途：把普通 GET、POST、DELETE 请求交给对应文件处理函数。
+*/
 #include "RequestHandler.hpp"
 
+/*
+包含：SessionResponse.hpp
+用途：识别并构造 counter、login、logout 三个 Session 虚拟路由。
+*/
+#include "SessionResponse.hpp"
+
+/*
+包含：<map>
+用途：遍历 LocationConfig 中 CGI 后缀到解释器的映射。
+*/
+#include <map>
+
+/*
+包含：<set>
+用途：读取 EffectiveRoute 的 allow_methods 并生成 Allow header。
+*/
+#include <set>
+
+/*
+包含：<string>
+用途：处理方法名、脚本路径、重定向正文和内部 CGI 路径 header。
+*/
+#include <string>
+
+/*
+包含：<cerrno>
+用途：在 stat() 失败后映射 CGI 脚本路径错误；不在 read/write 后依赖 errno。
+*/
 #include <cerrno>
+
+/*
+包含：<sys/stat.h>
+用途：使用 stat() 和 S_ISREG 检查 CGI 目标是否为普通文件。
+*/
 #include <sys/stat.h>
+
+/*
+包含：<unistd.h>
+用途：使用 access(X_OK) 检查 CGI 脚本执行权限。
+*/
 #include <unistd.h>
 
 /*
@@ -88,7 +150,7 @@ static bool isConfiguredCgiPath(const LocationConfig *location,
     1. stat 失败时把不存在/中间目录不存在映射为 404，权限失败映射为 403，其余映射为 500。
     2. 目标不是普通文件时返回 403，避免目录、FIFO、socket 或设备进入 execve。
     3. access(X_OK) 失败时返回 403。
-    4. 所有检查通过返回 PATH_OK，buildResponse() 随后返回 RESPONSE_BUILD_CGI 和该脚本路径。
+    4. 所有检查通过返回 PATH_OK，buildResponse() 随后通过内部 header 交付脚本路径。
 */
 static int validateCgiScript(const std::string &scriptPath)
 {
@@ -110,21 +172,24 @@ static int validateCgiScript(const std::string &scriptPath)
 
 /*
 函数：buildResponse
-用途：保留其他模块已经使用的 Response 返回接口，完成路由、方法、路径和 CGI 分发判断。
-参数来源：request 由 RequestParser 完整解析并由 ServerManager 传入。
+用途：作为项目唯一顶层入口，依次处理配置、重定向、方法权限、Session 路由、CGI 和普通文件请求。
+参数来源：
+    - request：由 RequestParser 完整解析后由 ServerManager 传入。
+    - sessionStore：由 ServerManager 长期持有的服务器级共享对象，不属于 Response 所有。
 变量说明：
-    - server/location/route：分别表示当前 server 配置、最长匹配 location 和合并后的有效路由。
-    - response：当前请求的默认响应，继承 Request 的 Connection 策略。
-    - action/pathStatus/cgiPathStatus：分别保存方法枚举、普通路径检查结果和 CGI 脚本检查结果。
+    - server/location/route：当前 server、最长匹配 location 和合并后的有效路由。
+    - response：继承 Request 连接策略的默认响应。
+    - action/pathStatus/cgiPathStatus：方法枚举、普通路径检查和 CGI 脚本检查结果。
 实现逻辑：
-    1. 检查 ServerConfig 并找到最长匹配 location，合并 EffectiveRoute。
-    2. 优先处理 redirect，再检查方法是否实现以及是否被配置允许。
-    3. 生成真实磁盘路径；CGI 路径先验证存在、普通文件和执行权限。
-    4. CGI 请求不在 Response 内运行，只把脚本路径写入现有 ServerManager 已识别的 X-Internal-CGI-Path 内部 header。
-    5. 非 CGI 请求按 GET、POST、DELETE 返回最终 Response。
-接口边界：返回类型保持 Response，避免要求 ServerManager 改用新的分发结果类型。
+    1. 检查 Request 是否绑定 ServerConfig，并合并 server/location 路由。
+    2. 优先执行配置重定向，再检查方法是否实现以及是否被当前路由允许。
+    3. 精确匹配三个 Session 示例路径时，把共享 store 交给 SessionResponse 层。
+    4. 其他请求生成真实路径；CGI 后缀先验证可执行脚本并交付内部路径 header。
+    5. 普通 GET、POST、DELETE 分别交给 RequestHandler 对应函数。
+接口约束：本项目不再提供不带 SessionStore 的旧重载，避免调用方误绕过 Session 功能。
 */
-Response buildResponse(const Request &request)
+Response buildResponse(const Request &request,
+                       SessionStore &sessionStore)
 {
     const ServerConfig *server = request.getConfig();
     Response response(request);
@@ -155,7 +220,8 @@ Response buildResponse(const Request &request)
         if (route.redirect_status != 304)
         {
             response.setHeader("Content-Type", "text/html");
-            response.setBody("<!DOCTYPE html><html><head><title>Redirect</title></head><body>Redirecting</body></html>");
+            response.setBody("<!DOCTYPE html><html><head><title>Redirect"
+                "</title></head><body>Redirecting</body></html>");
         }
         return response;
     }
@@ -172,6 +238,9 @@ Response buildResponse(const Request &request)
         response.setHeader("Allow", buildAllowHeader(route.allow_methods));
         return response;
     }
+
+    if (isSessionDemoPath(request.getPath()))
+        return buildSessionDemoResponse(request, sessionStore);
 
     int pathStatus = route.createEffectivePath(request.getPath(), action);
     if (isConfiguredCgiPath(location, request.getPath()))
@@ -199,4 +268,3 @@ Response buildResponse(const Request &request)
         return handlePost(request, route);
     return handleDelete(request, route);
 }
-

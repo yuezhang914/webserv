@@ -3,10 +3,28 @@
 用途：实现普通静态文件 GET，以及 method 字符串到内部动作的映射和 allow_methods 检查。
 拆分说明：目录、上传和删除处理分别移动到独立实现文件；公开 RequestHandler.hpp 接口保持不变。
 */
+/*
+包含：RequestHandler.hpp
+用途：取得 GET/POST/DELETE 公开入口和 RequestAction 映射声明。
+*/
 #include "RequestHandler.hpp"
+
+/*
+包含：RequestHandlerInternal.hpp
+用途：调用目录处理和 MIME 类型内部辅助接口。
+*/
 #include "RequestHandlerInternal.hpp"
 
+/*
+包含：<fstream>
+用途：使用 std::ifstream 以二进制方式读取普通静态文件。
+*/
 #include <fstream>
+
+/*
+包含：<sstream>
+用途：把静态文件流内容汇总为二进制安全 std::string。
+*/
 #include <sstream>
 
 /*

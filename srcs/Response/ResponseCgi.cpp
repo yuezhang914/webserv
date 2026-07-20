@@ -3,11 +3,34 @@
 用途：把异步 CGI 收集到的 stdout 转换为最终 Response，并处理 CGI 输出格式错误时的 502 响应。
 拆分说明：CGI 解析和构造函数从原 Response.cpp 原样移动，不执行 CGI、不改变 ServerManager 现有接口。
 */
+/*
+包含：Response.hpp
+用途：实现 CGI 输出适配相关 Response 成员和 buildCgiResponse()。
+*/
 #include "Response.hpp"
+
+/*
+包含：Request.hpp
+用途：继承原 CGI 请求的连接策略和 ServerConfig。
+*/
 #include "Request.hpp"
+
+/*
+包含：ServerConfig.hpp
+用途：CGI 失败时读取当前 server 的自定义错误页。
+*/
 #include "ServerConfig.hpp"
+
+/*
+包含：ResponseInternal.hpp
+用途：复用 CGI header value 的 OWS 删除函数。
+*/
 #include "ResponseInternal.hpp"
 
+/*
+包含：<sstream>
+用途：解析 CGI Status header 中的状态码和 reason phrase。
+*/
 #include <sstream>
 
 /*

@@ -3,9 +3,22 @@
 用途：把 normalized URL path 映射为真实文件系统路径，并执行 GET 所需的基础路径类型与 errno 校验。
 拆分说明：函数从原 EffectiveRoute.cpp 按“路径生成与验证”职责原样移动，不重复 URI 解码或规范化。
 */
+/*
+包含：EffectiveRoute.hpp
+用途：使用 EffectiveRoute、RequestAction、PATH_OK 和 joinPaths() 声明。
+*/
 #include "EffectiveRoute.hpp"
 
+/*
+包含：<cerrno>
+用途：读取 stat() 失败后的 errno，并映射为准确 HTTP 状态。
+*/
 #include <cerrno>
+
+/*
+包含：<sys/stat.h>
+用途：使用 stat()、S_ISREG 和 S_ISDIR 检查真实路径类型。
+*/
 #include <sys/stat.h>
 
 /*

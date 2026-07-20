@@ -1,5 +1,5 @@
 #include "Webserv.hpp"
-
+#include "SessionStore.hpp"
 #include "CgiHandler.hpp"
 /**
  * 函数：ServerManager::isListenFd
@@ -99,7 +99,10 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
     {
         std::cout << "[ServerManager] Request parsed successfully for FD " << clientFd << std::endl;
         conn->read_buffer.erase(0, consumed);      
-        Response res = buildResponse(conn->request);  
+        // Response res = buildResponse(conn->request);  
+        // 为了能编译session版修改 增加session参数 没有动其他逻辑
+        static SessionStore sessionStore;
+Response res = buildResponse(conn->request, sessionStore);
         
         // 3. 检查这到底是不是一个隐藏的 CGI 请求
         std::string script_path;
