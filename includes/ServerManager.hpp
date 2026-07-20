@@ -28,7 +28,8 @@ private:
     std::map<int, Connection*> _connections;         // clientFd -> Connection
 
     // 🚀 【CGI 并网资产】：逆向雷达与延迟追加队列
-    std::map<int, int> _cgi_fd_to_client_map; // cgi_read_fd -> clientFd
+    std::map<int, int> _cgi_read_fd_to_client_map;  // 读端专属：CGI 读 Fd -> Client Fd
+    std::map<int, int> _cgi_write_fd_to_client_map; // 写端专属：CGI 写 Fd -> Client Fd
     std::vector<struct pollfd> _fds_to_add;   // 暂存箱，封锁 vector 扩容带来的野指针段错误
 
     // 3. 内部私有工具函数
@@ -49,8 +50,7 @@ private:
     // 🚀 【CGI 并网工具】：异步分流与收割车间
     bool isCgiPipeFd(int fd);                               // 侦测触发的是不是 CGI 管道
     void handleCgiPipeRead(int cgiReadFd, size_t poll_idx); // 异步收割 Python 输出
-    void parseAndFormatCgiResponse(std::string &cgiOutput);
-
+  
     void handleCgiPipeWrite(int cgiWriteFd, size_t poll_idx);
 
 public:

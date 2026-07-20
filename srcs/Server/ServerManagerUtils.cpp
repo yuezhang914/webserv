@@ -56,23 +56,27 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
     Connection *conn = this->_connections[clientFd];
 
     int loop_counter = 0; // 物理计数器
+    
     // 1. 强攻非阻塞 Socket，把内核缓冲区捞干净
     while (true)
     {
-        
+        // 只要进入循环就累加。空转超过 1000 次强制熔断，防止卡死主线程！
+        if (++loop_counter > 1000)
+        {
+            std::cerr << "DEAD LOOP DETECTED IN READ VALVE! Force breaking..." << std::endl;
+            break;
+        }
 
-        ssize_t bytes_read = this->_connections[clientFd]->socket->read(buffer, BUFFER_SIZE - 1);
+        ssize_t bytes_read = conn->socket->read(buffer, BUFFER_SIZE - 1);
 
-      
         if (bytes_read == 0) // EOF（客户端优雅断开）
         {
             std::cout << "[ServerManager] Client FD " << clientFd << " closed connection (EOF)." << std::endl;
             this->closeConnection(clientFd, poll_index);
             return;
         }
-        if (bytes_read == -1) // 正常的非阻塞读空，安全 break
+        if (bytes_read == -1) // 正常的非阻塞读空，安全退出缓冲区读取
         {
-          
             break;
         }
         if (bytes_read == -2) // 物理崩溃，强行断开
@@ -83,61 +87,57 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
         if (bytes_read > 0)
         {
             buffer[bytes_read] = '\0';
-            this->_connections[clientFd]->read_buffer.append(buffer, bytes_read);
-        }
-
-        // 🛡️ 极端防卫：如果空转了超过 1000 次还没退出来，强制熔断，防止卡死主线程！
-        if (loop_counter > 1000)
-        {
-            std::cerr << "DEAD LOOP DETECTED IN READ VALVE! Force breaking..." << std::endl;
-            break;
+            conn->read_buffer.append(buffer, bytes_read);
         }
     }
 
     // 2. 解析蓄水池里的数据
     size_t consumed = 0;
-    
     int status = RequestParser::parseBuffer(conn->read_buffer, conn->request, &conn->config, consumed);
    
     if (status == REQUEST_OK)
     {
         std::cout << "[ServerManager] Request parsed successfully for FD " << clientFd << std::endl;
         conn->read_buffer.erase(0, consumed);      
-        Response res = buildResponse(this->_connections[clientFd]->request);  
-        // 检查这到底是不是一个隐藏的 CGI 请求
+        Response res = buildResponse(conn->request);  
+        
+        // 3. 检查这到底是不是一个隐藏的 CGI 请求
         std::string script_path;
         if (res.getHeader("X-Internal-CGI-Path", script_path))
         {
-            CgiHandler cgi(this->_connections[clientFd]->request, script_path);
+            CgiHandler cgi(conn->request, script_path);
             CgiFds fds = cgi.async_launch();
 
             if (fds.pid < 0 || fds.read_fd < 0 || fds.write_fd < 0)
             {
                 this->_connections[clientFd]->response.createResponse(500, "CGI Spawn Failed", this->_connections[clientFd]->config.error_pages);
-                this->enableClientWriteEvent(clientFd); // 🟢 采用高级特权操控，追加写事件
+                this->enableClientWriteEvent(clientFd); 
                 return;
             }
 
-            this->_cgi_fd_to_client_map[fds.read_fd] = clientFd;
+            // 🎯 【读端专属账本登记】：完备正名并网！
+            this->_cgi_read_fd_to_client_map[fds.read_fd] = clientFd;
 
-            this->_connections[clientFd]->is_cgi = true;
-            this->_connections[clientFd]->cgi_pid = fds.pid;
-            this->_connections[clientFd]->cgi_read_fd = fds.read_fd;
+            conn->is_cgi = true;
+            conn->cgi_pid = fds.pid;
+            conn->cgi_read_fd = fds.read_fd;
 
             this->registerFdToPoll(fds.read_fd, POLLIN);
 
-            if (this->_connections[clientFd]->request.getMethod() == "POST")
+            // 🎯 【写端专属账本登记】：POST 数据的完美因果绑定
+            if (conn->request.getMethod() == "POST")
             {
-                this->_connections[clientFd]->cgi_write_fd = fds.write_fd;
+                conn->cgi_write_fd = fds.write_fd;
+                this->_cgi_write_fd_to_client_map[fds.write_fd] = clientFd;
                 this->registerFdToPoll(fds.write_fd, POLLOUT);
             }
 
-            std::cout << "[⚡ WebServ Core] Client " << clientFd << " successfully split into CGI pipeline (FD: " << fds.read_fd << ") under PID " << fds.pid << std::endl;
+            std::cout << "[⚡ WebServ Core] Client " << clientFd << " successfully split into CGI pipeline (Read FD: " << fds.read_fd << ", Write FD: " << fds.write_fd << ") under PID " << fds.pid << std::endl;
             return;
         }
         else
         {
-            //静态、重定向、404/403 资产完美化一，直接并网导出！
+            // 4. 静态、重定向、404/403 资产完美化一，直接并网导出！
             conn->write_buffer = res.responseToString();
         }
 
@@ -156,7 +156,7 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
         std::string error_response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         conn->write_buffer += error_response;
 
-        // 在保持原有读管道监控的同时，追加写事件400 报错
+        // 在保持原有读管道监控的同时，追加写事件 400 报错
         this->enableClientWriteEvent(clientFd);
     }
 }
@@ -290,21 +290,6 @@ void ServerManager::acceptNewConnection(int listenFd)
     if (clientFd < 0)
     {
         std::cerr << "[Acceptor] Error: accept() failed on Listen FD " << listenFd << std::endl;
-        return;
-    }
-    int flags = ::fcntl(clientFd, F_GETFL, 0);
-    if (flags < 0)
-    {
-        std::cerr << "[Acceptor] CRITICAL: fcntl F_GETFL failed on Client FD " << clientFd << std::endl;
-        ::close(clientFd);
-        return;
-    }
-
-    // 强行注入 O_NONBLOCK 灵魂
-    if (::fcntl(clientFd, F_SETFL, flags | O_NONBLOCK) < 0)
-    {
-        std::cerr << "[Acceptor] CRITICAL: fcntl F_SETFL O_NONBLOCK failed on Client FD " << clientFd << std::endl;
-        ::close(clientFd);
         return;
     }
     // 1. 创建ClientSocket

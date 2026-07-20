@@ -1,4 +1,6 @@
 #include "ServerManager.hpp"
+#include "Response.hpp"
+
 #include <iostream>
 
 // 🎯 【高光守则】：构造函数前面绝对没有任何 void 或者是返回值类型！
@@ -180,8 +182,21 @@ void ServerManager::enableClientWriteEvent(int clientFd)
 bool ServerManager::isCgiPipeFd(int fd)
 {
     // 直接利用红黑树雷达一枪锁死，效率 O(log N) 极高！
-    return this->_cgi_fd_to_client_map.find(fd) != this->_cgi_fd_to_client_map.end();
+    return this->_cgi_read_fd_to_client_map.find(fd) != this->_cgi_read_fd_to_client_map.end();
 }
+
+void ServerManager::registerFdToPoll(int fd, short events)
+{
+    struct pollfd pfd;
+    pfd.fd = fd;
+    pfd.events = events; // 传入 POLLIN
+    pfd.revents = 0;     // 清空内核回执，防止幽灵触发
+
+    this->_poll_fds.push_back(pfd); // 正式入籍大循环名册
+
+    std::cout << "[ServerManager] FD " << fd << " successfully registered to poll tree." << std::endl;
+}
+
 
 /*
 函数用途：全量异步吞噬 CGI 管道读端弹回的就绪报文资产，并顺藤摸瓜将其缝合至目标客户端的写缓冲区。
@@ -193,8 +208,8 @@ bool ServerManager::isCgiPipeFd(int fd)
 void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
 {
     // 1. 【顺藤摸瓜】：反查因果契约
-    std::map<int, int>::iterator it = this->_cgi_fd_to_client_map.find(cgiReadFd);
-    if (it == this->_cgi_fd_to_client_map.end())
+    std::map<int, int>::iterator it = this->_cgi_read_fd_to_client_map.find(cgiReadFd);
+    if (it == this->_cgi_read_fd_to_client_map.end())
     {
         ::close(cgiReadFd);
         this->_poll_fds.erase(this->_poll_fds.begin() + poll_idx);
@@ -226,20 +241,22 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
             // ============================================================
             //                  黄金清洗并网安全车间 
             // ============================================================
-            // 1. 先把当前完全抽干的原生 CGI 脏报文提取出来
-            std::string cgi_raw_data = conn->write_buffer;
 
-            // 2. 扔进整形清洗车间，让它去剥离 Status、自动丈量 Content-Length
-            this->parseAndFormatCgiResponse(cgi_raw_data);
+            Response cgi_res;
+
+            cgi_res.parseCgiOutput(conn->write_buffer);
+          
 
             // 3. 清空发件箱，把整形完的高级满血报文一次性安全灌入！
             std::string().swap(conn->write_buffer); // 强力清空旧内存
-            conn->write_buffer = cgi_raw_data;      // 换装新资产
+
+            // 4. 将 Response 按照规范重构组装出来的满血高级资产，正式并网注入发件箱！
+            conn->write_buffer = cgi_res.responseToString();
 
             // 解除多路复用雷达网上对该管道的监听，并将管道物理关闭
             ::close(cgiReadFd);
             this->_poll_fds.erase(this->_poll_fds.begin() + poll_idx);
-            this->_cgi_fd_to_client_map.erase(it);
+            this->_cgi_read_fd_to_client_map.erase(it);
 
             // 货齐了，拉起客户端写事件，下一轮大循环完美发货！
             this->enableClientWriteEvent(clientFd);
@@ -294,7 +311,7 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
 
             ::close(cgiReadFd);
             this->_poll_fds.erase(this->_poll_fds.begin() + poll_idx);
-            this->_cgi_fd_to_client_map.erase(it);
+            this->_cgi_read_fd_to_client_map.erase(it);
             if (conn->cgi_pid > 0)
             {
                 ::kill(conn->cgi_pid, SIGKILL);
@@ -307,105 +324,7 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
     }
 }
 
-/*
-函数用途：洗涤 CGI 子进程吐出来的原生不规范报文，提取 Status 头，全量拼装成浏览器能直接识别的满血 HTTP 报文。
-参数：
-- cgiOutput (传入并就地修改)：当前连接 write_buffer 里面躺着的 CGI 原生不规范字节流。
-*/
-void ServerManager::parseAndFormatCgiResponse(std::string &cgiOutput)
-{
-    // 1. 【寻找分水岭】：在原生报文中定位头部与 Body 的黄金边界线 (\r\n\r\n 或 \n\n)
-    size_t header_end = cgiOutput.find("\r\n\r\n");
-    size_t delimiter_len = 4;
 
-    if (header_end == std::string::npos)
-    {
-        header_end = cgiOutput.find("\n\n");
-        delimiter_len = 2;
-    }
-
-    // 如果子进程吐出来的内容里连个空行都没有，说明是个完全畸形的输出
-    if (header_end == std::string::npos)
-    {
-        // 强行把它当作纯 Body 或者是残缺报文，为其全量兜底打包 200
-        std::stringstream ss;
-        ss << "HTTP/1.1 200 OK\r\n"
-           << "Server: Webserv/1.0\r\n"
-           << "Content-Type: text/html\r\n"
-           << "Content-Length: " << cgiOutput.size() << "\r\n"
-           << "Connection: keep-alive\r\n\r\n"
-           << cgiOutput;
-        cgiOutput = ss.str();
-        return;
-    }
-
-    // 2. 物理精准切割：把原始的 Headers 块和 Body 块在时空上割裂开来
-    std::string raw_headers = cgiOutput.substr(0, header_end);
-    std::string body = cgiOutput.substr(header_end + delimiter_len);
-
-    // 3. 【状态雷达反查】：逐行扫描原始 Headers，揪出可能隐藏的 Status: 状态行
-    std::string status_line = "HTTP/1.1 200 OK"; // 默认加冕 200 OK
-    std::string clean_headers = "";
-
-    std::stringstream header_stream(raw_headers);
-    std::string line;
-    while (std::getline(header_stream, line))
-    {
-        // 处理跨平台换行符残渣
-        if (!line.empty() && line[line.size() - 1] == '\r')
-            line.erase(line.size() - 1);
-
-        if (line.empty())
-            continue;
-
-        // 如果发现了 "Status:" 特权头（大小写模糊匹配防线）
-        if (line.size() >= 7 && (line.substr(0, 7) == "Status:" || line.substr(0, 7) == "status:"))
-        {
-            size_t value_start = line.find_first_not_of(" \t", 7);
-            if (value_start != std::string::npos)
-            {
-                // 把脚本给的 "404 Not Found" 升级转换为 "HTTP/1.1 404 Not Found"
-                status_line = "HTTP/1.1 " + line.substr(value_start);
-            }
-        }
-        else
-        {
-            // 如果是普通的 Content-Type 或 Custom-Header，老老实实寄存在干净的头部箱子里
-            clean_headers += line + "\r\n";
-        }
-    }
-
-    // 4. 将所有资产按照国际航空级 HTTP 规范重新装订并网！
-    std::stringstream final_packet;
-    final_packet << status_line << "\r\n";     // 1. 标准 HTTP 状态首行
-    final_packet << "Server: Webserv/1.0\r\n"; // 2. 大管家系统内政头
-    final_packet << clean_headers;             // 3. 脚本自带的透传头（如 Content-Type）
-
-    // 💡 很多写得粗糙的 CGI 脚本不会自己算长度，大管家在这里亲手帮它丈量并打上物理刚性防线：
-    if (clean_headers.find("Content-Length:") == std::string::npos &&
-        clean_headers.find("content-length:") == std::string::npos)
-    {
-        final_packet << "Content-Length: " << body.size() << "\r\n";
-    }
-
-    final_packet << "Connection: keep-alive\r\n\r\n"; // 4. 空行结束标志
-    final_packet << body;                             // 5. 黄金 Body 数据挂载
-
-    // 5. 满血资产安全覆盖，大功告成！
-    cgiOutput = final_packet.str();
-}
-
-void ServerManager::registerFdToPoll(int fd, short events)
-{
-    struct pollfd pfd;
-    pfd.fd = fd;
-    pfd.events = events; // 传入 POLLIN
-    pfd.revents = 0;     // 清空内核回执，防止幽灵触发
-
-    this->_poll_fds.push_back(pfd); // 正式入籍大循环名册
-
-    std::cout << "[ServerManager] FD " << fd << " successfully registered to poll tree." << std::endl;
-}
 
 /*
 函数用途：分批、非阻塞地将客户端 POST 请求的 Body 数据异步喂进 CGI 子进程的输入管道。
@@ -416,8 +335,8 @@ void ServerManager::registerFdToPoll(int fd, short events)
 void ServerManager::handleCgiPipeWrite(int cgiWriteFd, size_t poll_idx)
 {
     // 1. 【顺藤摸瓜】：一枪反查因果契约，明确知道这个写端管道是在伺候哪个客户端
-    std::map<int, int>::iterator it = this->_cgi_fd_to_client_map.find(cgiWriteFd);
-    if (it == this->_cgi_fd_to_client_map.end())
+    std::map<int, int>::iterator it = this->_cgi_write_fd_to_client_map.find(cgiWriteFd);
+    if (it == this->_cgi_write_fd_to_client_map.end())
     {
         // 孤儿写端管道，防卫性物理关闭，从雷达网里擦除
         ::close(cgiWriteFd);
@@ -478,16 +397,16 @@ void ServerManager::handleCgiPipeWrite(int cgiWriteFd, size_t poll_idx)
         // 绝大多数 CGI 脚本（如 Python 里的 sys.stdin.read()）只有读到 EOF 才会停止挂起、开始疯狂计算并返回结果！
         ::close(cgiWriteFd);
         this->_poll_fds.erase(this->_poll_fds.begin() + poll_idx);
-        this->_cgi_fd_to_client_map.erase(it);
+        this->_cgi_write_fd_to_client_map.erase(it);
         conn->cgi_write_fd = -1;
     }
     return;
 
 ERROR_FUSE:
-    // 🚨 触发紧急安全熔断清理，并将客户端切入 500 阵地
+    // 触发紧急安全熔断清理，并将客户端切入 500 阵地
     ::close(cgiWriteFd);
     this->_poll_fds.erase(this->_poll_fds.begin() + poll_idx);
-    this->_cgi_fd_to_client_map.erase(it);
+    this->_cgi_write_fd_to_client_map.erase(it);
     conn->cgi_write_fd = -1;
 
     // 降维回执 500 熔断报错
