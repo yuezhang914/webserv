@@ -924,3 +924,82 @@ void Response::setDefaultErrorPage()
     _body = body.str();
     _headers["Content-Type"] = "text/html";
 }
+
+/*
+函数用途：物理接管并洗白来自异步 CGI 管道的全量脏报文，直接并网到本类的原生 _headers 中。
+实现逻辑：
+1. 精准寻找 \r\n\r\n 或 \n\n 边界线，将头部和 Body 彻底剥离。
+2. 逐行扫描原始 Headers，分拣出 "Status:" 特权行，洗白为合法的 HTTP 状态首行存入 _status_line。
+3. 把普通透传头（如 Content-Type）利用类原生的 setHeader 或者是直接塞进 _headers 字典。
+*/
+void Response::parseCgiOutput(const std::string &cgiOutput)
+{
+    // 1. 【寻找分水岭】：在原生报文中定位头部与 Body 的黄金边界线 (\r\n\r\n 或 \n\n)
+    size_t header_end = cgiOutput.find("\r\n\r\n");
+    size_t delimiter_len = 4;
+
+    if (header_end == std::string::npos)
+    {
+        header_end = cgiOutput.find("\n\n");
+        delimiter_len = 2;
+    }
+
+    // 🛡️ 极端兜底：如果子进程吐出来的内容里连个空行都没有，说明是个完全畸形的输出
+    if (header_end == std::string::npos)
+    {
+        this->_status_line = "HTTP/1.1 200 OK";
+        this->setManagedHeader("Content-Type", "text/html");
+        this->_body = cgiOutput;
+        return;
+    }
+
+    // 2. 物理精准切割：把原始的 Headers 块和 Body 块在时空上割裂开来
+    std::string raw_headers = cgiOutput.substr(0, header_end);
+    this->_body = cgiOutput.substr(header_end + delimiter_len);
+
+    this->_status_line = "HTTP/1.1 200 OK"; // 默认加冕 200 OK
+
+    // 3. 【分拣并网】：开始调度你原生的 _headers 容器
+    std::stringstream header_stream(raw_headers);
+    std::string line;
+    while (std::getline(header_stream, line))
+    {
+        if (!line.empty() && line[line.size() - 1] == '\r')
+            line.erase(line.size() - 1);
+
+        if (line.empty())
+            continue;
+
+        // 如果发现了 "Status:" 特权头（大小写模糊匹配防线）
+        if (line.size() >= 7 && (line.substr(0, 7) == "Status:" || line.substr(0, 7) == "status:"))
+        {
+            size_t value_start = line.find_first_not_of(" \t", 7);
+            if (value_start != std::string::npos)
+            {
+                // 把脚本给的 "404 Not Found" 升级转换为 "HTTP/1.1 404 Not Found"
+                this->_status_line = "HTTP/1.1 " + line.substr(value_start);
+            }
+        }
+        else
+        {
+            // 🎯 核心并网修正：提取普通头键值对，直接调用你已有的核心防御设置接口
+            size_t colon = line.find(':');
+            if (colon != std::string::npos)
+            {
+                std::string key = line.substr(0, colon);
+                std::string val = line.substr(colon + 1);
+                
+                // 剔除前导空格
+                size_t val_start = val.find_first_not_of(" \t");
+                std::string clean_val = (val_start != std::string::npos) ? val.substr(val_start) : "";
+                
+                // 直接灌入原生的 setHeader，自动享受 canonical 键名规范化和大写修正防线！
+                this->setHeader(key, clean_val);
+            }
+        }
+    }
+    
+    // 4. 联动触发你已有的尺寸测量与连接闸门控制
+    this->updateContentLength();
+    this->updateConnectionHeader();
+}
