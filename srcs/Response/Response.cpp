@@ -3,9 +3,22 @@
 用途：实现 Response 对象的构造、只读访问、body 修改、连接策略设置与最终 HTTP 字节序列化。
 拆分说明：本文件只保留 Response 最基础的对象行为；header 规则、状态规则、错误页和 CGI 解析分别放入对应实现文件。
 */
+/*
+包含：Response.hpp
+用途：取得 Response 类、HeaderMap 和成员函数声明。
+*/
 #include "Response.hpp"
+
+/*
+包含：Request.hpp
+用途：构造 Response(request) 时读取 HTTP 版本和 Connection 策略。
+*/
 #include "Request.hpp"
 
+/*
+包含：<sstream>
+用途：序列化状态行、headers 和十进制字段到输出缓冲区。
+*/
 #include <sstream>
 
 /*

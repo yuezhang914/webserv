@@ -3,14 +3,52 @@
 用途：处理目录 index 候选、autoindex 开关和安全目录列表 HTML 生成。
 拆分说明：函数从原 RequestHandler.cpp 按“目录 GET”职责原样移动；不泄露磁盘路径，URL 编码与 HTML 转义规则保持不变。
 */
+/*
+包含：RequestHandlerInternal.hpp
+用途：使用 handleIndex、getMimeType、EffectiveRoute 和 Response 内部声明。
+*/
 #include "RequestHandlerInternal.hpp"
 
+/*
+包含：<cerrno>
+用途：读取目录、index 文件和 stat() 失败后的 errno。
+*/
 #include <cerrno>
+
+/*
+包含：<dirent.h>
+用途：使用 opendir()、readdir() 和 closedir() 生成 autoindex。
+*/
 #include <dirent.h>
+
+/*
+包含：<fcntl.h>
+用途：使用 open() 以只读方式打开候选 index 文件。
+*/
 #include <fcntl.h>
+
+/*
+包含：<sstream>
+用途：格式化 URL 百分号编码中的十六进制字节。
+*/
 #include <sstream>
+
+/*
+包含：<sys/stat.h>
+用途：使用 stat() 和 S_ISDIR 判断目录项类型。
+*/
 #include <sys/stat.h>
+
+/*
+包含：<unistd.h>
+用途：使用 read() 和 close() 读取普通 index 文件。
+*/
 #include <unistd.h>
+
+/*
+包含：<vector>
+用途：保存固定大小的文件读取缓冲区。
+*/
 #include <vector>
 
 static Response createIndexResponse(int fd, const std::string &indexPath,

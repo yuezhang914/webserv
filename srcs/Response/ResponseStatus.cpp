@@ -3,8 +3,16 @@
 用途：集中维护状态码、reason phrase、状态是否允许 body，以及 Content-Length 与状态变化的一致性。
 拆分说明：函数从原 Response.cpp 原样移动，不改变状态映射、强制无 body 状态或长度计算规则。
 */
+/*
+包含：Response.hpp
+用途：实现状态码、reason phrase、body 规则和 Content-Length 同步。
+*/
 #include "Response.hpp"
 
+/*
+包含：<sstream>
+用途：把 size_t body 长度转换为 Content-Length 十进制文本。
+*/
 #include <sstream>
 
 /*

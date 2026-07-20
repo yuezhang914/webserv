@@ -1,6 +1,6 @@
 /*
 文件：tests/module_tests/response_module_test.cpp
-用途：只测试 Response 模块及其直接依赖的真实 Config、RequestParser 和文件系统行为。
+用途：测试 Response 模块、Session 接入层及其直接依赖的真实 Config、RequestParser、SessionStore 和文件系统行为。
 测试边界：不包含 CgiHandler、CgiFds、pipe、fork、poll、execve 或 waitpid；CGI 部分只验证 Response 的分发结果，以及原始 CGI stdout 到最终 Response 的转换。
 测试原则：不使用 tests/test_support；配置由真实 Config 读取，请求由真实 RequestParser 构造，Response 使用项目正式源码。
 注释规则：每个辅助函数和测试函数都在函数头说明用途、参数来源、变量含义和逐步实现逻辑。
@@ -8,6 +8,7 @@
 #include "Config.hpp"
 #include "RequestParser.hpp"
 #include "Response.hpp"
+#include "SessionStore.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -213,18 +214,56 @@ static size_t countHeaderName(const Response &response,
 }
 
 /*
+函数：extractSessionIdFromSetCookie
+用途：从 Response 的 Set-Cookie value 中提取 WEBSERV_SESSION 的值，供后续请求模拟浏览器回传。
+参数来源：response 是 buildResponse(request, store) 返回结果；sessionId 是调用方提供的输出变量。
+变量说明：headerValue 保存完整 Set-Cookie；prefix 是固定 Cookie pair 前缀；end 是分号位置。
+实现逻辑：读取 Set-Cookie，确认以固定前缀开头，截取到第一个分号；空值和格式错误返回 false。
+*/
+static bool extractSessionIdFromSetCookie(const Response &response,
+                                          std::string &sessionId)
+{
+    sessionId.clear();
+    std::string headerValue;
+    if (!response.getHeader("Set-Cookie", headerValue))
+        return false;
+    const std::string prefix = "WEBSERV_SESSION=";
+    if (headerValue.compare(0, prefix.size(), prefix) != 0)
+        return false;
+    size_t end = headerValue.find(';', prefix.size());
+    if (end == std::string::npos)
+        end = headerValue.size();
+    sessionId = headerValue.substr(prefix.size(), end - prefix.size());
+    return !sessionId.empty();
+}
+
+/*
+函数：makeSessionCookieHeader
+用途：生成 parseRequest() 可直接拼入请求的 Cookie header，模拟浏览器保存并回传 Session ID。
+参数来源：sessionId 由 extractSessionIdFromSetCookie() 从上一响应取得。
+变量说明：无局部变量。
+实现逻辑：在 Session Cookie 前加入一个无关 theme Cookie，验证解析器能从多个 Cookie 中找到目标值。
+*/
+static std::string makeSessionCookieHeader(const std::string &sessionId)
+{
+    return "Cookie: theme=dark; WEBSERV_SESSION=" + sessionId + "\r\n";
+}
+
+/*
 函数：buildReadyResponse
-用途：调用保持旧接口的 buildResponse()，取得普通请求已经完成的 Response。
+用途：使用最终唯一接口构造一个不需要跨请求 Session 状态的普通响应。
 参数来源：request 由 parseRequest() 使用真实 RequestParser 构造。
-变量说明：本函数没有额外分发结果对象，因为 buildResponse() 的返回类型继续保持为 Response。
+变量说明：store 是本辅助函数临时创建的 SessionStore；普通静态、上传、删除和 CGI 路径不会依赖其长期状态。
 实现逻辑：
-    1. 直接调用 buildResponse(request)。
-    2. 返回得到的 Response 副本，供 GET、POST、DELETE、redirect 和错误分支测试。
-接口验证：本辅助函数会在编译期确认其他模块不需要改成 新的分发结果类型。
+    1. 创建仅供本次普通请求使用的 SessionStore。
+    2. 调用 buildResponse(request, store)，确保所有测试都经过最终公开接口。
+    3. 返回得到的 Response 副本。
+测试边界：需要验证 Session 跨请求持久化的场景不会使用本函数，而是在测试组内共享同一个 store。
 */
 static Response buildReadyResponse(const Request &request)
 {
-    return buildResponse(request);
+    SessionStore store;
+    return buildResponse(request, store);
 }
 
 /*
@@ -734,7 +773,7 @@ static void testCgiResponseCompatibility(const ServerConfig &server)
 
     check(parseRequest("GET", "/cgi/env.sh?name=Tom", "", "",
         server, request), "解析 CGI GET 路由请求");
-    response = buildResponse(request);
+    response = buildReadyResponse(request);
     check(response.getStatusCode() == 200
         && headerEquals(response, "X-Internal-CGI-Path", expectedScript),
         "CGI 请求通过既有内部 header 交付真实脚本路径");
@@ -771,7 +810,7 @@ static void testCgiResponseCompatibility(const ServerConfig &server)
     check(parseRequest("GET", "/cgi/env.sh",
         "Connection: close\r\n", "", server, request),
         "解析要求关闭连接的 CGI 请求");
-    response = buildResponse(request);
+    response = buildReadyResponse(request);
     response.parseCgiOutput(
         "Content-Type: text/plain\r\n\r\nclose-body");
     check(response.shouldCloseConnection()
@@ -781,7 +820,7 @@ static void testCgiResponseCompatibility(const ServerConfig &server)
     check(parseRequest("POST", "/cgi/env.sh",
         "Content-Length: 5\r\nContent-Type: text/plain\r\n",
         "hello", server, request), "解析 CGI POST 路由请求");
-    response = buildResponse(request);
+    response = buildReadyResponse(request);
     check(headerEquals(response, "X-Internal-CGI-Path", expectedScript),
         "POST CGI 继续使用现有 ServerManager 识别的路径 header");
     response.parseCgiOutput(
@@ -797,7 +836,7 @@ static void testCgiResponseCompatibility(const ServerConfig &server)
 
     check(parseRequest("GET", "/cgi/env.sh", "", "",
         server, request), "解析纯 body CGI 适配请求");
-    response = buildResponse(request);
+    response = buildReadyResponse(request);
     response.parseCgiOutput("plain-cgi-body");
     check(response.getStatusCode() == 200
         && response.getBody() == "plain-cgi-body",
@@ -871,29 +910,254 @@ static void testCgiResponseCompatibility(const ServerConfig &server)
 
     check(parseRequest("GET", "/cgi/missing.sh", "", "",
         server, request), "解析不存在 CGI 脚本请求");
-    response = buildResponse(request);
+    response = buildReadyResponse(request);
     check(response.getStatusCode() == 404,
         "不存在 CGI 脚本在启动前返回 404");
 
     check(parseRequest("GET", "/cgi/noexec.sh", "", "",
         server, request), "解析不可执行 CGI 脚本请求");
-    response = buildResponse(request);
+    response = buildReadyResponse(request);
     check(response.getStatusCode() == 403,
         "不可执行 CGI 脚本在启动前返回 403");
 
     check(parseRequest("GET", "/cgi/static.txt", "", "",
         server, request), "解析 CGI location 内普通静态文件");
-    response = buildResponse(request);
+    response = buildReadyResponse(request);
     check(response.getStatusCode() == 200
         && response.getBody() == "STATIC_NOT_CGI",
         "未匹配 cgi_extension 时仍走静态 GET");
 
     check(parseRequest("DELETE", "/cgi/env.sh", "", "",
         server, request), "解析 CGI location DELETE");
-    response = buildResponse(request);
+    response = buildReadyResponse(request);
     check(response.getStatusCode() == 405
         && headerEquals(response, "Allow", "GET, POST"),
         "CGI 分发前仍先遵守 location allow_methods");
+}
+
+/*
+函数：testSessionResponseIntegration
+用途：验证 Response 唯一 SessionStore 入口完成 Cookie 往返、状态持久化、登录轮换、退出销毁和缓存保护。
+参数来源：server 来自真实 Config；所有 Request 继续通过真实 RequestParser 构造。
+变量说明：
+    - store：跨多个请求复用的服务器级 SessionStore。
+    - request/response：每个场景的输入和输出。
+    - firstId/loginId/newId：分别保存匿名、登录后和退出后新建的 Session ID。
+    - storedUser/setCookie：验证服务端值和删除 Cookie 属性。
+实现逻辑：
+    1. 首次 counter 创建 Cookie，第二次回传同一 Cookie 后 visits 递增。
+    2. 使用唯一 SessionStore 入口处理普通静态文件，确认原 Response 行为和 store 数量不受影响。
+    3. login 保存用户并轮换 ID，旧 ID 失效且 visits 数据被保留。
+    4. 验证表单解码、HTML 转义、错误方法、媒体类型和 malformed form。
+    5. logout 删除服务端记录并返回 Max-Age=0；旧 Cookie 再访问会创建新 Session。
+    6. 验证成功与错误 Session 响应都禁止缓存，错误方法不执行 Session 操作并返回精确 Allow header。
+*/
+static void testSessionResponseIntegration(const ServerConfig &server)
+{
+    beginGroup("Response 与 Session Bonus 集成");
+    SessionStore store(1800, 64);
+    Request request;
+    Response response;
+    std::string firstId;
+    std::string loginId;
+    std::string newId;
+    std::string storedUser;
+    std::string setCookie;
+
+    check(parseRequest("GET", "/session/counter", "", "",
+        server, request), "解析首次 Session counter 请求");
+    response = buildResponse(request, store);
+    check(response.getStatusCode() == 200
+        && response.getBody().find("Visits: 1") != std::string::npos,
+        "首次 counter 返回 Visits: 1");
+    check(response.getBody().find("action=\"/session/login\"")
+            != std::string::npos
+        && response.getBody().find("action=\"/session/logout\"")
+            != std::string::npos,
+        "counter Response 包含浏览器可用的 login/logout 表单");
+    check(extractSessionIdFromSetCookie(response, firstId)
+        && SessionStore::isValidSessionId(firstId),
+        "首次 counter 返回合法 Session Cookie");
+    check(store.size() == 1
+        && headerEquals(response, "Content-Type",
+            "text/html; charset=utf-8"),
+        "首次 counter 创建一条服务端记录和 HTML 类型");
+    check(headerEquals(response, "Cache-Control", "no-store")
+        && headerEquals(response, "Pragma", "no-cache"),
+        "成功 Session Response 明确禁止缓存");
+
+    SessionStore queryStore(1800, 8);
+    check(parseRequest("GET", "/session/counter?source=test", "", "",
+        server, request), "解析带 query 的 Session counter");
+    response = buildResponse(request, queryStore);
+    check(response.getStatusCode() == 200
+        && response.getBody().find("Visits: 1") != std::string::npos
+        && queryStore.size() == 1,
+        "Session 虚拟路由使用 normalized path 并忽略 query");
+
+    check(parseRequest("GET", "/session/counter",
+        makeSessionCookieHeader(firstId), "", server, request),
+        "解析携带多个 Cookie 的第二次 counter");
+    response = buildResponse(request, store);
+    check(response.getStatusCode() == 200
+        && response.getBody().find("Visits: 2") != std::string::npos,
+        "同一 Cookie 恢复 Session 并递增到 Visits: 2");
+    check(extractSessionIdFromSetCookie(response, newId)
+        && newId == firstId && store.size() == 1,
+        "counter 刷新同一 ID 而不重复创建 Session");
+
+    check(parseRequest("GET", "/ping.html", "", "",
+        server, request), "解析唯一入口下的普通静态 GET");
+    response = buildResponse(request, store);
+    check(response.getStatusCode() == 200
+        && response.getBody() == "pong\n" && store.size() == 1,
+        "唯一 SessionStore 入口不改变普通静态文件行为");
+
+    check(parseRequest("POST", "/session/login",
+        makeSessionCookieHeader(firstId)
+        + "Content-Length: 5\r\nContent-Type: text/plain\r\n",
+        "Alice", server, request), "解析 text/plain Session login");
+    response = buildResponse(request, store);
+    check(response.getStatusCode() == 200
+        && response.getBody().find("Alice") != std::string::npos,
+        "login 返回用户名页面");
+    check(extractSessionIdFromSetCookie(response, loginId)
+        && loginId != firstId,
+        "login 轮换 Session ID");
+    check(!store.resumeSession(firstId)
+        && store.getValue(loginId, "user", storedUser)
+        && storedUser == "Alice", "旧 ID 失效且新 Session 保存 user");
+    check(store.size() == 1, "Session ID 轮换不增加记录总数");
+
+    check(parseRequest("GET", "/session/counter",
+        makeSessionCookieHeader(loginId), "", server, request),
+        "解析登录后 counter 请求");
+    response = buildResponse(request, store);
+    check(response.getBody().find("Visits: 3") != std::string::npos,
+        "登录轮换保留匿名 Session 的 visits 数据");
+
+    SessionStore formStore(1800, 16);
+    check(parseRequest("POST", "/session/login",
+        "Content-Length: 15\r\n"
+        "Content-Type: application/x-www-form-urlencoded; charset=UTF-8\r\n",
+        "user=%3CA%26%3E", server, request),
+        "解析 urlencoded Session login");
+    response = buildResponse(request, formStore);
+    check(response.getStatusCode() == 200
+        && response.getBody().find("&lt;A&amp;&gt;")
+            != std::string::npos,
+        "urlencoded user 被解码并在 HTML 中转义");
+
+    check(parseRequest("POST", "/session/login",
+        "Content-Length: 16\r\n"
+        "Content-Type: application/x-www-form-urlencoded\r\n",
+        "x=1&user=Tom+Lee", server, request),
+        "解析带额外字段和加号的 urlencoded login");
+    response = buildResponse(request, formStore);
+    check(response.getStatusCode() == 200
+        && response.getBody().find("Tom Lee") != std::string::npos,
+        "urlencoded login 忽略额外字段并把加号解码为空格");
+
+    size_t formSize = formStore.size();
+    check(parseRequest("POST", "/session/login",
+        "Content-Length: 17\r\n"
+        "Content-Type: application/x-www-form-urlencoded\r\n",
+        "user=One&user=Two", server, request),
+        "解析重复 user 字段的 urlencoded login");
+    response = buildResponse(request, formStore);
+    check(response.getStatusCode() == 400
+        && formStore.size() == formSize
+        && headerMissing(response, "Set-Cookie"),
+        "重复 user 字段返回 400 且不创建 Session");
+
+    check(parseRequest("POST", "/session/login",
+        "Content-Length: 7\r\nContent-Type: application/json\r\n",
+        "\"Alice\"", server, request), "解析不支持媒体类型的 login");
+    response = buildResponse(request, formStore);
+    check(response.getStatusCode() == 415
+        && formStore.size() == formSize
+        && headerMissing(response, "Set-Cookie"),
+        "不支持媒体类型返回 415 且不创建 Session");
+
+    check(parseRequest("POST", "/session/login",
+        "Content-Length: 8\r\n"
+        "Content-Type: application/x-www-form-urlencoded\r\n",
+        "user=%ZZ", server, request), "解析 malformed form login");
+    response = buildResponse(request, formStore);
+    check(response.getStatusCode() == 400
+        && formStore.size() == formSize
+        && headerMissing(response, "Set-Cookie"),
+        "malformed form 返回 400 且不创建 Session");
+
+    check(parseRequest("POST", "/session/login",
+        "Content-Length: 0\r\nContent-Type: text/plain\r\n",
+        "", server, request), "解析空用户名 login");
+    response = buildResponse(request, formStore);
+    check(response.getStatusCode() == 400
+        && formStore.size() == formSize
+        && headerMissing(response, "Set-Cookie"),
+        "空用户名返回 400 且不创建 Session");
+
+    check(parseRequest("POST", "/session/counter",
+        "Content-Length: 0\r\n", "", server, request),
+        "解析错误方法 counter");
+    response = buildResponse(request, store);
+    check(response.getStatusCode() == 405
+        && headerEquals(response, "Allow", "GET"),
+        "counter 错误方法返回 405 Allow GET");
+    check(headerEquals(response, "Cache-Control", "no-store")
+        && headerEquals(response, "Pragma", "no-cache"),
+        "Session 错误响应同样禁止缓存");
+
+    check(parseRequest("GET", "/session/login", "", "",
+        server, request), "解析错误方法 login");
+    response = buildResponse(request, store);
+    check(response.getStatusCode() == 405
+        && headerEquals(response, "Allow", "POST"),
+        "login 错误方法返回 405 Allow POST");
+
+    check(parseRequest("GET", "/session/counter",
+        makeSessionCookieHeader(loginId) + "Connection: close\r\n",
+        "", server, request), "解析要求关闭连接的 Session 请求");
+    response = buildResponse(request, store);
+    check(response.shouldCloseConnection()
+        && headerEquals(response, "Connection", "close"),
+        "Session Response 继承 Request 的 Connection 策略");
+
+    check(parseRequest("POST", "/session/logout",
+        makeSessionCookieHeader(loginId) + "Content-Length: 0\r\n",
+        "", server, request), "解析 Session logout");
+    response = buildResponse(request, store);
+    check(response.getStatusCode() == 200
+        && response.getHeader("Set-Cookie", setCookie)
+        && setCookie.find("Max-Age=0") != std::string::npos,
+        "logout 返回浏览器删除 Cookie");
+    check(store.size() == 0 && !store.resumeSession(loginId),
+        "logout 删除服务端 Session");
+
+    check(parseRequest("GET", "/session/counter",
+        makeSessionCookieHeader(loginId), "", server, request),
+        "解析退出后继续使用旧 Cookie");
+    response = buildResponse(request, store);
+    check(response.getBody().find("Visits: 1") != std::string::npos
+        && extractSessionIdFromSetCookie(response, newId)
+        && newId != loginId,
+        "退出后的旧 Cookie 创建新 Session");
+
+    check(parseRequest("GET", "/session/counter/extra", "", "",
+        server, request), "解析非精确 Session 路径");
+    response = buildResponse(request, store);
+    check(response.getStatusCode() == 404
+        && headerMissing(response, "Set-Cookie"),
+        "非精确路径继续走普通文件系统路由");
+
+    check(parseRequest("DELETE", "/session/logout", "", "",
+        server, request), "解析错误方法的 logout 请求");
+    response = buildResponse(request, store);
+    check(response.getStatusCode() == 405
+        && headerEquals(response, "Allow", "POST")
+        && headerMissing(response, "Set-Cookie"),
+        "logout 错误方法返回 405 且不会修改浏览器 Cookie");
 }
 
 /*
@@ -917,13 +1181,13 @@ static void testMissingConfig()
 
 /*
 函数：main
-用途：准备真实文件和配置，依次运行全部 Response-only 测试，并返回 shell 可识别状态。
+用途：准备真实文件和配置，依次运行全部 Response 与 Session 集成测试，并返回 shell 可识别状态。
 参数来源：无命令行参数；使用 CONFIG_PATH 固定测试配置。
 变量说明：config 是真实 Config 对象；servers 是其只读 server 列表。
 实现逻辑：
     1. 写入 fixture 文件和 conf。
     2. 构造 Config 并确认测试使用真实配置解析结果。
-    3. 配置有效时运行 Response class、GET、POST、DELETE、CGI 边界和配置防御测试。
+    3. 配置有效时运行 Response class、GET、POST、DELETE、CGI、Session 集成和配置防御测试。
     4. 打印总计；失败数为零返回 0，否则返回 1。
 */
 int main()
@@ -940,10 +1204,11 @@ int main()
         testPost(server);
         testDelete(server);
         testCgiResponseCompatibility(server);
+        testSessionResponseIntegration(server);
         testMissingConfig();
     }
 
-    std::cout << "\n========== Response-only 测试汇总 =========="
+    std::cout << "\n========== Response/Session 测试汇总 =========="
               << std::endl;
     std::cout << "总断言：" << g_total << std::endl;
     std::cout << "通过：" << (g_total - g_failed) << std::endl;

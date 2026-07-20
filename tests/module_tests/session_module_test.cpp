@@ -470,6 +470,11 @@ static void testCounterExample()
     check(firstResult.statusCode == 200
         && firstResult.body.find("Visits: 1") != std::string::npos,
         "首次访问显示 Visits: 1");
+    check(firstResult.body.find("action=\"/session/login\"")
+            != std::string::npos
+        && firstResult.body.find("action=\"/session/logout\"")
+            != std::string::npos,
+        "counter 页面提供浏览器可直接提交的 login/logout 表单");
     check(firstResult.hasSetCookie
         && firstResult.setCookieValue.find("WEBSERV_SESSION=") == 0
         && firstResult.setCookieValue.find("HttpOnly") != std::string::npos

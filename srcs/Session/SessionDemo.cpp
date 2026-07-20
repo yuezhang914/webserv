@@ -237,7 +237,7 @@ const char *SessionDemo::sessionCookieName()
 用途：实现最小 Session 演示：同一 Cookie 每次访问使服务端 visits 加一。
 参数：cookieHeader 来自 Request；store 是服务器共享 SessionStore；now 是请求时间；result 是输出。
 变量：created 表示是否新建；storedVisits/visits 保存计数；maxValue 防止递增溢出。
-实现逻辑：恢复或创建会话、读取并递增 visits、先生成 Cookie 再写值、生成 200 HTML；失败时回收新会话并重置结果。
+实现逻辑：恢复或创建会话、读取并递增 visits、先生成 Cookie 再写值、生成带登录/退出表单的 200 HTML；失败时回收新会话并重置结果。
 */
 bool SessionDemo::buildCounterExample(const std::string &cookieHeader,
                                       SessionStore &store,
@@ -271,7 +271,12 @@ bool SessionDemo::buildCounterExample(const std::string &cookieHeader,
             "</title></head><body><h1>Cookie and Session Demo</h1>"
             "<p>Visits: ";
         result.body += unsignedLongToString(visits);
-        result.body += "</p></body></html>";
+        result.body += "</p><form method=\"post\" action=\"/session/login\">"
+            "<label>User <input name=\"user\" maxlength=\"64\"></label>"
+            "<button type=\"submit\">Login</button></form>"
+            "<form method=\"post\" action=\"/session/logout\">"
+            "<button type=\"submit\">Logout</button></form>"
+            "</body></html>";
         return true;
     }
     catch (...)
@@ -337,7 +342,10 @@ bool SessionDemo::buildLoginExample(const std::string &cookieHeader,
         result.body = "<!DOCTYPE html><html><head><title>Session Login"
             "</title></head><body><h1>Logged in</h1><p>User: ";
         result.body += escapeHtml(userName);
-        result.body += "</p></body></html>";
+        result.body += "</p><p><a href=\"/session/counter\">"
+            "Back to counter</a></p><form method=\"post\" "
+            "action=\"/session/logout\"><button type=\"submit\">"
+            "Logout</button></form></body></html>";
         return true;
     }
     catch (...)
@@ -366,7 +374,9 @@ bool SessionDemo::buildLogoutExample(const std::string &cookieHeader,
             "/", true, "Lax", false, expiredCookie))
             return false;
         std::string body = "<!DOCTYPE html><html><head><title>Session Logout"
-            "</title></head><body><h1>Logged out</h1></body></html>";
+            "</title></head><body><h1>Logged out</h1><p><a "
+            "href=\"/session/counter\">Start a new session</a></p>"
+            "</body></html>";
         result.statusCode = 200;
         result.hasSetCookie = true;
         result.setCookieValue = expiredCookie;

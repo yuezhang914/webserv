@@ -3,12 +3,40 @@
 用途：统一创建响应，并负责加载自定义错误页、读取错误页文件和生成默认 HTML 错误页。
 拆分说明：相关函数从原 Response.cpp 原样移动，不改变自定义错误页优先级或失败回退规则。
 */
+/*
+包含：Response.hpp
+用途：实现 Response 错误页生成和文件读取成员函数。
+*/
 #include "Response.hpp"
 
+/*
+包含：<fcntl.h>
+用途：使用 open() 以只读方式打开自定义错误页。
+*/
 #include <fcntl.h>
+
+/*
+包含：<sstream>
+用途：格式化默认错误页中的状态码和文本。
+*/
 #include <sstream>
+
+/*
+包含：<sys/stat.h>
+用途：使用 fstat() 和 S_ISREG 确认错误页是普通文件。
+*/
 #include <sys/stat.h>
+
+/*
+包含：<unistd.h>
+用途：使用 read() 和 close() 读取错误页文件。
+*/
 #include <unistd.h>
+
+/*
+包含：<vector>
+用途：保存固定大小的错误页读取缓冲区。
+*/
 #include <vector>
 
 /*
@@ -131,3 +159,4 @@ void Response::setDefaultErrorPage()
     _headers["Content-Type"] = "text/html";
 }
 
+ 

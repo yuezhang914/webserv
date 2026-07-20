@@ -3,11 +3,34 @@
 用途：验证普通 POST 上传请求、选择上传目录、生成不覆盖旧文件的唯一名称，并把二进制 body 写入文件。
 拆分说明：上传相关函数从原 RequestHandler.cpp 原样移动；multipart 仍明确不在本模块解析。
 */
+/*
+包含：RequestHandlerInternal.hpp
+用途：使用 FileOperation、路径拼接、Request 和 Response 内部声明。
+*/
 #include "RequestHandlerInternal.hpp"
 
+/*
+包含：<fstream>
+用途：使用 std::ofstream 以二进制方式创建并写入上传文件。
+*/
 #include <fstream>
+
+/*
+包含：<sstream>
+用途：生成同名上传文件的递增后缀和数字文本。
+*/
 #include <sstream>
+
+/*
+包含：<sys/stat.h>
+用途：使用 stat() 检查上传目录和候选文件是否存在。
+*/
 #include <sys/stat.h>
+
+/*
+包含：<unistd.h>
+用途：使用 access() 检查上传目录写权限。
+*/
 #include <unistd.h>
 
 /*
