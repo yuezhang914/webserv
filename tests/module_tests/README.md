@@ -3,8 +3,12 @@
 
 ```bash
 chmod +x tests/module_tests/*.sh
+
 ./tests/module_tests/run_request_test.sh
+
 ./tests/module_tests/run_response_test.sh
 
 bash tests/module_tests/run_config_test.sh
+
+ ./tests/module_tests/run_session_test.sh 
 ```

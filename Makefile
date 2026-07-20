@@ -10,8 +10,9 @@ SRC_DIRS = \
 	srcs/Request \
 	srcs/Response \
 	srcs/Cgi \
-	srcs/Bonus \
+	srcs/Session \
 	srcs/Utils
+
 
 OBJ_DIR = obj
 
