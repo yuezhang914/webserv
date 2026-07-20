@@ -292,21 +292,6 @@ void ServerManager::acceptNewConnection(int listenFd)
         std::cerr << "[Acceptor] Error: accept() failed on Listen FD " << listenFd << std::endl;
         return;
     }
-    int flags = ::fcntl(clientFd, F_GETFL, 0);
-    if (flags < 0)
-    {
-        std::cerr << "[Acceptor] CRITICAL: fcntl F_GETFL failed on Client FD " << clientFd << std::endl;
-        ::close(clientFd);
-        return;
-    }
-
-    // 强行注入 O_NONBLOCK 灵魂
-    if (::fcntl(clientFd, F_SETFL, flags | O_NONBLOCK) < 0)
-    {
-        std::cerr << "[Acceptor] CRITICAL: fcntl F_SETFL O_NONBLOCK failed on Client FD " << clientFd << std::endl;
-        ::close(clientFd);
-        return;
-    }
     // 1. 创建ClientSocket
     ClientSocket *p_socket = new ClientSocket(clientFd);
 
