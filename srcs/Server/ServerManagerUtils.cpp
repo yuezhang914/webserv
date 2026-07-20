@@ -61,7 +61,7 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
     {
         
 
-        ssize_t bytes_read = this->_connections[clientFd]->socket->read(buffer, BUFFER_SIZE - 1);
+        ssize_t bytes_read = conn->socket->read(buffer, BUFFER_SIZE - 1);
 
       
         if (bytes_read == 0) // EOF（客户端优雅断开）
@@ -83,7 +83,7 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
         if (bytes_read > 0)
         {
             buffer[bytes_read] = '\0';
-            this->_connections[clientFd]->read_buffer.append(buffer, bytes_read);
+            conn->read_buffer.append(buffer, bytes_read);
         }
 
         // 🛡️ 极端防卫：如果空转了超过 1000 次还没退出来，强制熔断，防止卡死主线程！
@@ -103,12 +103,12 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
     {
         std::cout << "[ServerManager] Request parsed successfully for FD " << clientFd << std::endl;
         conn->read_buffer.erase(0, consumed);      
-        Response res = buildResponse(this->_connections[clientFd]->request);  
+        Response res = buildResponse(conn->request);  
         // 检查这到底是不是一个隐藏的 CGI 请求
         std::string script_path;
         if (res.getHeader("X-Internal-CGI-Path", script_path))
         {
-            CgiHandler cgi(this->_connections[clientFd]->request, script_path);
+            CgiHandler cgi(conn->request, script_path);
             CgiFds fds = cgi.async_launch();
 
             if (fds.pid < 0 || fds.read_fd < 0 || fds.write_fd < 0)
@@ -120,15 +120,15 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
 
             this->_cgi_fd_to_client_map[fds.read_fd] = clientFd;
 
-            this->_connections[clientFd]->is_cgi = true;
-            this->_connections[clientFd]->cgi_pid = fds.pid;
-            this->_connections[clientFd]->cgi_read_fd = fds.read_fd;
+            conn->is_cgi = true;
+            conn->cgi_pid = fds.pid;
+            conn->cgi_read_fd = fds.read_fd;
 
             this->registerFdToPoll(fds.read_fd, POLLIN);
 
-            if (this->_connections[clientFd]->request.getMethod() == "POST")
+            if (conn->request.getMethod() == "POST")
             {
-                this->_connections[clientFd]->cgi_write_fd = fds.write_fd;
+                conn->cgi_write_fd = fds.write_fd;
                 this->registerFdToPoll(fds.write_fd, POLLOUT);
             }
 

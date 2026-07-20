@@ -83,7 +83,7 @@ CgiFds CgiHandler::async_launch()
         char **env = _buildEnvironment();
         if (env == NULL)
         {
-            exit(127);
+            _exit(127);
         }
 
         char *args[2];
@@ -93,7 +93,7 @@ CgiFds CgiHandler::async_launch()
         execve(args[0], args, env);
 
         _freeEnvironment(env);
-        exit(127);
+        _exit(127);
     }
 
     // ================== 主进程大管家车间 ==================
