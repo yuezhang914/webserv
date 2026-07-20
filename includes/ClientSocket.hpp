@@ -10,6 +10,9 @@ class ClientSocket
 {
 private:
     int _fd;
+
+    // 自洗非阻塞（剥夺阻塞特权）
+    void setNonBlocking();
     // 禁用拷贝，防止 FD 遭遇多重析构 close
     ClientSocket(const ClientSocket &);
     ClientSocket &operator=(const ClientSocket &);
@@ -20,9 +23,7 @@ public:
     explicit ClientSocket(int fd);
     ~ClientSocket(); // RAII：生命周期结束自动物理 close
 
-    // 核心动作 1：自洗非阻塞（剥夺阻塞特权）
-    void setNonBlocking();
-    // 核心动作 2：底层无 errno 依赖物理读取
+        // 核心动作 2：底层无 errno 依赖物理读取
     // 如果读取成功，返回字节数；
     // 如果 EOF 触发返回 0；
     // 如果遇到阻碍（EAGAIN/EWOULDBLOCK）返回 -1；
