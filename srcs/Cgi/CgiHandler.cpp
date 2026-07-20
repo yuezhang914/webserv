@@ -5,6 +5,21 @@ CgiHandler::CgiHandler(const Request &request, const std::string &script_path)
 
 CgiHandler::~CgiHandler() {}
 
+/*
+函数用途：安全裂变子进程（Fork），通过双向物理管道重定向焊接，非阻塞、高安全、净空级地拉起外部 CGI 脚本（如 Python 进程）。
+参数与变量：
+- fds (局部资产结构体)：CgiFds，打包承载最终并网回传给大管家的“管道读端”、“管道写端”及“子进程 PID”的核心资产包。
+- pipe_to_parent (局部数组)：int[2]，开凿的从子进程流向大管家主进程的单向“动态货包输出渠道”（子写父读）。
+- pipe_to_child (局部数组)：int[2]，开凿从大管家主进程流向子进程的单向“POST Body 喂食渠道”（父写子读）。
+- fd_limit (局部变量)：long，通过 sysconf 动态捕获的当前操作系统允许的最大文件描述符上限（防止泄露的天花板防线）。
+实现逻辑：
+1. 安全开凿与非阻塞加冕：开凿两组双向物理管道。对留在大管家主进程一侧的读端（pipe_to_parent[0]）与写端（pipe_to_child[1]）强行追加 O_NONBLOCK 非阻塞标记与 FD_CLOEXEC（执行时自动关闭），死锁主循环的异步吞吐运力。
+2. 子进程特权主权焊接（fds.pid == 0）：
+   - 边界碰撞防御：严密校验管道 FD 是否巧合分在了 0 (stdin) 或 1 (stdout) 坑位，通过 dup2 精准条件焊接标准输入输出，随后立刻释放原生临时变量。
+   - 铁血彻底净空：除了系统自带的 FD_CLOEXEC 自动清洗外，利用 sysconf 获取系统上限，用 while 循环将 3 以上的所有残留、泄露文件描述符进行毁灭性地强制 close 物理大清洗，确保外部脚本（如 Python）启动前进程环境处于绝对净空状态。
+   - 弹射起飞：构建沙盒环境变量（_buildEnvironment），一枪调用 execve 强行接管子进程时空，若失败则通过 _exit(127) 迅速无感自毁，严防子进程意外折返倒灌进主循环雷达网！
+3. 主进程主权交割：回到主进程大管家车间，立刻关闭用不到的子进程侧对流端，将幸存的非阻塞大管家专属读/写管道描述符及子进程 PID 封装进 CgiFds 资产包，交割给雷达名册入籍！
+*/
 CgiFds CgiHandler::async_launch()
 {
     CgiFds fds;
