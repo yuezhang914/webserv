@@ -1,3 +1,8 @@
+/*
+文件：includes/Response.hpp
+用途：声明 HTTP Response 对象、受控 header/body 接口、CGI stdout 适配接口以及 buildResponse() 顶层入口。
+拆分说明：类声明保持集中；各组成员函数分别实现在 Response、Headers、Status、Connection、Error 和 Cgi 源文件中。
+*/
 #ifndef RESPONSE_HPP
 #define RESPONSE_HPP
 

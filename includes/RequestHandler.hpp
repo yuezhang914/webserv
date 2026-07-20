@@ -1,3 +1,8 @@
+/*
+文件：includes/RequestHandler.hpp
+用途：声明普通 GET、POST、DELETE 处理入口，以及 method 到内部 RequestAction 的映射接口。
+拆分说明：静态文件、目录、上传和删除分别由 srcs/Response 下对应实现文件完成，公开函数签名保持不变。
+*/
 #ifndef REQUEST_HANDLER_HPP
 #define REQUEST_HANDLER_HPP
 

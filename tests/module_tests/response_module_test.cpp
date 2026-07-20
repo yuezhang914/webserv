@@ -713,7 +713,7 @@ static void testDelete(const ServerConfig &server)
     6. 验证不存在、不可执行、非 CGI 后缀和不允许的方法仍直接返回正常 Response。
 
 它不测试：
-CgiHandler::async_launch()
+CGI 异步启动接口
 pipe
 fork
 execve

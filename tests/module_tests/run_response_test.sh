@@ -1,5 +1,7 @@
 #!/bin/sh
-# 测试版本：Response-only interface-compatible v2（不使用 ResponseBuildResult）
+# 文件：tests/module_tests/run_response_test.sh
+# 用途：编译真实 Config、RequestParser 与拆分后的全部 Response .cpp，并运行不依赖 CGI 进程实现的 Response 模块回归测试。
+# 测试边界：不启动 pipe/fork/poll/execve；CGI 只验证内部脚本路径交接和 stdout 到 Response 的转换。
 set -eu
 
 # 函数：fail
@@ -17,7 +19,7 @@ fail()
 # 用途：从当前测试脚本目录逐层向上寻找真实 Webserv 项目根目录。
 # 参数来源：无参数；起点使用脚本自身所在目录 SCRIPT_DIR。
 # 变量说明：candidate 保存当前检查的目录路径。
-# 实现逻辑：逐层向上检查 includes/Response.hpp 与 srcs/Response/Response.cpp；找到后输出路径，走到根目录仍未找到则返回失败。
+# 实现逻辑：逐层检查 includes/Response.hpp 与 srcs/Response/Response.cpp；找到后输出路径，走到根目录仍未找到则返回失败。
 find_project_root()
 {
     candidate="$SCRIPT_DIR"
@@ -45,40 +47,64 @@ BASE_CXXFLAGS="-Wall -Wextra -Werror -std=c++98 ${EXTRA_CXXFLAGS:-}"
 BUILD_DIR="tests/module_tests/.build_response_only"
 mkdir -p "$BUILD_DIR"
 
-# 本脚本只编译真实 Config、RequestParser 和 Response；不会检查或编译任何 CGI 实现文件。
-for file in \
-    includes/Response.hpp \
-    includes/EffectiveRoute.hpp \
-    includes/RequestHandler.hpp \
-    includes/Request.hpp \
-    includes/RequestParser.hpp \
-    includes/ConfigRouteUtils.hpp \
-    includes/ServerConfig.hpp \
-    includes/LocationConfig.hpp \
-    srcs/Response/Response.cpp \
-    srcs/Response/EffectiveRoute.cpp \
-    srcs/Response/RequestHandler.cpp \
-    srcs/Request/Request.cpp \
-    srcs/Request/RequestParser.cpp \
-    srcs/Request/RequestParserRequestLine.cpp \
-    srcs/Request/RequestParserUri.cpp \
-    srcs/Request/RequestParserHeaders.cpp \
-    srcs/Request/RequestParserBody.cpp \
-    srcs/Request/RequestParserChunked.cpp \
-    srcs/Config/Config.cpp \
-    srcs/Config/ConfigParser.cpp \
-    srcs/Config/ConfigRouteUtils.cpp \
-    srcs/Config/LocationConfig.cpp \
-    srcs/Config/ServerConfig.cpp
-do
-    [ -f "$file" ] || fail "缺少正式项目文件：$file"
-done
+# 拆分后的 Response 源文件使用显式列表：既保证每个实现被编译，也让缺失文件在链接前就能给出清楚错误。
+RESPONSE_HEADERS="includes/Response.hpp \
+includes/ResponseInternal.hpp \
+includes/EffectiveRoute.hpp \
+includes/RequestHandler.hpp \
+includes/RequestHandlerInternal.hpp"
+RESPONSE_SOURCES="srcs/Response/Response.cpp \
+srcs/Response/ResponseBuilder.cpp \
+srcs/Response/ResponseHeaders.cpp \
+srcs/Response/ResponseStatus.cpp \
+srcs/Response/ResponseConnection.cpp \
+srcs/Response/ResponseError.cpp \
+srcs/Response/ResponseCgi.cpp \
+srcs/Response/EffectiveRoute.cpp \
+srcs/Response/EffectivePath.cpp \
+srcs/Response/RequestHandler.cpp \
+srcs/Response/RequestDirectory.cpp \
+srcs/Response/RequestUpload.cpp \
+srcs/Response/RequestDelete.cpp"
+REQUEST_SOURCES="srcs/Request/Request.cpp \
+srcs/Request/RequestParser.cpp \
+srcs/Request/RequestParserRequestLine.cpp \
+srcs/Request/RequestParserUri.cpp \
+srcs/Request/RequestParserHeaders.cpp \
+srcs/Request/RequestParserBody.cpp \
+srcs/Request/RequestParserChunked.cpp"
+CONFIG_SOURCES="srcs/Config/Config.cpp \
+srcs/Config/ConfigParser.cpp \
+srcs/Config/ConfigRouteUtils.cpp \
+srcs/Config/LocationConfig.cpp \
+srcs/Config/ServerConfig.cpp"
+PROJECT_HEADERS="includes/Request.hpp \
+includes/RequestParser.hpp \
+includes/ConfigRouteUtils.hpp \
+includes/ServerConfig.hpp \
+includes/LocationConfig.hpp"
+
+# 函数：check_required_files
+# 用途：在编译前确认测试依赖的正式源码、拆分后新增文件和公共头文件全部存在。
+# 参数来源：使用上方 RESPONSE_HEADERS、RESPONSE_SOURCES、REQUEST_SOURCES、CONFIG_SOURCES 与 PROJECT_HEADERS。
+# 变量说明：file 依次保存当前检查路径。
+# 实现逻辑：任一文件缺失立即调用 fail；全部存在时正常返回。
+check_required_files()
+{
+    for file in $RESPONSE_HEADERS $RESPONSE_SOURCES \
+        $REQUEST_SOURCES $CONFIG_SOURCES $PROJECT_HEADERS
+    do
+        [ -f "$file" ] || fail "缺少正式项目文件：$file"
+    done
+}
+
+check_required_files
 
 if [ ! -f includes/Config.hpp ] && [ ! -f srcs/Config/Config.hpp ]; then
     fail "缺少真实 Config.hpp（应位于 includes/ 或 srcs/Config/）"
 fi
 
-# 检查 Response 保持其他模块已经使用的公开接口，同时不要求测试工程包含 CgiHandler 或 CgiFds。
+# 检查 Response 保持其他模块已经使用的公开接口，同时允许实现正常分布在多个 .cpp 中。
 grep -q 'class Response' includes/Response.hpp \
     || fail "Response.hpp 未定义 class Response"
 grep -q 'Response buildResponse' includes/Response.hpp \
@@ -88,13 +114,16 @@ grep -q 'void parseCgiOutput' includes/Response.hpp \
 grep -q 'enum RequestAction' includes/EffectiveRoute.hpp \
     || fail "RequestAction 未合并到 EffectiveRoute.hpp"
 
-# 检查旧的重复文件和直接访问 Request 字段问题仍被清理。
+# 检查拆分后没有回退到旧类型、旧宏、直接访问 Request 字段或文本包含式 .inc 方案。
 [ ! -e includes/RequestAction.hpp ] \
     || fail "仍残留独立 RequestAction.hpp"
 [ ! -e includes/ResponseUtils.hpp ] \
     || fail "仍残留 ResponseUtils.hpp"
 [ ! -e srcs/Response/ResponseUtils.cpp ] \
     || fail "仍残留 ResponseUtils.cpp"
+if find srcs/Response -type f -name '*.inc' | grep -q .; then
+    fail "Response 仍使用 .inc 文本包含方案；应拆成独立 .cpp"
+fi
 if grep -R -n 'struct Response' includes srcs/Response >/dev/null 2>&1; then
     fail "仍残留旧 struct Response"
 fi
@@ -107,18 +136,18 @@ if grep -R -n -E '#define[[:space:]]+(GET|POST|DELETE)' \
     fail "仍残留 GET/POST/DELETE 方法宏"
 fi
 if grep -R -n -E 'ResponseBuildResult|ResponseBuildKind' \
-    includes/Response.hpp srcs/Response/Response.cpp >/dev/null 2>&1; then
+    includes/Response.hpp srcs/Response/*.cpp >/dev/null 2>&1; then
     fail "Response 仍要求其他模块迁移到 ResponseBuildResult"
 fi
-grep -q 'X-Internal-CGI-Path' srcs/Response/Response.cpp \
-    || fail "CGI 分支未保留现有 ServerManager 使用的内部路径接口"
+if ! grep -R -q 'X-Internal-CGI-Path' srcs/Response/*.cpp; then
+    fail "CGI 分支未保留现有 ServerManager 使用的内部路径接口"
+fi
 grep -q 'parseCgiOutput' tests/module_tests/response_module_test.cpp \
     || fail "测试未覆盖 ServerManager 已使用的 parseCgiOutput"
-grep -q '#include "Config.hpp"' \
-    tests/module_tests/response_module_test.cpp \
+grep -q '#include "Config.hpp"' tests/module_tests/response_module_test.cpp \
     || fail "测试未使用真实 Config"
 if grep -q '#include "CgiHandler.hpp"' \
-    tests/module_tests/response_module_test.cpp \
+        tests/module_tests/response_module_test.cpp \
     || grep -q -E '(^|[^[:alnum:]_])CgiFds[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' \
         tests/module_tests/response_module_test.cpp \
     || grep -q -E 'async_launch[[:space:]]*\(' \
@@ -128,6 +157,8 @@ fi
 
 printf '%s\n' "[PASS] buildResponse 继续返回 Response"
 printf '%s\n' "[PASS] parseCgiOutput 兼容 ServerManager 现有调用"
+printf '%s\n' "[PASS] CGI 内部路径接口可位于拆分后的 ResponseBuilder.cpp"
+printf '%s\n' "[PASS] 测试编译全部拆分 .cpp，且不存在 .inc"
 printf '%s\n' "[PASS] 测试不依赖 CgiHandler、CgiFds、pipe、fork、poll 或 waitpid"
 printf '%s\n' "[PASS] 使用项目真实 Config、RequestParser 和 Response"
 printf '%s\n' "[PASS] Config/test.cpp 不会被编入测试程序"
@@ -144,21 +175,6 @@ mkdir -p \
     tests/tmp_response_www/text-index \
     tests/tmp_response_www/joined_upload
 
-REQUEST_SOURCES="srcs/Request/Request.cpp \
-srcs/Request/RequestParser.cpp \
-srcs/Request/RequestParserRequestLine.cpp \
-srcs/Request/RequestParserUri.cpp \
-srcs/Request/RequestParserHeaders.cpp \
-srcs/Request/RequestParserBody.cpp \
-srcs/Request/RequestParserChunked.cpp"
-CONFIG_SOURCES="srcs/Config/Config.cpp \
-srcs/Config/ConfigParser.cpp \
-srcs/Config/ConfigRouteUtils.cpp \
-srcs/Config/LocationConfig.cpp \
-srcs/Config/ServerConfig.cpp"
-RESPONSE_SOURCES="srcs/Response/Response.cpp \
-srcs/Response/EffectiveRoute.cpp \
-srcs/Response/RequestHandler.cpp"
 INCLUDE_FLAGS="-Iincludes -Isrcs/Config -Isrcs/Request -Isrcs/Response"
 
 "$CXX" $BASE_CXXFLAGS $INCLUDE_FLAGS \

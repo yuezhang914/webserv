@@ -1,3 +1,8 @@
+/*
+文件：includes/EffectiveRoute.hpp
+用途：声明 Response 模块内部使用的请求动作类型、合并后路由数据以及 URL 到文件系统路径的公开协作接口。
+拆分说明：配置合并实现在 EffectiveRoute.cpp，真实路径生成与 stat 校验实现在 EffectivePath.cpp。
+*/
 #ifndef EFFECTIVE_ROUTE_HPP
 #define EFFECTIVE_ROUTE_HPP
 
