@@ -915,10 +915,28 @@ static void testCgiResponseCompatibility(const ServerConfig &server)
         "不存在 CGI 脚本在启动前返回 404");
 
     check(parseRequest("GET", "/cgi/noexec.sh", "", "",
-        server, request), "解析不可执行 CGI 脚本请求");
+        server, request), "解析由解释器执行的不可执行 CGI 脚本请求");
+    response = buildReadyResponse(request);
+    check(response.getStatusCode() == 200
+        && headerEquals(response, "X-Internal-CGI-Interpreter", "/bin/sh"),
+        "配置解释器时脚本只需可读，并向 ServerManager 交付解释器路径");
+
+    ServerConfig directServer = server;
+    size_t locationIndex = 0;
+    while (locationIndex < directServer.locations.size())
+    {
+        if (directServer.locations[locationIndex].path == "/cgi/")
+        {
+            directServer.locations[locationIndex].cgi_extensions[".sh"] = "";
+            break;
+        }
+        ++locationIndex;
+    }
+    check(parseRequest("GET", "/cgi/noexec.sh", "", "",
+        directServer, request), "解析无解释器的不可执行 CGI 脚本请求");
     response = buildReadyResponse(request);
     check(response.getStatusCode() == 403,
-        "不可执行 CGI 脚本在启动前返回 403");
+        "没有配置解释器时脚本仍必须拥有执行权限");
 
     check(parseRequest("GET", "/cgi/static.txt", "", "",
         server, request), "解析 CGI location 内普通静态文件");

@@ -108,22 +108,20 @@ static std::string buildAllowHeader(const std::set<std::string> &allowMethods)
 
 
 /*
-函数：isConfiguredCgiPath
-用途：判断 normalized request path 是否以当前 location 配置的 CGI 后缀结尾。
+函数：findConfiguredCgiInterpreter
+用途：判断 normalized request path 是否匹配当前 location 的 CGI 后缀，并取出该后缀配置的解释器。
 参数来源：
     - location：buildResponse() 通过 findMatchingLocation() 找到的最长匹配 location。
-    - path：RequestParser 已经解码、规范化并去掉 query 的 request.getPath()。
-变量说明：
-    - it：遍历 location->cgi_extensions 的迭代器；key 是 .py/.sh 等后缀，value 是队友配置的解释器路径。
-    - extension：当前检查的 CGI 后缀。
-实现逻辑：
-    1. 没有 location 或没有 cgi_extension 配置时返回 false。
-    2. 逐个检查 path 最后是否完整等于某个扩展名。
-    3. 只负责识别是否走 CGI；解释器 value 不在 Response 中使用，因为队友公开接口只接收 script_path。
+    - path：RequestParser 已解码、规范化并去掉 query 的 request.getPath()。
+    - interpreter：输出引用；成功时写入 cgi_extensions value，空值表示脚本自身可直接执行。
+变量说明：it 遍历后缀到解释器的映射；extension 是当前后缀。
+实现逻辑：没有 CGI 配置时返回 false；逐个比较完整文件后缀；命中后写出解释器并返回 true。
 */
-static bool isConfiguredCgiPath(const LocationConfig *location,
-                                const std::string &path)
+static bool findConfiguredCgiInterpreter(const LocationConfig *location,
+                                         const std::string &path,
+                                         std::string &interpreter)
 {
+    interpreter.clear();
     if (location == NULL || location->cgi_extensions.empty())
         return false;
     std::map<std::string, std::string>::const_iterator it =
@@ -134,7 +132,10 @@ static bool isConfiguredCgiPath(const LocationConfig *location,
         if (!extension.empty() && path.size() >= extension.size()
             && path.compare(path.size() - extension.size(),
                 extension.size(), extension) == 0)
+        {
+            interpreter = it->second;
             return true;
+        }
         ++it;
     }
     return false;
@@ -142,17 +143,18 @@ static bool isConfiguredCgiPath(const LocationConfig *location,
 
 /*
 函数：validateCgiScript
-用途：在 fork/execve 前确认 EffectiveRoute 生成的 CGI 目标确实是可执行普通文件。
-参数来源：scriptPath 来自 route.targetPath，即 root/alias 与 request.getPath() 合成后的真实磁盘路径。
+用途：在 fork/execve 前确认 EffectiveRoute 生成的 CGI 目标是普通文件，并按启动方式检查读或执行权限。
+参数来源：scriptPath 来自 route.targetPath；requiresExecutePermission 在没有配置解释器时为 true。
 变量说明：
     - info：stat() 填充的文件类型和权限信息。
 实现逻辑：
     1. stat 失败时把不存在/中间目录不存在映射为 404，权限失败映射为 403，其余映射为 500。
     2. 目标不是普通文件时返回 403，避免目录、FIFO、socket 或设备进入 execve。
-    3. access(X_OK) 失败时返回 403。
+    3. 直接执行脚本时检查 X_OK；通过解释器执行时只要求 R_OK。
     4. 所有检查通过返回 PATH_OK，buildResponse() 随后通过内部 header 交付脚本路径。
 */
-static int validateCgiScript(const std::string &scriptPath)
+static int validateCgiScript(const std::string &scriptPath,
+                             bool requiresExecutePermission)
 {
     struct stat info;
     if (stat(scriptPath.c_str(), &info) != 0)
@@ -165,7 +167,8 @@ static int validateCgiScript(const std::string &scriptPath)
     }
     if (!S_ISREG(info.st_mode))
         return 403;
-    if (access(scriptPath.c_str(), X_OK) != 0)
+    int requiredMode = requiresExecutePermission ? X_OK : R_OK;
+    if (access(scriptPath.c_str(), requiredMode) != 0)
         return 403;
     return PATH_OK;
 }
@@ -243,9 +246,12 @@ Response buildResponse(const Request &request,
         return buildSessionDemoResponse(request, sessionStore);
 
     int pathStatus = route.createEffectivePath(request.getPath(), action);
-    if (isConfiguredCgiPath(location, request.getPath()))
+    std::string cgiInterpreter;
+    if (findConfiguredCgiInterpreter(location, request.getPath(),
+                                     cgiInterpreter))
     {
-        int cgiPathStatus = validateCgiScript(route.targetPath);
+        int cgiPathStatus = validateCgiScript(route.targetPath,
+                                              cgiInterpreter.empty());
         if (cgiPathStatus != PATH_OK)
         {
             response.createResponse(cgiPathStatus, "",
@@ -254,6 +260,9 @@ Response buildResponse(const Request &request,
         }
         response.setStatus(200);
         response.setHeader("X-Internal-CGI-Path", route.targetPath);
+        if (!cgiInterpreter.empty())
+            response.setHeader("X-Internal-CGI-Interpreter",
+                               cgiInterpreter);
         return response;
     }
 
