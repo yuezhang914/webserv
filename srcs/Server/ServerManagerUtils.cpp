@@ -226,43 +226,102 @@ void ServerManager::handleClientWrite(int clientFd, size_t poll_index)
         this->_poll_fds[poll_index].events = POLLIN;
     }
 }
-/**
- * 函数：ServerManager::closeConnection
- * 用途：当客户端主动断开连接、HTTP 发送完毕或连接发生底层致命错误时，调用该函数安全关闭文件描述符，并在物理内存中全量注销该客人的所有资产，防止内存与 FD（文件描述符）泄漏。
- * 参数来源：来自 handleClientRead() 或 handleClientWrite() 检测到断开或异常的分支。
- * 变量解释：
- *     - clientFd：即将被彻底销毁、扫地出门的目标客户端套接字。
- *     - poll_index：传引用参数（size_t &），代表该客户端在全局 _poll_fds 监视大阵列中的实时下标位置。
- *     - _poll_fds：核心监视大阵列，利用 vector 连续内存存放 pollfd。
- *     - _client_to_srv_map：运行时映射表，记录 clientFd 对应的虚拟主机配置。
- *     - _client_buffers：运行时映射表，记录该客户端专属的读写拼接小抽屉。
- * 实现逻辑：
- *     1. 调用 close(clientFd) 系统调用，物理斩断与浏览器的套接字通信管道，释放文件描述符资源。
- *     2. 拿着 clientFd 钥匙，去 _client_to_srv_map 账本中执行 erase() 物理擦除，销毁配置关联。
- *     3. 拿着 clientFd 钥匙，去 _client_buffers 账本中执行 erase() 物理擦除，彻底释放拼接缓存。
- *     4. **【核心绝杀：修正大循环下标】**：呼叫 _poll_fds.erase(_poll_fds.begin() + poll_index) 将其从 poll 大网中无情切除。由于 vector 移除元素会导致后面的所有节点集体向前挪移一位，为了防止主大循环的 for 循环在执行 ++i 时无脑跨跳、漏检紧随其后的新节点，我们在内部顺手执行 `--poll_index`（自减 1 修正位置），完美御敌。
- * 后续影响：资产全面清空。被注销的 clientFd 物理消失，不再占用系统句柄上限。
- *           由于 poll_index 被传引用扣回了正确位置，run() 循环在下一个滴答里依然能滴水不漏地扫描到每一个鲜活的连接，系统稳健度拉满。
- */
-void ServerManager::closeConnection(int clientFd, size_t poll_index)
+
+/*
+函数用途：作为多路复用雷达网的防卫外科车间，在 _poll_fds 阵列中纵向检索指定 FD，找到后将其物理抹除并缩容 vector 舱位，严防悬空 FD 污染 poll 监听。
+参数与变量：
+- targetFd (传入参数)：int，亟待从多路复用雷达网中注销剔除的物理文件描述符（如 cgi_read_fd 或 cgi_write_fd）。
+- i (局部卡尺变量)：size_t，遍历 _poll_fds 动态阵列的检索游标。
+实现逻辑：
+1. 🛡️ 边界防卫：点验 targetFd 有效性，若传入的是 -1（未开通状态），当场优雅折返。
+2. 🔍 物理检索：自头至尾正向扫描 this->_poll_fds 动态向量阵列。
+3. 🪓 物理剜除与缩容：一旦匹配到 this->_poll_fds[i].fd == targetFd，立刻调用 vector::erase(begin() + i) 
+   将其从内存轨道上彻底剔除并压缩阵列，随后断开循环，向大管家交割绝对干净的雷达网时空！
+*/
+void ServerManager::_eraseFdFromPoll(int targetFd)
 {
-    std::cout << "[ServerManager] Safely clear asset for Client FD: " << clientFd << std::endl;
+    if (targetFd == -1)
+        return;
 
-    // 1. 物理斩断套接字通信
-    close(clientFd);
-
-    // 2.只要一笔抹掉这个 clientFd 的盒子，盒子里面的 read_buffer、物理搬运工 ClientIO（包含写缓冲区）全部自动物理析构，干净利落！
-    this->_connections.erase(clientFd);
-
-    /*
-        3. 保持原来的排序，不在这里立马从 vector 中 erase 它，而是把它的标志位设为死寂状态 (-1)
-        告诉内核：下一次 poll 别再看它了。同时让 run() 的倒序大循环完完整整走完这轮点名，不踩空
-    */
-    if (poll_index < this->_poll_fds.size())
+    for (size_t i = 0; i < this->_poll_fds.size(); ++i)
     {
-        this->_poll_fds[poll_index].fd = -1;
-        this->_poll_fds[poll_index].events = 0;
-        this->_poll_fds[poll_index].revents = 0;
+        if (this->_poll_fds[i].fd == targetFd)
+        {
+            // 🧹 物理剔除并让 vector 自动收缩舱位，绝不留悬空垃圾
+            this->_poll_fds.erase(this->_poll_fds.begin() + i);
+            break;
+        }
+    }
+}
+
+void ServerManager::cleanupConnectionCgi(Connection *conn)
+{
+    if (conn == NULL)
+        return;
+
+    // 清理读端管道（若挂在 poll_fds 上，也需在调用处或此处清除，防悬空）
+    if (conn->cgi_read_fd != -1)
+    {
+        this->_eraseFdFromPoll(conn->cgi_read_fd);
+        this->_cgi_read_fd_to_client_map.erase(conn->cgi_read_fd);
+        ::close(conn->cgi_read_fd);
+        conn->cgi_read_fd = -1;
+    }
+
+    // 清理写端管道
+    if (conn->cgi_write_fd != -1)
+    {
+        this->_eraseFdFromPoll(conn->cgi_write_fd);
+        this->_cgi_write_fd_to_client_map.erase(conn->cgi_write_fd);
+        ::close(conn->cgi_write_fd);
+        conn->cgi_write_fd = -1;
+    }
+
+    // 🪓 斩杀子进程，防止客户端中途断连留下僵尸进程！
+    if (conn->cgi_pid > 0)
+    {
+        ::kill(conn->cgi_pid, SIGKILL);
+        ::waitpid(conn->cgi_pid, NULL, 0);
+        conn->cgi_pid = -1;
+    }
+    conn->is_cgi = false;
+}
+/*
+函数用途：作为客户端断连战后总务车间，优雅回收 Connection 堆内存资产，依靠 RAII 自动闭合物理 FD，并重置多路复用雷达槽位。
+实现逻辑：
+1. 🔍 账本反查：在 _connections 名册中定位该 clientFd 的 Connection* 实体。
+2. 🧹 CGI 连带清场：如果该连接中途断连且正挂着 CGI，强制 kill 子进程、回收 PID、并注销 CGI 管道 FD（彻底封杀僵尸进程）。
+3. 💎 资源回收（RAII 顺藤摸瓜）：
+   - 执行 delete connection; 
+   - 触发 Connection::~Connection() -> delete socket -> 触发 ClientSocket::~ClientSocket()；
+   - 由 ClientSocket 的析构函数唯一地、安全地执行 ::close(clientFd)，绝无重复关闭（Double Close）风险！
+4. 🗑️ 账本注销：从 _connections 名册中 erase 清除指针节点。
+5. 📡 雷达网擦除：将 _poll_fds 中对应的 pollIndex 槽位重置为 -1（留给 prePollCleanup 洗舱车间物理剔除），严防悬空 FD！
+*/
+void ServerManager::closeConnection(int clientFd, size_t pollIndex)
+{
+    std::map<int, Connection *>::iterator it = this->_connections.find(clientFd);
+
+    if (it != this->_connections.end())
+    {
+        Connection *connection = it->second;
+
+        // 1. 🛡️ 先清理该连接关联的 CGI pipe 和子进程（彻底封杀僵尸进程）
+        this->cleanupConnectionCgi(connection);
+
+        // 2. 🏛️ RAII 完美闭环：由 delete 触发 ClientSocket 析构函数关闭 clientFd
+        delete connection;
+        
+        // 3. 🧹 清除名册账本节点
+        this->_connections.erase(it);
+    }
+
+    // 4. 📡 物理抹去 poll 雷达网槽位
+    if (pollIndex < this->_poll_fds.size())
+    {
+        this->_poll_fds[pollIndex].fd = -1;
+        this->_poll_fds[pollIndex].events = 0;
+        this->_poll_fds[pollIndex].revents = 0;
     }
 }
 

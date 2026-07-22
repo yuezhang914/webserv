@@ -25,12 +25,12 @@ private:
 
     // 2. 运行时高效映射表
     std::map<int, ServerConfig> _listen_socket_map; // listenFd -> ServerConfig
-    std::map<int, Connection*> _connections;         // clientFd -> Connection
+    std::map<int, Connection *> _connections;       // clientFd -> Connection
 
     // 🚀 【CGI 并网资产】：逆向雷达与延迟追加队列
     std::map<int, int> _cgi_read_fd_to_client_map;  // 读端专属：CGI 读 Fd -> Client Fd
     std::map<int, int> _cgi_write_fd_to_client_map; // 写端专属：CGI 写 Fd -> Client Fd
-    std::vector<struct pollfd> _fds_to_add;   // 暂存箱，封锁 vector 扩容带来的野指针段错误
+    std::vector<struct pollfd> _fds_to_add;         // 暂存箱，封锁 vector 扩容带来的野指针段错误
 
     // 3. 内部私有工具函数
     void setupSockets();                                     // 砸开所有配置的物理端口
@@ -50,11 +50,13 @@ private:
     // 🚀 【CGI 并网工具】：异步分流与收割车间
     bool isCgiPipeFd(int fd);                               // 侦测触发的是不是 CGI 管道
     void handleCgiPipeRead(int cgiReadFd, size_t poll_idx); // 异步收割 Python 输出
-  
+
     void handleCgiPipeWrite(int cgiWriteFd, size_t poll_idx);
     void _cleanupCgiResources(Connection *conn);
+    void cleanupConnectionCgi(Connection *conn);
+    void _eraseFdFromPoll(int targetFd);
 
-public:
+    public :
     // 构造与析构
     ServerManager(const std::vector<ServerConfig> &configs);
     ~ServerManager();
