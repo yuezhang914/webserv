@@ -98,19 +98,19 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
     if (status == REQUEST_OK)
     {
         std::cout << "[ServerManager] Request parsed successfully for FD " << clientFd << std::endl;
-        conn->read_buffer.erase(0, consumed);      
+        conn->read_buffer.erase(0, consumed);
 
         // 💡 冲突解决：完美缝合 SessionStore 机制！
         static SessionStore sessionStore;
         Response res = buildResponse(conn->request, sessionStore);
-        
+
         // 3. 检查这到底是不是一个隐藏的 CGI 请求
         std::string script_path;
-        std::string interpreter_path; // 👈 补齐变量声明
+        std::string interpreter_path;
 
         if (res.getHeader("X-Internal-CGI-Path", script_path))
         {
-            // 💡 语法修补：安全提取 X-Internal-CGI-Interpreter 对应的解释器路径
+            // 💡 提取 X-Internal-CGI-Interpreter 对应的解释器路径
             res.getHeader("X-Internal-CGI-Interpreter", interpreter_path);
 
             CgiHandler cgi(conn->request, script_path, interpreter_path);
@@ -128,24 +128,32 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
 
             conn->is_cgi = true;
             conn->cgi_read_fd = fds.read_fd;
-            conn->cgi_write_fd = fds.write_fd;
             conn->cgi_pid = fds.pid;
             conn->cgi_body_bytes_sent = 0;
 
             // 🧹 强力清空旧内存，为本次 CGI 提取开辟绝对干净的物理舱位！
             std::string().swap(conn->cgi_output_buffer);
 
+            // 1️⃣ 读端（CGI 吐数据给父进程）永远注册 POLLIN 监听
             this->registerFdToPoll(fds.read_fd, POLLIN);
 
-            // 🎯 【写端专属账本登记】：POST 数据的完美因果绑定
-            if (conn->request.getMethod() == "POST")
+            // 💡 2️⃣ 🎯 【问题 11 精准修正：按 Body 充沛度决定写端命运】
+            if (!conn->request.getBody().empty())
             {
+                // 有 Body 需要推给子进程 (如带数据的 POST/PUT)：装填写端，注册 POLLOUT
                 conn->cgi_write_fd = fds.write_fd;
                 this->_cgi_write_fd_to_client_map[fds.write_fd] = clientFd;
                 this->registerFdToPoll(fds.write_fd, POLLOUT);
             }
+            else
+            {
+                // 无 Body (如 GET、DELETE 或空 Body 的 POST)：父进程当场关闭写端！
+                // 这一关，子进程的 stdin 瞬间触发物理 EOF，彻底封杀 GET 读死锁！
+                ::close(fds.write_fd);
+                conn->cgi_write_fd = -1;
+            }
 
-            std::cout << "[⚡ WebServ Core] Client " << clientFd << " successfully split into CGI pipeline (Read FD: " << fds.read_fd << ", Write FD: " << fds.write_fd << ") under PID " << fds.pid << std::endl;
+            std::cout << "[⚡ WebServ Core] Client " << clientFd << " successfully split into CGI pipeline (Read FD: " << fds.read_fd << ", Write FD: " << conn->cgi_write_fd << ") under PID " << fds.pid << std::endl;
             return;
         }
         else
@@ -243,7 +251,7 @@ void ServerManager::handleClientWrite(int clientFd, size_t poll_index)
 实现逻辑：
 1. 🛡️ 边界防卫：点验 targetFd 有效性，若传入的是 -1（未开通状态），当场优雅折返。
 2. 🔍 物理检索：自头至尾正向扫描 this->_poll_fds 动态向量阵列。
-3. 🪓 物理剜除与缩容：一旦匹配到 this->_poll_fds[i].fd == targetFd，立刻调用 vector::erase(begin() + i) 
+3. 🪓 物理剜除与缩容：一旦匹配到 this->_poll_fds[i].fd == targetFd，立刻调用 vector::erase(begin() + i)
    将其从内存轨道上彻底剔除并压缩阵列，随后断开循环，向大管家交割绝对干净的雷达网时空！
 */
 void ServerManager::_eraseFdFromPoll(int targetFd)
@@ -300,7 +308,7 @@ void ServerManager::cleanupConnectionCgi(Connection *conn)
 1. 🔍 账本反查：在 _connections 名册中定位该 clientFd 的 Connection* 实体。
 2. 🧹 CGI 连带清场：如果该连接中途断连且正挂着 CGI，强制 kill 子进程、回收 PID、并注销 CGI 管道 FD（彻底封杀僵尸进程）。
 3. 💎 资源回收（RAII 顺藤摸瓜）：
-   - 执行 delete connection; 
+   - 执行 delete connection;
    - 触发 Connection::~Connection() -> delete socket -> 触发 ClientSocket::~ClientSocket()；
    - 由 ClientSocket 的析构函数唯一地、安全地执行 ::close(clientFd)，绝无重复关闭（Double Close）风险！
 4. 🗑️ 账本注销：从 _connections 名册中 erase 清除指针节点。
@@ -319,7 +327,7 @@ void ServerManager::closeConnection(int clientFd, size_t pollIndex)
 
         // 2. 🏛️ RAII 完美闭环：由 delete 触发 ClientSocket 析构函数关闭 clientFd
         delete connection;
-        
+
         // 3. 🧹 清除名册账本节点
         this->_connections.erase(it);
     }
