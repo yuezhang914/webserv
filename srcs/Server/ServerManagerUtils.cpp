@@ -118,7 +118,18 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
 
             if (fds.pid < 0 || fds.read_fd < 0 || fds.write_fd < 0)
             {
-                this->_connections[clientFd]->response.createResponse(500, "CGI Spawn Failed", this->_connections[clientFd]->config.error_pages);
+                std::cerr << "[CGI] Error: Failed to spawn CGI process for client " << clientFd << std::endl;
+
+                // 1. 生成 500 Response 结构
+                conn->response.createResponse(500, "CGI Spawn Failed", conn->config.error_pages);
+
+                // 2. 💡 关键临门一脚：将 Response 序列化为 HTTP 文本，安全注入发件箱 write_buffer！
+                conn->write_buffer = conn->response.responseToString();
+
+                // 3. 标记发完即断（错误响应完关闭连接）
+                conn->close_after_write = true;
+
+                // 4. 激活 POLLOUT，让 handleClientWrite 能在下一轮 TICK 把 500 报错顺畅吐给客户端
                 this->enableClientWriteEvent(clientFd);
                 return;
             }
