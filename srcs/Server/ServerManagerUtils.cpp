@@ -150,6 +150,7 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
             conn->cgi_read_fd = fds.read_fd;
             conn->cgi_pid = fds.pid;
             conn->cgi_body_bytes_sent = 0;
+            conn->cgi_started_at = std::time(NULL); // 装填物理起始时间戳！
 
             std::string().swap(conn->cgi_output_buffer);
 
@@ -165,7 +166,7 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
             }
             else
             {
-               // 无 Body：直接通过辅助函数优雅关闭写端！
+                // 无 Body：直接通过辅助函数优雅关闭写端！
                 conn->cgi_write_fd = fds.write_fd; // 临时赋值给 conn 以便 closeCgiWritePipe 识别
                 this->closeCgiWritePipe(conn);
             }

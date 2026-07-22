@@ -24,7 +24,7 @@
 #include <sys/types.h>
 #include <unistd.h>   // 物理引入 fork, pipe, dup2, close 等系统调用
 #include <sys/wait.h> // 物理引入 waitpid
-
+#include <ctime>
 
 // 3. 业务平坦化组装
 #include "Config.hpp"
