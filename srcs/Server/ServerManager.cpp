@@ -165,19 +165,19 @@ int ServerManager::executePoll(int &retries)
 2. 锁定位置后，在原有的读雷达（POLLIN）基础上，强行用位或操作追加追加绑定 POLLOUT 监听标记。
 3. 此举会在下一轮大循环中激活内核通知，将控制权平滑扭送至核心发货车间（handleClientWrite），实现高效控制。
 */
-void ServerManager::enableClientWriteEvent(int clientFd)
-{
-    size_t i = 0;
-    while (i < this->_poll_fds.size())
-    {
-        if (this->_poll_fds[i].fd == clientFd)
-        {
-            this->_poll_fds[i].events |= POLLOUT;
-            break;
-        }
-        ++i;
-    }
-}
+// void ServerManager::enableClientWriteEvent(int clientFd)
+// {
+//     size_t i = 0;
+//     while (i < this->_poll_fds.size())
+//     {
+//         if (this->_poll_fds[i].fd == clientFd)
+//         {
+//             this->_poll_fds[i].events |= POLLOUT;
+//             break;
+//         }
+//         ++i;
+//     }
+// }
 
 /*
 函数用途：判定当前就绪的 fd 是否属于 CGI 子进程与主进程通信的异步物理管道读/写端。

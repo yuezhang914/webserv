@@ -53,7 +53,7 @@ private:
 
     void registerFdToPoll(int fd, short events);
 
-    void enableClientWriteEvent(int clientFd);
+   
 
     // 🚀 【CGI 并网工具】：异步分流与收割车间
     bool isCgiPipeFd(int fd);                               // 侦测触发的是不是 CGI 管道
