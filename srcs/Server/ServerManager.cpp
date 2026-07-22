@@ -323,10 +323,9 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
             // ============================================================
             //                  黄金清洗并网安全车间 
             // ============================================================
-            Response cgi_res;
-
-            // 💡 用纯净的 cgi_output_buffer 进行 HTTP 头部解析与加冕
-            cgi_res.parseCgiOutput(conn->cgi_output_buffer);
+            
+            // 💡 纯净组装 Response 实体
+            Response cgi_res = buildCgiResponse(conn->request, conn->cgi_output_buffer);
 
             // 强力清空已用完的物料箱与发件箱旧内存
             std::string().swap(conn->cgi_output_buffer);
@@ -335,10 +334,20 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
             // 💎 临门一脚：将 Response 洗白组装出来的满血高级 HTTP 报文，一次性安全注入发件箱！
             conn->write_buffer = cgi_res.responseToString();
 
-            // 4. 解除多路复用雷达网上对该读端管道的监听，并将管道物理关闭
+            // 4. 注销并关闭读端管道
             ::close(cgiReadFd);
             this->_poll_fds.erase(this->_poll_fds.begin() + poll_idx);
             this->_cgi_read_fd_to_client_map.erase(it);
+            conn->cgi_read_fd = -1;
+
+            // 💡 物理双保险：连带清场可能残留的 POST 写端管道，严防 poll 雷达网悬空 FD
+            if (conn->cgi_write_fd != -1)
+            {
+                this->_eraseFdFromPoll(conn->cgi_write_fd);
+                this->_cgi_write_fd_to_client_map.erase(conn->cgi_write_fd);
+                ::close(conn->cgi_write_fd);
+                conn->cgi_write_fd = -1;
+            }
 
             // 5. 资源清理与子进程回收（带 WNOHANG 护盾）
             this->_cleanupCgiResources(conn);
@@ -365,18 +374,23 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
             conn->response.createResponse(500, "CGI Read Error", conn->config.error_pages);
             conn->write_buffer = conn->response.responseToString();
 
+            // 物理擦除读端管道
             ::close(cgiReadFd);
             this->_poll_fds.erase(this->_poll_fds.begin() + poll_idx);
             this->_cgi_read_fd_to_client_map.erase(it);
+            conn->cgi_read_fd = -1;
 
-            // 🪓 斩杀子进程并回收
-            if (conn->cgi_pid > 0)
+            // 物理连带擦除写端管道
+            if (conn->cgi_write_fd != -1)
             {
-                ::kill(conn->cgi_pid, SIGKILL);
-                ::waitpid(conn->cgi_pid, NULL, 0);
-                conn->cgi_pid = -1;
+                this->_eraseFdFromPoll(conn->cgi_write_fd);
+                this->_cgi_write_fd_to_client_map.erase(conn->cgi_write_fd);
+                ::close(conn->cgi_write_fd);
+                conn->cgi_write_fd = -1;
             }
-            conn->is_cgi = false;
+
+            // 🪓 统一交由善后车间：斩杀子进程并回收（带 WNOHANG 护盾，无阻塞隐患）
+            this->_cleanupCgiResources(conn);
 
             this->enableClientWriteEvent(clientFd);
             return;

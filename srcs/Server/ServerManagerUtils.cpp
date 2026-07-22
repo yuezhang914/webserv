@@ -105,7 +105,7 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
         std::string script_path;
         if (res.getHeader("X-Internal-CGI-Path", script_path))
         {
-            CgiHandler cgi(conn->request, script_path);
+            CgiHandler cgi(conn->request, script_path, res.getHeader("X-Internal-CGI-Path", interpreter_path));
             CgiFds fds = cgi.async_launch();
 
             if (fds.pid < 0 || fds.read_fd < 0 || fds.write_fd < 0)

@@ -24,6 +24,7 @@ class CgiHandler
 private:
     const Request &_request;
     std::string   _script_path;
+    std::string    _interpreter_path; // ⚙️ 解释器物理路径（如 /usr/bin/python3，允许为空）
 
     // 🔒 内部工业私密车间：负责帮子进程构建 execve 需要的物理环境变量矩阵与参数
     char **_buildEnvironment() const;
@@ -34,7 +35,7 @@ private:
     CgiHandler &operator=(const CgiHandler &other);
 
 public:
-    CgiHandler(const Request &request, const std::string &script_path);
+    CgiHandler(const Request &request, const std::string &script_path, const std::string &interpreter_path);
     ~CgiHandler();
 
     // 🚀【异步核心大闸】：只开凿管道、fork 孵化进程，瞬间返回物理凭证，绝不阻塞！

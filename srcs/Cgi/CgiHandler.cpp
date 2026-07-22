@@ -1,7 +1,7 @@
 #include "Webserv.hpp"
 
-CgiHandler::CgiHandler(const Request &request, const std::string &script_path)
-    : _request(request), _script_path(script_path) {}
+CgiHandler::CgiHandler(const Request &request, const std::string &script_path, const std::string &interpreter_path)
+    : _request(request), _script_path(script_path), _interpreter_path(interpreter_path) {}
 
 CgiHandler::~CgiHandler() {}
 
@@ -23,10 +23,14 @@ CgiHandler::~CgiHandler() {}
 CgiFds CgiHandler::async_launch()
 {
     CgiFds fds;
+    fds.read_fd = -1;
+    fds.write_fd = -1;
+    fds.pid = -1;
+
     int pipe_to_parent[2];
     int pipe_to_child[2];
 
-    // 1. 安全开凿单向通道（防止短路求值引起的未决句柄泄露）
+    // 1. 安全开凿单向通道
     if (pipe(pipe_to_parent) < 0)
     {
         std::cerr << "[CGI] Error: pipe_to_parent failed." << std::endl;
@@ -40,7 +44,7 @@ CgiFds CgiHandler::async_launch()
         return fds;
     }
 
-    // 将主进程留下的管道读写端追加为【非阻塞】与【执行时关闭】
+    // 2. 将主进程留下的管道读写端设置为【非阻塞】与【执行时自动关闭 FD_CLOEXEC】
     int fl1 = fcntl(pipe_to_parent[0], F_GETFL, 0);
     fcntl(pipe_to_parent[0], F_SETFL, fl1 | O_NONBLOCK);
     fcntl(pipe_to_parent[0], F_SETFD, FD_CLOEXEC);
@@ -49,7 +53,7 @@ CgiFds CgiHandler::async_launch()
     fcntl(pipe_to_child[1], F_SETFL, fl2 | O_NONBLOCK);
     fcntl(pipe_to_child[1], F_SETFD, FD_CLOEXEC);
 
-    // 2.子进程
+    // 3. 裂变子进程
     fds.pid = fork();
     if (fds.pid < 0)
     {
@@ -60,69 +64,83 @@ CgiFds CgiHandler::async_launch()
         return fds;
     }
 
-    if (fds.pid == 0) // ================== 子进程==================
+    if (fds.pid == 0) // ================== 子进程物理空间 ==================
     {
-        // 1. 精准条件焊接与原生临时变量释放，预防管道正好分配到 0 或 1 时的bug
+        // 1. 关掉完全属于父进程的两个管道端
+        close(pipe_to_parent[0]);
+        close(pipe_to_child[1]);
+
+        // 2. 🪓 物理清场：关闭除了 pipe_to_child[0] 和 pipe_to_parent[1] 之外所有 >= 3 的 FD
+        long fd_limit = sysconf(_SC_OPEN_MAX);
+        if (fd_limit < 0)
+            fd_limit = 1024;
+
+        for (int current_fd = 3; current_fd < fd_limit; ++current_fd)
+        {
+            // 💡 关键防御：绝不能把等会儿要 dup2 用到的两个物理管道 FD 给提前关掉了！
+            if (current_fd != pipe_to_child[0] && current_fd != pipe_to_parent[1])
+            {
+                close(current_fd);
+            }
+        }
+
+        // 3. 🔩 黄金焊接：精准重定向至 stdin (0) 与 stdout (1)
         if (pipe_to_child[0] != STDIN_FILENO)
         {
             dup2(pipe_to_child[0], STDIN_FILENO);
-            close(pipe_to_child[0]);
+            close(pipe_to_child[0]); // 焊接完后释放原始描述符
         }
         if (pipe_to_parent[1] != STDOUT_FILENO)
         {
             dup2(pipe_to_parent[1], STDOUT_FILENO);
-            close(pipe_to_parent[1]);
+            close(pipe_to_parent[1]); // 焊接完后释放原始描述符
         }
 
-        // 关掉完全属于父进程的两个对流方向原生端
-        if (pipe_to_parent[0] > STDERR_FILENO)
-            close(pipe_to_parent[0]);
-        if (pipe_to_child[1] > STDERR_FILENO)
-            close(pipe_to_child[1]);
-
-        // 在内核自带的 FD_CLOEXEC 自动清洗之外，
-        // 循环 3 以上的所有遗漏 FD，确保子进程去跑 Python 前绝对净空
-        long fd_limit = sysconf(_SC_OPEN_MAX);
-        if (fd_limit < 0)
-        {
-            fd_limit = 1024;
-        }
-        int current_fd = 3;
-        while (current_fd < fd_limit)
-        {
-            close(current_fd);
-            ++current_fd;
-        }
-
-        // 3. 环境
+        // 4. 组装环境变量
         char **env = _buildEnvironment();
         if (env == NULL)
         {
             _exit(127);
         }
 
-        char *args[2];
-        args[0] = const_cast<char *>(_script_path.c_str());
-        args[1] = NULL;
+        // 5. 弹射组装
+        char *script_path_c = const_cast<char *>(_script_path.c_str());
+        char *args[3];
 
-        execve(args[0], args, env);
+        if (!_interpreter_path.empty())
+        {
+            // 💡 方案 A：配置文件指定解释器（/usr/bin/python3 script.py）
+            args[0] = const_cast<char *>(_interpreter_path.c_str());
+            args[1] = script_path_c;
+            args[2] = NULL;
 
+            ::execve(args[0], args, env);
+        }
+        else
+        {
+            // 💡 方案 B：直接弹射脚本本身
+            args[0] = script_path_c;
+            args[1] = NULL;
+
+            ::execve(args[0], args, env);
+        }
+
+        // 如果 execve 穿透，说明弹射失败
         _freeEnvironment(env);
         _exit(127);
     }
 
     // ================== 主进程大管家车间 ==================
-    // 释放大管家用不到的子进程侧单向原生端
+    // 1. 释放大管家用不到的子进程侧单向端
     close(pipe_to_child[0]);
     close(pipe_to_parent[1]);
 
-    // 装填多路复用总线核心资产
+    // 2. 装填多路复用总线核心资产
     fds.read_fd = pipe_to_parent[0];
     fds.write_fd = pipe_to_child[1];
 
     return fds;
 }
-
 /*
 函数用途：作为底层堆内存手工分配作坊，将 C++ 的 std::string 键值对强行序列化为 C 风格以 \0 结尾的裸字符指针（char*），用于构建 execve 所需的原生沙盒环境。
 参数与变量：
