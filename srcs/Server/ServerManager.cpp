@@ -14,6 +14,7 @@ ServerManager::ServerManager(const std::vector<ServerConfig> &configs)
 // 斩断所有堆上开辟的服务器物理套接字指针
 ServerManager::~ServerManager()
 {
+    // 1. 物理释放所有监听套接字（ServerSocket*）
     for (size_t i = 0; i < this->_listen_sockets.size(); ++i)
     {
         if (this->_listen_sockets[i] != NULL)
@@ -22,8 +23,21 @@ ServerManager::~ServerManager()
         }
     }
     this->_listen_sockets.clear();
+
+    // 2. 💡 物理释放所有残留的客户端连接（Connection*）
+    for (std::map<int, Connection *>::iterator it = this->_connections.begin();
+         it != this->_connections.end(); ++it)
+    {
+        if (it->second != NULL)
+        {
+            delete it->second; // 触发 Connection 析构，清理内部 Socket 与残存管道
+        }
+    }
+    this->_connections.clear();
+
     std::cout << "[ServerManager] Engine completely shutdown and memory released." << std::endl;
 }
+
 /*
 函数用途：物理拉起 Webserv 网络的奠基点火仪式（巢穴孵化），全量启动底层服务器级网络套接字的物理实例化。
 参数与变量：
@@ -762,12 +776,9 @@ void ServerManager::enforceCgiTimeouts()
         std::map<int, Connection *>::iterator current = it++;
         Connection *conn = current->second;
 
-        if (conn != NULL
-            && conn->is_cgi
-            && conn->cgi_started_at > 0
-            && (now - conn->cgi_started_at > 10)) // 🎯 10 秒无脑物理熔断阈值
+        if (conn != NULL && conn->is_cgi && conn->cgi_started_at > 0 && (now - conn->cgi_started_at > 10)) // 🎯 10 秒无脑物理熔断阈值
         {
-            std::cerr << "[CGI Timeout] Warning: CGI script execution time exceeded 10s for Client FD " 
+            std::cerr << "[CGI Timeout] Warning: CGI script execution time exceeded 10s for Client FD "
                       << current->first << "! Force fusing 504 Gateway Timeout." << std::endl;
 
             // 💡 复用问题 20 打造的 failCgi 原子函数：
