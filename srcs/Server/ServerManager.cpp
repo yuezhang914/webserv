@@ -156,47 +156,6 @@ int ServerManager::executePoll(int &retries)
 }
 
 /*
-函数用途：在多路复用雷达网上动态激活目标客户端的写事件（POLLOUT），宣告其发件箱货物已齐。
-参数与变量：
-- clientFd (传入参数)：当前已经装订完毕、眼巴巴等着把 HTTP 报文派发出去的客户端网络套接字。
-- _poll_fds (类内部常驻容器)：std::vector<struct pollfd>，大管家赖以生存的多路复用核心轮询监视名册。
-实现逻辑：
-1. 线性扫描全局轮询名册 _poll_fds，精准定位该 clientFd 在内核名册中入籍的物理坑位。
-2. 锁定位置后，在原有的读雷达（POLLIN）基础上，强行用位或操作追加追加绑定 POLLOUT 监听标记。
-3. 此举会在下一轮大循环中激活内核通知，将控制权平滑扭送至核心发货车间（handleClientWrite），实现高效控制。
-*/
-// void ServerManager::enableClientWriteEvent(int clientFd)
-// {
-//     size_t i = 0;
-//     while (i < this->_poll_fds.size())
-//     {
-//         if (this->_poll_fds[i].fd == clientFd)
-//         {
-//             this->_poll_fds[i].events |= POLLOUT;
-//             break;
-//         }
-//         ++i;
-//     }
-// }
-
-/*
-函数用途：判定当前就绪的 fd 是否属于 CGI 子进程与主进程通信的异步物理管道读/写端。
-参数与变量：
-- fd (传入参数)：多路复用大循环当前弹回、亟待辨别身份的就绪文件描述符。
-- _cgi_read_fd_to_client_map (类内部常驻容器)：std::map<int, int>，专职捕捞读端管道的雷达映射账本。
-- _cgi_write_fd_to_client_map (类内部常驻容器)：std::map<int, int>，专职输送 POST 请求体的写端渠道映射账本。
-实现逻辑：
-1. 分别在读端账本（_cgi_read_fd_to_client_map）与写端账本（_cgi_write_fd_to_client_map）中发起红黑树雷达反查。
-2. 只要在任意一个反查专属账本中挂号留痕（即未命中 end()），说明其身上背负着 CGI 契约，当场判为系统特权管道，返回 true。
-3. 若两处账本均查无此人，说明它是普通的客户端、监听套接字或常规静态资源，返回 false。
-*/
-bool ServerManager::isCgiPipeFd(int fd)
-{
-    return (this->_cgi_read_fd_to_client_map.find(fd) != this->_cgi_read_fd_to_client_map.end()) ||
-           (this->_cgi_write_fd_to_client_map.find(fd) != this->_cgi_write_fd_to_client_map.end());
-}
-
-/*
 函数用途：将新生的物理文件描述符（Socket 或 Pipe）正式编入多路复用大循环，开启全天候事件监控。
 参数与变量：
 - fd (传入参数)：刚破壳而出（通过 accept 或 pipe 物理孵化）且亟待编入帝国防御网的底层文件描述符。
@@ -233,7 +192,7 @@ void ServerManager::registerFdToPoll(int fd, short events)
    - 万一子进程因为某种原因（如死循环、线程挂起）尚未死透（ret == 0），为了绝不卡死主线程的 poll 大闸，当场果断补一枪 ::kill(conn->cgi_pid, SIGKILL) 物理毁灭打击，并再次 waitpid 强制秒级收尸！
 3. 🔄 状态印记复位：将 cgi_pid 归零重置为 -1，并将 is_cgi 标志切回 false，为该 Connection 承接下一轮 HTTP 交互清理好物理赛道。
 */
-void ServerManager::_cleanupCgiResources(Connection *conn)
+void ServerManager::cleanupCgiResources(Connection *conn)
 {
     if (conn == NULL)
         return;
@@ -285,7 +244,7 @@ void ServerManager::closeCgiWritePipe(Connection *connection)
     this->_cgi_write_fd_to_client_map.erase(fd);
 
     // 2. 从 poll 监听雷达网中注销
-    this->_eraseFdFromPoll(fd);
+    this->eraseFdFromPoll(fd);
 
     // 3. 物理关闭文件描述符
     ::close(fd);
@@ -303,7 +262,7 @@ void ServerManager::closeCgiReadPipe(Connection *conn)
 
     int fd = conn->cgi_read_fd;
     this->_cgi_read_fd_to_client_map.erase(fd);
-    this->_eraseFdFromPoll(fd);
+    this->eraseFdFromPoll(fd);
     ::close(fd);
     conn->cgi_read_fd = -1;
 }
@@ -391,7 +350,7 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
     if (it == this->_cgi_read_fd_to_client_map.end())
     {
         ::close(cgiReadFd);
-        this->_eraseFdFromPoll(cgiReadFd);
+        this->eraseFdFromPoll(cgiReadFd);
         return;
     }
     int clientFd = it->second;
@@ -400,7 +359,7 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
     if (connectionIt == this->_connections.end() || connectionIt->second == NULL)
     {
         std::cerr << "[CGI Reader] Warning: Client FD " << clientFd << " already destroyed/NULL! Cleaning pipe." << std::endl;
-        this->_eraseFdFromPoll(cgiReadFd);
+        this->eraseFdFromPoll(cgiReadFd);
         this->_cgi_read_fd_to_client_map.erase(it);
         ::close(cgiReadFd);
         return;
@@ -500,7 +459,7 @@ void ServerManager::handleCgiPipeWrite(int cgiWriteFd, size_t poll_idx)
     {
         // 孤儿写端管道，防卫性物理关闭
         ::close(cgiWriteFd);
-        this->_eraseFdFromPoll(cgiWriteFd);
+        this->eraseFdFromPoll(cgiWriteFd);
         return;
     }
     int clientFd = it->second;
@@ -513,7 +472,7 @@ void ServerManager::handleCgiPipeWrite(int cgiWriteFd, size_t poll_idx)
 
         // 客户端已失效，用 helper 直接原子化清理写端！
         this->_cgi_write_fd_to_client_map.erase(it);
-        this->_eraseFdFromPoll(cgiWriteFd);
+        this->eraseFdFromPoll(cgiWriteFd);
         ::close(cgiWriteFd);
         return;
     }
@@ -587,7 +546,7 @@ void ServerManager::failCgiReadPipe(int cgiReadFd)
     std::map<int, int>::iterator it = this->_cgi_read_fd_to_client_map.find(cgiReadFd);
     if (it == this->_cgi_read_fd_to_client_map.end())
     {
-        this->_eraseFdFromPoll(cgiReadFd);
+        this->eraseFdFromPoll(cgiReadFd);
         ::close(cgiReadFd);
         return;
     }
@@ -602,7 +561,7 @@ void ServerManager::failCgiReadPipe(int cgiReadFd)
     else
     {
         // 客户端已失效，纯粹清理管道
-        this->_eraseFdFromPoll(cgiReadFd);
+        this->eraseFdFromPoll(cgiReadFd);
         this->_cgi_read_fd_to_client_map.erase(it);
         ::close(cgiReadFd);
     }
@@ -616,7 +575,7 @@ void ServerManager::failCgiWritePipe(int cgiWriteFd)
     std::map<int, int>::iterator it = this->_cgi_write_fd_to_client_map.find(cgiWriteFd);
     if (it == this->_cgi_write_fd_to_client_map.end())
     {
-        this->_eraseFdFromPoll(cgiWriteFd);
+        this->eraseFdFromPoll(cgiWriteFd);
         ::close(cgiWriteFd);
         return;
     }
@@ -631,7 +590,7 @@ void ServerManager::failCgiWritePipe(int cgiWriteFd)
     else
     {
         // 客户端已失效，清理写管道账本
-        this->_eraseFdFromPoll(cgiWriteFd);
+        this->eraseFdFromPoll(cgiWriteFd);
         this->_cgi_write_fd_to_client_map.erase(it);
         ::close(cgiWriteFd);
     }

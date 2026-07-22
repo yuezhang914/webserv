@@ -27,7 +27,6 @@ public:
 // 💡 新增：CGI 启动时间戳标定
     std::time_t cgi_started_at;
 
-
     Connection();
     Connection(int clientFd, const ServerConfig &srv_cfg);
 
