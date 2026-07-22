@@ -289,7 +289,7 @@ void ServerManager::_cleanupCgiResources(Connection *conn)
 */
 void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
 {
-    (void)poll_idx; // 💡 使用按 FD 值精确擦除，彻底摒弃可能失效的 poll_idx 索引
+    (void)poll_idx;
 
     // 1. 【顺藤摸瓜】：反查因果契约
     std::map<int, int>::iterator it = this->_cgi_read_fd_to_client_map.find(cgiReadFd);
@@ -300,7 +300,22 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
         return;
     }
     int clientFd = it->second;
-    Connection *conn = _connections[clientFd];
+
+    // 💡 🎯 【问题 14 核心修复：用 find() 替代 operator[]，严防插入 NULL 指针】
+    std::map<int, Connection *>::iterator connectionIt = this->_connections.find(clientFd);
+    if (connectionIt == this->_connections.end() || connectionIt->second == NULL)
+    {
+        std::cerr << "[CGI Reader] Warning: Client FD " << clientFd << " already destroyed/NULL! Cleaning pipe." << std::endl;
+        
+        // 客户端没了，管道失去意义，直接清理管道并退出，绝不解引用！
+        this->_eraseFdFromPoll(cgiReadFd);
+        this->_cgi_read_fd_to_client_map.erase(it);
+        ::close(cgiReadFd);
+        return;
+    }
+
+    // 此时安全拿到 100% 物理有效的 Connection 指针
+    Connection *conn = connectionIt->second;
 
     char buffer[4096];
 
@@ -311,12 +326,10 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
 
         if (bytesRead > 0)
         {
-            // 🛡️ 物理隔离：只往 CGI 专用物料箱追加！发件箱 write_buffer 保持绝对净空！
             conn->cgi_output_buffer.append(buffer, static_cast<size_t>(bytesRead));
             std::cout << "[CGI Reader] Sucked " << bytesRead << " bytes from pipe fd " << cgiReadFd << " to client " << clientFd << std::endl;
             continue;
         }
-
         else if (bytesRead == 0) // EOF 闭环
         {
             std::cout << "[CGI Reader] Reached EOF for pipe fd " << cgiReadFd << "." << std::endl;
@@ -326,10 +339,8 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
             std::string().swap(conn->cgi_output_buffer);
             std::string().swap(conn->write_buffer);
 
-            // 满血报文注入发件箱
             conn->write_buffer = cgi_res.responseToString();
 
-            // 💡 1️⃣ 安全注销写端管道（如果有）
             if (conn->cgi_write_fd != -1)
             {
                 this->_eraseFdFromPoll(conn->cgi_write_fd);
@@ -338,7 +349,6 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
                 conn->cgi_write_fd = -1;
             }
 
-            // 💡 2️⃣ 安全注销读端管道
             this->_eraseFdFromPoll(cgiReadFd);
             this->_cgi_read_fd_to_client_map.erase(it);
             ::close(cgiReadFd);
@@ -346,30 +356,24 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
 
             this->_cleanupCgiResources(conn);
 
-            // 🚀 💡 🎯 【核心闭环：CGI 完成，将客户端重置为 POLLOUT 准备发货！】
             this->setClientEvents(clientFd, POLLOUT);
             return;
         }
-
         else
         {
-            // bytesRead == -1：遇到了底层的分水岭
             if (errno == EAGAIN || errno == EWOULDBLOCK)
-                break; // 内核缓冲区抽干，正常退出，等下一次数据来
+                break;
             if (errno == EINTR)
-                continue; // 被信号打断，继续抽
+                continue;
 
-            // ❌ 发生真正的系统级读取错误，切入 500 熔断
             std::cerr << "[CGI Reader] System read error on fd " << cgiReadFd << ", breaking conduit." << std::endl;
 
-            // 物理清空脏物料箱与发件箱
             std::string().swap(conn->cgi_output_buffer);
             std::string().swap(conn->write_buffer);
 
             conn->response.createResponse(500, "CGI Read Error", conn->config.error_pages);
             conn->write_buffer = conn->response.responseToString();
 
-            // 💡 1️⃣ 安全物理连带擦除写端管道
             if (conn->cgi_write_fd != -1)
             {
                 this->_eraseFdFromPoll(conn->cgi_write_fd);
@@ -378,16 +382,13 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
                 conn->cgi_write_fd = -1;
             }
 
-            // 💡 2️⃣ 安全物理擦除读端管道
             this->_eraseFdFromPoll(cgiReadFd);
             this->_cgi_read_fd_to_client_map.erase(it);
             ::close(cgiReadFd);
             conn->cgi_read_fd = -1;
 
-            // 🪓 统一交由善后车间：斩杀子进程并回收（带 WNOHANG 护盾，无阻塞隐患）
             this->_cleanupCgiResources(conn);
 
-            // 🚀 💡 🎯 【修正：错误分支也统一重置为 POLLOUT】
             this->setClientEvents(clientFd, POLLOUT);
             return;
         }
