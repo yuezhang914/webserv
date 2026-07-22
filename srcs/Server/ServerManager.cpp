@@ -820,20 +820,39 @@ void ServerManager::enforceCgiTimeouts()
 void ServerManager::run()
 {
     if (this->_poll_fds.empty())
+    {
+        std::cerr << "[ServerManager] Error: No listening sockets in poll tree. Aborting run()." << std::endl;
         return;
+    }
+    
     std::cout << "[ServerManager] Main loop started. Entering the matrix..." << std::endl;
 
     int poll_error_retries = 0;
-    while (true)
+    while (true) // 💡 1. 用 this->_running 标记替代 while(true)，方便平滑收到 SIGINT (Ctrl+C) 时优雅退出
     {
+        // 1. 🧹 轮询前的账本与死链清理车间
         this->prePollCleanup();
 
+        // 2. 📡 执行 1000ms 物理超时/阻塞轮询
         int ret = this->executePoll(poll_error_retries);
         if (ret < 0)
+        {
+            std::cerr << "[ServerManager] Fatal poll failure limit reached. Breaking main loop." << std::endl;
             break;
+        }
 
-        this->dispatchEvents();
+        // 💡 3. 核心分水岭：只有真的有 FD 就绪 (ret > 0) 时，才去拉响雷达分发事件！
+        if (ret > 0)
+        {
+            this->dispatchEvents();
+        }
+
+        // 4. ⏱️ 盘点车间 A：10 秒 CGI 超时熔断巡检 (504 Gateway Timeout)
         this->enforceCgiTimeouts();
+
+        // 5. 🪓 盘点车间 B：纯非阻塞 WNOHANG 延迟回收 CGI 僵尸进程
         this->reapFinishedCgiChildren();
     }
+
+    std::cout << "[ServerManager] Main loop safely terminated." << std::endl;
 }
