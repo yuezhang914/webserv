@@ -183,124 +183,84 @@ CgiFds CgiHandler::async_launch()
 
     return fds;
 }
-/*
-函数用途：作为底层堆内存手工分配作坊，将 C++ 的 std::string 键值对强行序列化为 C 风格以 \0 结尾的裸字符指针（char*），用于构建 execve 所需的原生沙盒环境。
-参数与变量：
-- key (传入参数)：std::string，环境变量的名称（如 "REQUEST_METHOD" 或 "CONTENT_LENGTH"）。
-- value (传入参数)：std::string，环境变量的具体数据内容（如 "POST" 或 "128"）。
-- env_pair (局部变量)：std::string，利用标准连接符拼接出来的规范级 "KEY=VALUE" 临时完整报文字符串。
-- str (局部裸指针变量)：char*，通过 std::malloc 在堆内存上为该变量精确丈量并开辟出的物理生存空间。
-实现逻辑：
-1. 协议级拼装：将 key 与 value 通过 '=' 符号在内存中进行一线缝合。
-2. 物理丈量与开天辟地：为了容纳拼接后的报文，外加 C 风格终结符（\0），调用 std::malloc 精确申请 env_pair.size() + 1 字节的连续堆内存。
-3. 物理拷贝与资产锁定：在防御性点验指针非空后，调用 std::strcpy 将 C++ 缓存区的内容物理拓印到新生的堆舱位中，
-   以原生裸指针姿态返回，留待后续 _freeEnvironment 车间进行全量物理销毁，严防内存泄露。
-*/
-static char *createEnvString(const std::string &key, const std::string &value)
-{
-    std::string env_pair = key + "=" + value;
-    char *str = static_cast<char *>(std::malloc(env_pair.size() + 1));
-    if (str != NULL)
-    {
-        std::strcpy(str, env_pair.c_str());
-    }
-    return str;
-}
+
 
 /*
-函数用途：作为 C++98 古法标准专用的数字铸币车间，利用标准输出字符串流（ostringstream），将无符号整型（size_t）物理转译为 C++ 标准字符串（std::string）。
-参数与变量：
-- size (传入参数)：size_t，当前亟待进行文本化包装的物理度量数值（如 Body 的全量字节长度）。
-- ss (局部对象变量)：std::ostringstream，系统原生的高级格式化内存流蓄水池。
-实现逻辑：
-1. 流式灌注转换：通过 C++ 特有的流输入重载操作符（<<），将纯二进制的 size_t 数字推入 ss 蓄水池中，由标准库在内部自动完成字符化、高低位对齐以及物理转译。
-2. 资产拓印交付（临门一脚）：调用 ss.str() 精确拓印出流缓冲区中蓄满的字符串资产。
-3. 跨界并网：以右值姿态安全返回，直接喂给 CONTENT_LENGTH 等关键 CGI 协议环境变量，为子进程 Python 脚本提供绝对精准的非阻塞断句依据。
+辅助函数：数字转 string (标准 C++98 范式)
 */
-static std::string sizeToStr(size_t size)
+static std::string numberToString(int num)
 {
     std::ostringstream ss;
-    ss << size;
+    ss << num;
     return ss.str();
 }
 
 /*
-函数用途：从客户端原始 Request 请求大脑中深度榨取 HTTP 协议核心物料，在堆内存中动态开凿并组装出一套规整的 C 风格二维指针阵列（char**），作为 execve 裂变后子进程的常驻环境变量沙盒。
-参数与变量：
-- env_map (局部暂存容器)：std::map<std::string, std::string>，中间物料分拣账本，用于格式化对齐各类 CGI 协议核心字段。
-- env (局部二维指针变量)：char**，通过 std::malloc 动态申请的、在堆上连续排列的裸指针数组阵列（大小为 元素总数 + 1 哨兵）。
-- it (局部迭代器)：std::map<std::string, std::string>::const_iterator，用于纵向点验分拣完毕的键值对资产。
-- createEnvString (外部静态工具函数)：负责把单个 "KEY=VALUE" 灌入堆内存，转换为独立 C 风格裸指针的雕刻作坊。
-实现逻辑：
-1. 协议级物料榨取：全量搜集网关接口标准。针对 GET 注入 QUERY_STRING 供脚本解析入参；针对 POST 封锁 CONTENT_LENGTH 与 CONTENT_TYPE 边界防御线，彻底唤醒并指引 Python 的 sys.stdin.read() 精准断句。
-2. 二维阵列物理开凿：精确计算键值对总量，额外追加 1 格物理舱位用来放置 NULL 终点哨兵，在堆上一次性申请连续的指针存储空间。
-3. 铁血熔断回滚防御：通过 while 循环调用 createEnvString 逐条拓印灌入。一旦中间某一条堆内存申请意外爆雷（返回 NULL），立刻启动紧急熔断清理车间，逆向逐一 free 掉已分配的行资产并全量释放行指针阵列，实现零泄露的安全折返。
-4. 挂载最高终点哨兵：在阵列末尾（env[i]）手工砸下 NULL 钢印，宣告沙盒时空边界闭环，完美对齐 POSIX 工业规范！
+内部函数：构建符合 RFC 3875 标准的 CGI 环境变量矩阵
 */
 char **CgiHandler::_buildEnvironment() const
 {
-    // 1. 搜集物料：从当前的 _request 智囊大脑里榨取核心协议字段
-    std::map<std::string, std::string> env_map;
+    std::map<std::string, std::string> envMap;
 
-    env_map["GATEWAY_INTERFACE"] = "CGI/1.1";
-    env_map["SERVER_PROTOCOL"] = "HTTP/1.1";
-    env_map["SERVER_SOFTWARE"] = "Webserv/1.0";
-    env_map["REQUEST_METHOD"] = _request.getMethod(); // "GET" 或 "POST"
+    // 1. 🏛️ 核心请求要素（RFC 3875 必填）
+    envMap["GATEWAY_INTERFACE"] = "CGI/1.1";
+    envMap["SERVER_PROTOCOL"]    = "HTTP/1.1";
+    envMap["REQUEST_METHOD"]     = _request.getMethod();
+    envMap["QUERY_STRING"]       = _request.getQuery(); // 不带 '?' 的纯 query 字符串
 
-    // PATH_INFO: 脚本名后面的额外路由路径（例如 /cgi-bin/test.py/user -> "/user"）
-    // 这里如果还没写剥离逻辑，先给个安全的空值，或者直接给整个 path
-    env_map["PATH_INFO"] = _request.getPath();
+    // 2. 📜 路径定位映射（物理与逻辑严格解耦）
+    envMap["SCRIPT_NAME"]     = _request.getPath(); // 浏览器视角：如 /cgi/test.py
+    envMap["SCRIPT_FILENAME"] = _script_path;       // 磁盘物理视角：如 ./www/cgi/test.py
+    envMap["PATH_INFO"]       = "";                 // 当前未切分额外路径时，严格置空
 
-    // SCRIPT_NAME: 脚本在服务器上的真实物理路径
-    env_map["SCRIPT_NAME"] = _script_path;
-
-    // QUERY_STRING: GET 请求问号后面的核心参数（例如 "user=admin&token=42"）
-    // Python 脚本里的 cgi.FieldStorage() 全靠这个字段来解析入参！
-    env_map["QUERY_STRING"] = _request.getQuery();
-
-    // 🚨 针对 POST 上传的关键防线：
-    // 如果客户端发了 Body，必须把长度和物料类型同步传给子进程，否则 Python 的 sys.stdin.read() 会不知道读多少字节
-    std::string content_type;
-    if (_request.getHeader("content-type", content_type))
+    // 3. 🌐 读取服务器配置信息 (ServerConfig)
+    const ServerConfig *server = _request.getConfig();
+    if (server != NULL)
     {
-        env_map["CONTENT_TYPE"] = content_type;
+        envMap["SERVER_NAME"]   = server->host;
+        envMap["SERVER_PORT"]   = numberToString(server->port);
+        envMap["DOCUMENT_ROOT"] = server->root;
     }
-    env_map["CONTENT_LENGTH"] = sizeToStr(_request.getBody().size());
-
-    // 🚀 工业级彩蛋：把客户端传来的所有自定义 HTTP Headers 也全量并网（转换为 HTTP_X 格式）
-    // 比如客户端传了 "X-User-Id: 42"，Python 里就能通过 os.environ['HTTP_X_USER_ID'] 跨界读取！
-    // 注：此处可根据你的 Request 类是否有迭代 Headers 的接口来决定是否遍历。
-
-    // 2. 物理开凿：在堆上开辟二维指针阵列
-    // 大小为 env_map.size() + 1，多出来的那一个格用来放 NULL 作为终点站哨兵
-    char **env = static_cast<char **>(std::malloc((env_map.size() + 1) * sizeof(char *)));
-    if (env == NULL)
+    else
     {
-        return NULL;
+        envMap["SERVER_NAME"]   = "localhost";
+        envMap["SERVER_PORT"]   = "8080";
+        envMap["DOCUMENT_ROOT"] = "./www";
     }
 
-    // 3. 逐条拓印灌入
+    // 4. 📦 HTTP Header 自动透传 (如 Content-Type, Content-Length 及自定义 Header)
+    // 根据 CGI 规范，所有 HTTP 请求头需转为 HTTP_ 前缀大写下划线形式
+    std::string contentType;
+    if (_request.getHeader("content-type", contentType))
+    {
+        envMap["CONTENT_TYPE"] = contentType;
+    }
+
+    std::string contentLength;
+    if (_request.getHeader("content-length", contentLength))
+    {
+        envMap["CONTENT_LENGTH"] = contentLength;
+    }
+
+    // 可选：透传 HTTP_USER_AGENT, HTTP_COOKIE 等
+    std::string cookie;
+    if (_request.getHeader("cookie", cookie))
+    {
+        envMap["HTTP_COOKIE"] = cookie;
+    }
+
+    // 5. 🧱 将 map 转换并分配为 char** 二维指针矩阵 (传递给 execve)
+    char **env = new char*[envMap.size() + 1];
     size_t i = 0;
-    std::map<std::string, std::string>::const_iterator it = env_map.begin();
-    while (it != env_map.end())
+    for (std::map<std::string, std::string>::const_iterator it = envMap.begin();
+         it != envMap.end(); ++it)
     {
-        env[i] = createEnvString(it->first, it->second);
-        // 如果中间某一条物理内存申请爆雷，需要启动紧急熔断清理（防止半闭环泄露）
-        if (env[i] == NULL)
-        {
-            while (i > 0)
-            {
-                std::free(env[--i]);
-            }
-            std::free(env);
-            return NULL;
-        }
-        ++it;
+        std::string envStr = it->first + "=" + it->second;
+        env[i] = new char[envStr.size() + 1];
+        std::strcpy(env[i], envStr.c_str());
         ++i;
     }
-
-    // 🎯 放置终点站最高防线哨兵
-    env[i] = NULL;
+    env[i] = NULL; // NULL 结尾哨兵
 
     return env;
 }
