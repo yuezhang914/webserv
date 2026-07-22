@@ -317,8 +317,6 @@ void ServerManager::cleanupCgiResources(Connection *conn)
     conn->cgi_started_at = 0;
 }
 
-
-
 /*
 帮助函数：一键处置 CGI 失败/熔断（如 500、502）
 完成全量管道销毁、杀进程、装填错误 Response 并重置客户端事件为 POLLOUT
@@ -330,32 +328,25 @@ void ServerManager::failCgi(Connection *conn, int statusCode)
 
     int clientFd = conn->socket->getFd();
 
-    // 1. 一键关闭读写管道
-    this->closeCgiWritePipe(conn);
-    this->closeCgiReadPipe(conn);
-
-    // 2. 清空脏缓存
-    std::string().swap(conn->cgi_output_buffer);
-    std::string().swap(conn->write_buffer);
-
-    // 3. 强行 KILL 暴走/异常的子进程并重置
+    // 1. 强行 KILL 暴走/异常的子进程（防止卡死 CPU）
     if (conn->cgi_pid > 0)
     {
         ::kill(conn->cgi_pid, SIGKILL);
     }
-    this->releaseCgiProcess(conn);
 
-    // 4. 重装错误报文并标记发完即断
+    // 2. 🧹 一键释放物理资源：
+    this->cleanupCgiResources(conn);
+
+    // 3. 清空脏缓存
+    std::string().swap(conn->cgi_output_buffer);
+    std::string().swap(conn->write_buffer);
+
+    // 4. 重装 HTTP 错误报文（如 500 / 502 / 504）并标记发完即断
     conn->response.createResponse(statusCode, "CGI Execution Failed", conn->config.error_pages);
     conn->write_buffer = conn->response.responseToString();
     conn->close_after_write = true;
 
-    // 5. 复位 CGI 标志位
-    conn->is_cgi = false;
-    conn->cgi_body_bytes_sent = 0;
-    conn->cgi_started_at = 0;
-
-    // 6. 激活客户端 POLLOUT 发货
+    // 5. 激活客户端 POLLOUT 发货，向浏览器推送错误响应
     this->setClientEvents(clientFd, POLLOUT);
 }
 
@@ -411,7 +402,7 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
 
         if (bytesRead > 0)
         {
-            // 💡 🎯 【问题 19 卡尺 + 问题 20 failCgi 一键熔断】
+            // 【问题 19 卡尺 + 问题 20 failCgi 一键熔断】
             if (conn->cgi_output_buffer.size() + static_cast<size_t>(bytesRead) > CGI_MAX_OUTPUT_SIZE)
             {
                 std::cerr << "[CGI Reader] Error: CGI output exceeded limit! Force 502." << std::endl;
@@ -422,7 +413,7 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
             conn->cgi_output_buffer.append(buffer, static_cast<size_t>(bytesRead));
             continue;
         }
-        else if (bytesRead == 0) // 🎯 【问题 20 黄金 EOF 清理顺序】
+        else if (bytesRead == 0) // EOF 清理顺序
         {
             std::cout << "[CGI Reader] Reached EOF for pipe fd " << cgiReadFd << "." << std::endl;
 
@@ -440,7 +431,7 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
             std::string().swap(conn->write_buffer);
 
             conn->write_buffer = cgiResponse.responseToString();
-            conn->close_after_write = cgiResponse.shouldCloseConnection();
+            conn->close_after_write = true;
 
             // 4. 非阻塞回收子进程 (WNOHANG)
             this->releaseCgiProcess(conn);
@@ -448,7 +439,7 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
             // 5. 复位 CGI 状态与计数器
             conn->is_cgi = false;
             conn->cgi_body_bytes_sent = 0;
-            conn->cgi_started_at = 0; // 💡 正常完成，重置时间戳
+            conn->cgi_started_at = 0; // 正常完成，重置时间戳
 
             // 6. 切换客户端事件为 POLLOUT 准备发货
             this->setClientEvents(clientFd, POLLOUT);
