@@ -11,8 +11,7 @@ class ClientSocket
 private:
     int _fd;
 
-    // 自洗非阻塞（剥夺阻塞特权）
-    void setNonBlocking();
+   
     // 禁用拷贝，防止 FD 遭遇多重析构 close
     ClientSocket(const ClientSocket &);
     ClientSocket &operator=(const ClientSocket &);
@@ -32,6 +31,9 @@ public:
 
     // 核心动作 3：底层无 errno 依赖物理喷吐
     ssize_t write(const std::string &data) const;
+
+     // 自洗非阻塞（剥夺阻塞特权）
+    void setNonBlocking();
 
     // 核心动作 4：主动断开
     void closeFd();
