@@ -574,6 +574,7 @@ void ServerManager::failCgiReadPipe(int cgiReadFd)
     std::map<int, int>::iterator it = this->_cgi_read_fd_to_client_map.find(cgiReadFd);
     if (it == this->_cgi_read_fd_to_client_map.end())
     {
+        // 孤儿 FD，不在映射表中：直接注销 poll 并关闭
         this->eraseFdFromPoll(cgiReadFd);
         ::close(cgiReadFd);
         return;
@@ -581,14 +582,15 @@ void ServerManager::failCgiReadPipe(int cgiReadFd)
 
     int clientFd = it->second;
     std::map<int, Connection *>::iterator connIt = this->_connections.find(clientFd);
+
     if (connIt != this->_connections.end() && connIt->second != NULL)
     {
-        // 💡 直接复用问题 20 打造的原子熔断神器 failCgi(500)！
+        // 💡 客户端完好：调用 failCgi(502)，内部会自动调用 closeCgiReadPipe(conn)
         this->failCgi(connIt->second, 502);
     }
     else
     {
-        // 客户端已失效，纯粹清理管道
+        // 必须手动擦除 map 映射、注销 poll 并关闭 fd
         this->eraseFdFromPoll(cgiReadFd);
         this->_cgi_read_fd_to_client_map.erase(it);
         ::close(cgiReadFd);
@@ -763,13 +765,13 @@ void ServerManager::reapFinishedCgiChildren()
             {
                 std::cout << "[CGI Reaper] Deferred reap success for PID " << conn->cgi_pid << std::endl;
                 conn->cgi_pid = -1;
-                conn->is_cgi = false;
+    
             }
             else if (result < 0)
             {
                 // 出错或找不到进程，重置 pid
                 conn->cgi_pid = -1;
-                conn->is_cgi = false;
+        
             }
             // 如果 result == 0，说明还没退出，继续留在 map 中，等待下一轮 poll 探测
         }
