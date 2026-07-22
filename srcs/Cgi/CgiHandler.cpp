@@ -34,6 +34,30 @@ static std::string baseName(const std::string &path)
 }
 
 /*
+辅助函数：安全配置父进程保留的管道 FD（设置 O_NONBLOCK 和 FD_CLOEXEC）
+返回：成功返回 true，任何一步 fcntl 失败均返回 false
+*/
+static bool configureParentPipeFd(int fd)
+{
+    int statusFlags = fcntl(fd, F_GETFL, 0);
+    if (statusFlags < 0)
+        return false;
+
+    if (fcntl(fd, F_SETFL, statusFlags | O_NONBLOCK) < 0)
+        return false;
+
+    int descriptorFlags = fcntl(fd, F_GETFD, 0);
+    if (descriptorFlags < 0)
+        return false;
+
+    // 💡 注意：先 F_GETFD 再按位或，严防覆盖原有的 descriptor flags！
+    if (fcntl(fd, F_SETFD, descriptorFlags | FD_CLOEXEC) < 0)
+        return false;
+
+    return true;
+}
+
+/*
 函数用途：安全裂变子进程（Fork），通过双向物理管道重定向焊接，非阻塞、高安全、净空级地拉起外部 CGI 脚本（如 Python 进程）。
 参数与变量：
 - fds (局部资产结构体)：CgiFds，打包承载最终并网回传给大管家的“管道读端”、“管道写端”及“子进程 PID”的核心资产包。
@@ -72,14 +96,16 @@ CgiFds CgiHandler::async_launch()
         return fds;
     }
 
-    // 2. 将主进程留下的管道读写端设置为【非阻塞】与【执行时自动关闭 FD_CLOEXEC】
-    int fl1 = fcntl(pipe_to_parent[0], F_GETFL, 0);
-    fcntl(pipe_to_parent[0], F_SETFL, fl1 | O_NONBLOCK);
-    fcntl(pipe_to_parent[0], F_SETFD, FD_CLOEXEC);
-
-    int fl2 = fcntl(pipe_to_child[1], F_GETFL, 0);
-    fcntl(pipe_to_child[1], F_SETFL, fl2 | O_NONBLOCK);
-    fcntl(pipe_to_child[1], F_SETFD, FD_CLOEXEC);
+    // 2. 将主进程留下的管道读写端设置为【非阻塞】与【FD_CLOEXEC】
+    if (!configureParentPipeFd(pipe_to_parent[0]) || !configureParentPipeFd(pipe_to_child[1]))
+    {
+        std::cerr << "[CGI] Error: configureParentPipeFd failed." << std::endl;
+        close(pipe_to_parent[0]);
+        close(pipe_to_parent[1]);
+        close(pipe_to_child[0]);
+        close(pipe_to_child[1]);
+        return fds;
+    }
 
     // 3. 裂变子进程
     fds.pid = fork();
@@ -94,52 +120,49 @@ CgiFds CgiHandler::async_launch()
 
     if (fds.pid == 0) // ================== 子进程物理空间 ==================
     {
-        // 1. 关掉完全属于父进程的两个管道端
+        // 1. 关闭完全属于父进程的两个管道端
         close(pipe_to_parent[0]);
         close(pipe_to_child[1]);
 
-        // 2. 🪓 物理清场：关闭除了 pipe_to_child[0] 和 pipe_to_parent[1] 之外所有 >= 3 的 FD
-        long fd_limit = sysconf(_SC_OPEN_MAX);
-        if (fd_limit < 0)
-            fd_limit = 1024;
-
-        for (int current_fd = 3; current_fd < fd_limit; ++current_fd)
-        {
-            // 💡 关键防御：绝不能把等会儿要 dup2 用到的两个物理管道 FD 给提前关掉了！
-            if (current_fd != pipe_to_child[0] && current_fd != pipe_to_parent[1])
-            {
-                close(current_fd);
-            }
-        }
-
-        // 3. 🔩 黄金焊接：精准重定向至 stdin (0) 与 stdout (1)
+        // 2. 🔩 黄金焊接：精准重定向至 stdin (0) 与 stdout (1)
         if (pipe_to_child[0] != STDIN_FILENO)
         {
-            dup2(pipe_to_child[0], STDIN_FILENO);
+            if (dup2(pipe_to_child[0], STDIN_FILENO) < 0)
+            {
+                std::cerr << "[CGI] Error: dup2 STDIN failed." << std::endl;
+                close(pipe_to_child[0]);
+                close(pipe_to_parent[1]);
+                exit(127); // 💡 合规替换：使用白名单允许的 exit()
+            }
             close(pipe_to_child[0]); // 焊接完后释放原始描述符
         }
+
         if (pipe_to_parent[1] != STDOUT_FILENO)
         {
-            dup2(pipe_to_parent[1], STDOUT_FILENO);
+            if (dup2(pipe_to_parent[1], STDOUT_FILENO) < 0)
+            {
+                std::cerr << "[CGI] Error: dup2 STDOUT failed." << std::endl;
+                close(pipe_to_parent[1]);
+                exit(127); // 💡 合规替换：使用白名单允许的 exit()
+            }
             close(pipe_to_parent[1]); // 焊接完后释放原始描述符
         }
 
-        // 💡 4. 🎯 【核心升级：物理切换工作目录】
+        // 3. 物理切换工作目录
         std::string scriptDirectory = directoryName(_script_path);
         std::string scriptName = baseName(_script_path);
 
-        // 切换到脚本所在的物理目录
         if (chdir(scriptDirectory.c_str()) != 0)
         {
             std::cerr << "[CGI] Error: Failed to chdir to " << scriptDirectory << std::endl;
-            _exit(127); // 切换目录失败，当场安全退出
+            exit(127);
         }
 
-        // 5. 组装环境变量
+        // 4. 组装环境变量
         char **env = _buildEnvironment();
         if (env == NULL)
         {
-            _exit(127);
+            exit(127);
         }
 
         // 5. 弹射组装
@@ -147,8 +170,6 @@ CgiFds CgiHandler::async_launch()
 
         if (!_interpreter_path.empty())
         {
-            // 💡 方案 A：有物理解释器（如 /usr/bin/python3 test.py）
-            // 切换目录后，直接把文件名 scriptName 传给解释器，解释器会在当前目录下完美找到它！
             args[0] = const_cast<char *>(_interpreter_path.c_str());
             args[1] = const_cast<char *>(scriptName.c_str());
             args[2] = NULL;
@@ -157,8 +178,6 @@ CgiFds CgiHandler::async_launch()
         }
         else
         {
-            // 💡 方案 B：直接执行脚本（如 ./test.py）
-            // 切换目录后，加上 "./" 前缀确保 Linux execve 可以在当前目录下定位可执行文件！
             std::string executable = "./" + scriptName;
 
             args[0] = const_cast<char *>(executable.c_str());
@@ -167,9 +186,9 @@ CgiFds CgiHandler::async_launch()
             ::execve(args[0], args, env);
         }
 
-        // 如果 execve 穿透，说明弹射失败
+        // ❌ 如果 execve 穿透到了这里，说明弹射失败
         _freeEnvironment(env);
-        _exit(127);
+        exit(127); // 💡 合规替换：使用白名单允许的 exit()
     }
 
     // ================== 主进程大管家车间 ==================
@@ -182,7 +201,7 @@ CgiFds CgiHandler::async_launch()
     fds.write_fd = pipe_to_child[1];
 
     return fds;
-}
+}\\\
 
 
 /*
@@ -228,8 +247,10 @@ char **CgiHandler::_buildEnvironment() const
         envMap["DOCUMENT_ROOT"] = "./www";
     }
 
-    // 4. 📦 HTTP Header 自动透传 (如 Content-Type, Content-Length 及自定义 Header)
-    // 根据 CGI 规范，所有 HTTP 请求头需转为 HTTP_ 前缀大写下划线形式
+    // 4. 📦 HTTP Header 自动透传 (RFC 3875 映射)
+    // 根据 CGI 规范：Content-Type 和 Content-Length 无 HTTP_ 前缀，其他 Header 一律加 HTTP_ 前缀并转大写下划线
+    
+    // 4.1 特例 Header（直接映射）
     std::string contentType;
     if (_request.getHeader("content-type", contentType))
     {
@@ -242,11 +263,32 @@ char **CgiHandler::_buildEnvironment() const
         envMap["CONTENT_LENGTH"] = contentLength;
     }
 
-    // 可选：透传 HTTP_USER_AGENT, HTTP_COOKIE 等
-    std::string cookie;
-    if (_request.getHeader("cookie", cookie))
+    // 4.2 常规 HTTP Header 转换为 HTTP_ 前缀形式
+    std::string headerValue;
+
+    if (_request.getHeader("cookie", headerValue))
     {
-        envMap["HTTP_COOKIE"] = cookie;
+        envMap["HTTP_COOKIE"] = headerValue;
+    }
+
+    if (_request.getHeader("host", headerValue))
+    {
+        envMap["HTTP_HOST"] = headerValue;
+    }
+
+    if (_request.getHeader("user-agent", headerValue))
+    {
+        envMap["HTTP_USER_AGENT"] = headerValue;
+    }
+
+    if (_request.getHeader("accept", headerValue))
+    {
+        envMap["HTTP_ACCEPT"] = headerValue;
+    }
+
+    if (_request.getHeader("referer", headerValue))
+    {
+        envMap["HTTP_REFERER"] = headerValue;
     }
 
     // 5. 🧱 将 map 转换并分配为 char** 二维指针矩阵 (传递给 execve)
@@ -264,7 +306,6 @@ char **CgiHandler::_buildEnvironment() const
 
     return env;
 }
-
 /*
 函数用途：作为底层堆内存的战后善后总务车间，顺藤摸瓜点验并全量物理销毁前置生成的 C 风格二维环境变量阵列，彻底回收内存主权。
 参数与变量：
