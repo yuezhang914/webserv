@@ -153,19 +153,30 @@ void ServerManager::prePollCleanup()
 */
 int ServerManager::executePoll(int &retries)
 {
-    int ret = poll(&this->_poll_fds[0], this->_poll_fds.size(), -1);
+    int ret = ::poll(&this->_poll_fds[0], this->_poll_fds.size(), 1000);
 
     if (ret < 0)
     {
+        // 💡 1. 显式捕获 EINTR 信号打断：直接算作正常暂态，重置/不计入致命错误 retry
+        if (errno == EINTR)
+        {
+            return 0; // 信号打断，安全跳过，下一轮继续 poll
+        }
+
+        // 💡 2. 真正的其他致命底层 poll 错误（如 EFAULT, EINVAL），触发弹性重试
         if (retries < 3)
         {
+            std::cerr << "[executePoll] Warning: poll() system call failed with errno "
+                      << errno << ", retrying (" << retries + 1 << "/3)..." << std::endl;
             retries++;
             return 0;
         }
-        return -1;
+
+        std::cerr << "[executePoll] Fatal: poll() failed consecutively over limit! Terminating main loop." << std::endl;
+        return -1; // 连续 3 次致命错误，彻底熔断
     }
 
-    retries = 0; // 成功捕获事件，物理复位防崩溃计数器
+    retries = 0; // 成功捕获事件或超时，物理复位防崩溃计数器
     return ret;
 }
 
@@ -183,64 +194,33 @@ int ServerManager::executePoll(int &retries)
 */
 void ServerManager::registerFdToPoll(int fd, short events)
 {
+    if (fd < 0)
+    {
+        std::cerr << "[ServerManager] Error: Attempted to register invalid negative FD: " << fd << std::endl;
+        return;
+    }
+
+    // 1. 防重复注册防线：检查该 FD 是否已经在 _poll_fds 名册中
+    for (size_t i = 0; i < this->_poll_fds.size(); ++i)
+    {
+        if (this->_poll_fds[i].fd == fd)
+        {
+            std::cout << "[ServerManager] Notice: FD " << fd << " already registered in poll tree. Updating events instead." << std::endl;
+            this->_poll_fds[i].events = events; // 存在则直接覆写事件掩码
+            this->_poll_fds[i].revents = 0;
+            return;
+        }
+    }
+
+    // 2. 正常入籍
     struct pollfd pfd;
     pfd.fd = fd;
-    pfd.events = events; // 传入 POLLIN
-    pfd.revents = 0;     // 清空内核回执，防止幽灵触发
+    pfd.events = events; // 传入 POLLIN / POLLOUT
+    pfd.revents = 0;     // 清空内核回执，彻底杜绝幽灵触发
 
     this->_poll_fds.push_back(pfd); // 正式入籍大循环名册
 
-    std::cout << "[ServerManager] FD " << fd << " successfully registered to poll tree." << std::endl;
-}
-
-/*
-函数用途：作为 CGI 战后善后总务车间，专职以非阻塞姿态回收子进程遗骸、物理注销残留写端管道，并复位连接的 CGI 状态位。
-参数与变量：
-- conn (指针参数)：Connection*，当前正在处理 CGI 交互的客户端物理连接实体。
-- status (局部变量)：int，用于接收 waitpid 提取出的子进程退出状态码。
-- ret (局部变量)：pid_t，waitpid 系统调用的物理回执，用于判定子进程是否已经死亡。
-实现逻辑：
-1. 🧹 管道残渣清场：校验并物理关闭未耗尽或遗留的 POST 写端管道（cgi_write_fd），将其指针恢复为 -1。
-2. 🛡️ 弹性非阻塞收尸（WNOHANG 护盾）：
-   - 调用 waitpid(conn->cgi_pid, &status, WNOHANG)。如果子进程已经顺畅死亡，瞬间回收其 PCB 尸体；
-   - 万一子进程因为某种原因（如死循环、线程挂起）尚未死透（ret == 0），为了绝不卡死主线程的 poll 大闸，当场果断补一枪 ::kill(conn->cgi_pid, SIGKILL) 物理毁灭打击，并再次 waitpid 强制秒级收尸！
-3. 🔄 状态印记复位：将 cgi_pid 归零重置为 -1，并将 is_cgi 标志切回 false，为该 Connection 承接下一轮 HTTP 交互清理好物理赛道。
-*/
-void ServerManager::cleanupCgiResources(Connection *conn)
-{
-    if (conn == NULL)
-        return;
-
-    // 1. 🧹 物理关闭 POST 写端管道（使用统一帮助函数）
-    if (conn->cgi_write_fd != -1)
-    {
-        this->closeCgiWritePipe(conn);
-    }
-
-    // 2. 🪓 纯非阻塞回收子进程遗骸
-    if (conn->cgi_pid > 0)
-    {
-        int status = 0;
-        // 💡 必须全程使用 WNOHANG 护盾！
-        pid_t ret = ::waitpid(conn->cgi_pid, &status, WNOHANG);
-
-        if (ret == conn->cgi_pid || ret < 0)
-        {
-            // 子进程已正常退出或已不存在，重置 PID
-            std::cout << "[CGI Process] Child PID " << conn->cgi_pid << " reaped instantly." << std::endl;
-            conn->cgi_pid = -1;
-        }
-        else if (ret == 0)
-        {
-            // 💡 核心改动：ret == 0 说明子进程还在后台运行。
-            // 绝不杀它，也绝不阻塞！保留 conn->cgi_pid，让它自然运行，
-            // 稍后由 reapFinishedCgiChildren() 在主循环每轮 poll() 后自动收尸。
-            std::cout << "[CGI Process] Child PID " << conn->cgi_pid << " still active, deferred reaping." << std::endl;
-        }
-    }
-
-    // 3. 🔄 彻底复位 CGI 状态标定
-    conn->is_cgi = false;
+    std::cout << "[ServerManager] FD " << fd << " successfully registered to poll tree with events: " << events << std::endl;
 }
 
 /*
@@ -295,6 +275,49 @@ void ServerManager::releaseCgiProcess(Connection *conn)
     }
     // 若 ret == 0 说明仍活跃，保留 cgi_pid 留给 reapFinishedCgiChildren 后台循环回收
 }
+/*
+函数用途：作为 CGI 战后善后总务车间，专职以非阻塞姿态回收子进程遗骸、物理注销残留写端管道，并复位连接的 CGI 状态位。
+参数与变量：
+- conn (指针参数)：Connection*，当前正在处理 CGI 交互的客户端物理连接实体。
+- status (局部变量)：int，用于接收 waitpid 提取出的子进程退出状态码。
+- ret (局部变量)：pid_t，waitpid 系统调用的物理回执，用于判定子进程是否已经死亡。
+实现逻辑：
+1. 管道残渣清场：校验并物理关闭未耗尽或遗留的 POST 写端管道（cgi_write_fd），将其指针恢复为 -1。
+2. 弹性非阻塞收尸（WNOHANG 护盾）：
+   - 调用 waitpid(conn->cgi_pid, &status, WNOHANG)。如果子进程已经顺畅死亡，瞬间回收其 PCB 尸体；
+   - 万一子进程因为某种原因（如死循环、线程挂起）尚未死透（ret == 0），为了绝不卡死主线程的 poll 大闸，当场果断补一枪 ::kill(conn->cgi_pid, SIGKILL) 物理毁灭打击，并再次 waitpid 强制秒级收尸！
+3. 🔄 状态印记复位：将 cgi_pid 归零重置为 -1，并将 is_cgi 标志切回 false，为该 Connection 承接下一轮 HTTP 交互清理好物理赛道。
+*/
+void ServerManager::cleanupCgiResources(Connection *conn)
+{
+    if (conn == NULL)
+        return;
+
+    // 1.物理关闭 POST 写端管道（一键注销 Poll、Map 与 FD）
+    if (conn->cgi_write_fd != -1)
+    {
+        this->closeCgiWritePipe(conn);
+    }
+
+    // 2.物理关闭读端管道（一键注销 Poll、Map 与 FD）
+    if (conn->cgi_read_fd != -1)
+    {
+        this->closeCgiReadPipe(conn);
+    }
+
+    // 3.纯非阻塞回收子进程遗骸 (WNOHANG)
+    if (conn->cgi_pid > 0)
+    {
+        this->releaseCgiProcess(conn);
+    }
+
+    // 4. 彻底归零并复位所有 CGI 连带账本状态
+    conn->is_cgi = false;
+    conn->cgi_body_bytes_sent = 0;
+    conn->cgi_started_at = 0;
+}
+
+
 
 /*
 帮助函数：一键处置 CGI 失败/熔断（如 500、502）
