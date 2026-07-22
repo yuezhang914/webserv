@@ -6,6 +6,34 @@ CgiHandler::CgiHandler(const Request &request, const std::string &script_path, c
 CgiHandler::~CgiHandler() {}
 
 /*
+辅助函数：切出路径中的目录部分（Directory Name）
+例如：/var/www/cgi-bin/test.py -> /var/www/cgi-bin
+     test.py                  -> .
+*/
+static std::string directoryName(const std::string &path)
+{
+    size_t pos = path.find_last_of('/');
+    if (pos == std::string::npos)
+        return ".";
+    if (pos == 0) // 处理根目录情况 /test.py
+        return "/";
+    return path.substr(0, pos);
+}
+
+/*
+辅助函数：切出路径中的文件名部分（Base Name）
+例如：/var/www/cgi-bin/test.py -> test.py
+     test.py                  -> test.py
+*/
+static std::string baseName(const std::string &path)
+{
+    size_t pos = path.find_last_of('/');
+    if (pos == std::string::npos)
+        return path;
+    return path.substr(pos + 1);
+}
+
+/*
 函数用途：安全裂变子进程（Fork），通过双向物理管道重定向焊接，非阻塞、高安全、净空级地拉起外部 CGI 脚本（如 Python 进程）。
 参数与变量：
 - fds (局部资产结构体)：CgiFds，打包承载最终并网回传给大管家的“管道读端”、“管道写端”及“子进程 PID”的核心资产包。
@@ -96,7 +124,18 @@ CgiFds CgiHandler::async_launch()
             close(pipe_to_parent[1]); // 焊接完后释放原始描述符
         }
 
-        // 4. 组装环境变量
+        // 💡 4. 🎯 【核心升级：物理切换工作目录】
+        std::string scriptDirectory = directoryName(_script_path);
+        std::string scriptName = baseName(_script_path);
+
+        // 切换到脚本所在的物理目录
+        if (chdir(scriptDirectory.c_str()) != 0)
+        {
+            std::cerr << "[CGI] Error: Failed to chdir to " << scriptDirectory << std::endl;
+            _exit(127); // 切换目录失败，当场安全退出
+        }
+
+        // 5. 组装环境变量
         char **env = _buildEnvironment();
         if (env == NULL)
         {
@@ -104,22 +143,25 @@ CgiFds CgiHandler::async_launch()
         }
 
         // 5. 弹射组装
-        char *script_path_c = const_cast<char *>(_script_path.c_str());
         char *args[3];
 
         if (!_interpreter_path.empty())
         {
-            // 💡 方案 A：配置文件指定解释器（/usr/bin/python3 script.py）
+            // 💡 方案 A：有物理解释器（如 /usr/bin/python3 test.py）
+            // 切换目录后，直接把文件名 scriptName 传给解释器，解释器会在当前目录下完美找到它！
             args[0] = const_cast<char *>(_interpreter_path.c_str());
-            args[1] = script_path_c;
+            args[1] = const_cast<char *>(scriptName.c_str());
             args[2] = NULL;
 
             ::execve(args[0], args, env);
         }
         else
         {
-            // 💡 方案 B：直接弹射脚本本身
-            args[0] = script_path_c;
+            // 💡 方案 B：直接执行脚本（如 ./test.py）
+            // 切换目录后，加上 "./" 前缀确保 Linux execve 可以在当前目录下定位可执行文件！
+            std::string executable = "./" + scriptName;
+
+            args[0] = const_cast<char *>(executable.c_str());
             args[1] = NULL;
 
             ::execve(args[0], args, env);
