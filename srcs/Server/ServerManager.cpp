@@ -238,30 +238,32 @@ void ServerManager::_cleanupCgiResources(Connection *conn)
     if (conn == NULL)
         return;
 
-    // 1. 🧹 物理关闭 POST 写端管道残渣（若未关闭）
+    // 1. 🧹 物理关闭 POST 写端管道（使用统一帮助函数）
     if (conn->cgi_write_fd != -1)
     {
-        ::close(conn->cgi_write_fd);
-        conn->cgi_write_fd = -1;
+        this->closeCgiWritePipe(conn);
     }
 
-    // 2. 🪓 铁血回收子进程遗骸（带 WNOHANG 非阻塞护盾）
+    // 2. 🪓 纯非阻塞回收子进程遗骸
     if (conn->cgi_pid > 0)
     {
         int status = 0;
-        // 💡 WNOHANG 护盾：尝试非阻塞收尸，绝不阻塞主线程
+        // 💡 必须全程使用 WNOHANG 护盾！
         pid_t ret = ::waitpid(conn->cgi_pid, &status, WNOHANG);
 
-        if (ret == 0)
+        if (ret == conn->cgi_pid || ret < 0)
         {
-            // 🚨 极端防御：子进程关了管道但还没死透！
-            // 发送物理毁灭打击 SIGKILL，补一枪秒级收尸
-            ::kill(conn->cgi_pid, SIGKILL);
-            ::waitpid(conn->cgi_pid, NULL, 0); // 已经被 SIGKILL 必死无疑，瞬间收尸
+            // 子进程已正常退出或已不存在，重置 PID
+            std::cout << "[CGI Process] Child PID " << conn->cgi_pid << " reaped instantly." << std::endl;
+            conn->cgi_pid = -1;
         }
-
-        // 标记子进程 PID 已经物理注销
-        conn->cgi_pid = -1;
+        else if (ret == 0)
+        {
+            // 💡 核心改动：ret == 0 说明子进程还在后台运行。
+            // 绝不杀它，也绝不阻塞！保留 conn->cgi_pid，让它自然运行，
+            // 稍后由 reapFinishedCgiChildren() 在主循环每轮 poll() 后自动收尸。
+            std::cout << "[CGI Process] Child PID " << conn->cgi_pid << " still active, deferred reaping." << std::endl;
+        }
     }
 
     // 3. 🔄 彻底复位 CGI 状态标定
@@ -641,6 +643,35 @@ void ServerManager::dispatchEvents()
     }
 }
 
+void ServerManager::reapFinishedCgiChildren()
+{
+    for (std::map<int, Connection *>::iterator it = this->_connections.begin();
+         it != this->_connections.end(); ++it)
+    {
+        Connection *conn = it->second;
+        if (conn != NULL && conn->cgi_pid > 0)
+        {
+            int status = 0;
+            // 非阻塞探测子进程状态
+            pid_t result = ::waitpid(conn->cgi_pid, &status, WNOHANG);
+
+            if (result == conn->cgi_pid)
+            {
+                std::cout << "[CGI Reaper] Deferred reap success for PID " << conn->cgi_pid << std::endl;
+                conn->cgi_pid = -1;
+                conn->is_cgi = false;
+            }
+            else if (result < 0)
+            {
+                // 出错或找不到进程，重置 pid
+                conn->cgi_pid = -1;
+                conn->is_cgi = false;
+            }
+            // 如果 result == 0，说明还没退出，继续留在 map 中，等待下一轮 poll 探测
+        }
+    }
+}
+
 /*
 函数用途：物理启动 Webserv 核心主循环大闸（The Matrix），作为永动机总动力引擎，全天候驱动雷达轮询与业务分流。
 参数与变量：
@@ -670,5 +701,6 @@ void ServerManager::run()
             break;
 
         this->dispatchEvents();
+        this->reapFinishedCgiChildren();
     }
 }
