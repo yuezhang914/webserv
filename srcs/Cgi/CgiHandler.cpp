@@ -201,7 +201,7 @@ CgiFds CgiHandler::async_launch()
     fds.write_fd = pipe_to_child[1];
 
     return fds;
-}\\\
+}
 
 
 /*
