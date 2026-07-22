@@ -53,16 +53,16 @@ private:
 
     void registerFdToPoll(int fd, short events);
 
-    void enableClientWriteEvent(int clientFd);
+   
 
-    // 🚀 【CGI 并网工具】：异步分流与收割车间
-    bool isCgiPipeFd(int fd);                               // 侦测触发的是不是 CGI 管道
+    // 【CGI 并网工具】：异步分流与收割车间
+    // 侦测触发的是不是 CGI 管道
     void handleCgiPipeRead(int cgiReadFd, size_t poll_idx); // 异步收割 Python 输出
 
     void handleCgiPipeWrite(int cgiWriteFd, size_t poll_idx);
-    void _cleanupCgiResources(Connection *conn);
+    void cleanupCgiResources(Connection *conn);
     void cleanupConnectionCgi(Connection *conn);
-    void _eraseFdFromPoll(int targetFd);
+    void eraseFdFromPoll(int targetFd);
     void setClientEvents(int clientFd, short events);
 
     // 💡 新增：统一回收 CGI 写端管道资源的原子帮助函数

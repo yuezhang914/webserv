@@ -294,7 +294,7 @@ void ServerManager::handleClientWrite(int clientFd, size_t poll_index)
 3. 🪓 物理剜除与缩容：一旦匹配到 this->_poll_fds[i].fd == targetFd，立刻调用 vector::erase(begin() + i)
    将其从内存轨道上彻底剔除并压缩阵列，随后断开循环，向大管家交割绝对干净的雷达网时空！
 */
-void ServerManager::_eraseFdFromPoll(int targetFd)
+void ServerManager::eraseFdFromPoll(int targetFd)
 {
     if (targetFd == -1)
         return;
@@ -318,7 +318,7 @@ void ServerManager::cleanupConnectionCgi(Connection *conn)
     // 清理读端管道（若挂在 poll_fds 上，也需在调用处或此处清除，防悬空）
     if (conn->cgi_read_fd != -1)
     {
-        this->_eraseFdFromPoll(conn->cgi_read_fd);
+        this->eraseFdFromPoll(conn->cgi_read_fd);
         this->_cgi_read_fd_to_client_map.erase(conn->cgi_read_fd);
         ::close(conn->cgi_read_fd);
         conn->cgi_read_fd = -1;
@@ -327,7 +327,7 @@ void ServerManager::cleanupConnectionCgi(Connection *conn)
     // 清理写端管道
     if (conn->cgi_write_fd != -1)
     {
-        this->_eraseFdFromPoll(conn->cgi_write_fd);
+        this->eraseFdFromPoll(conn->cgi_write_fd);
         this->_cgi_write_fd_to_client_map.erase(conn->cgi_write_fd);
         ::close(conn->cgi_write_fd);
         conn->cgi_write_fd = -1;
