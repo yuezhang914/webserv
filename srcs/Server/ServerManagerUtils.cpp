@@ -1,5 +1,5 @@
 #include "Webserv.hpp"
-
+#include "SessionStore.hpp"
 #include "CgiHandler.hpp"
 /**
  * 函数：ServerManager::isListenFd
@@ -98,14 +98,22 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
     if (status == REQUEST_OK)
     {
         std::cout << "[ServerManager] Request parsed successfully for FD " << clientFd << std::endl;
-        conn->read_buffer.erase(0, consumed);
-        Response res = buildResponse(conn->request);
+        conn->read_buffer.erase(0, consumed);      
 
+        // 💡 冲突解决：完美缝合 SessionStore 机制！
+        static SessionStore sessionStore;
+        Response res = buildResponse(conn->request, sessionStore);
+        
         // 3. 检查这到底是不是一个隐藏的 CGI 请求
         std::string script_path;
+        std::string interpreter_path; // 👈 补齐变量声明
+
         if (res.getHeader("X-Internal-CGI-Path", script_path))
         {
-            CgiHandler cgi(conn->request, script_path, res.getHeader("X-Internal-CGI-Path", interpreter_path));
+            // 💡 语法修补：安全提取 X-Internal-CGI-Interpreter 对应的解释器路径
+            res.getHeader("X-Internal-CGI-Interpreter", interpreter_path);
+
+            CgiHandler cgi(conn->request, script_path, interpreter_path);
             CgiFds fds = cgi.async_launch();
 
             if (fds.pid < 0 || fds.read_fd < 0 || fds.write_fd < 0)
