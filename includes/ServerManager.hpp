@@ -59,6 +59,10 @@ private:
 
     // 💡 新增：统一回收 CGI 写端管道资源的原子帮助函数
     void closeCgiWritePipe(Connection *connection);
+    void closeCgiReadPipe(Connection *conn);
+    void releaseCgiProcess(Connection *conn);
+    void failCgi(Connection *conn, int statusCode);
+
 
     void reapFinishedCgiChildren();
 
