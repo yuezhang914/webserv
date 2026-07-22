@@ -55,8 +55,9 @@ private:
     void _cleanupCgiResources(Connection *conn);
     void cleanupConnectionCgi(Connection *conn);
     void _eraseFdFromPoll(int targetFd);
+    void setClientEvents(int clientFd, short events);
 
-    public :
+public:
     // 构造与析构
     ServerManager(const std::vector<ServerConfig> &configs);
     ~ServerManager();

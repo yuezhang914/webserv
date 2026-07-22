@@ -1,6 +1,5 @@
 #include "Webserv.hpp"
 
-
 #include <iostream>
 
 // 构造函数前面绝对没有任何 void 或者是返回值类型！
@@ -260,7 +259,7 @@ void ServerManager::_cleanupCgiResources(Connection *conn)
             ::kill(conn->cgi_pid, SIGKILL);
             ::waitpid(conn->cgi_pid, NULL, 0); // 已经被 SIGKILL 必死无疑，瞬间收尸
         }
-        
+
         // 标记子进程 PID 已经物理注销
         conn->cgi_pid = -1;
     }
@@ -290,12 +289,14 @@ void ServerManager::_cleanupCgiResources(Connection *conn)
 */
 void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
 {
+    (void)poll_idx; // 💡 使用按 FD 值精确擦除，彻底摒弃可能失效的 poll_idx 索引
+
     // 1. 【顺藤摸瓜】：反查因果契约
     std::map<int, int>::iterator it = this->_cgi_read_fd_to_client_map.find(cgiReadFd);
     if (it == this->_cgi_read_fd_to_client_map.end())
     {
         ::close(cgiReadFd);
-        this->_poll_fds.erase(this->_poll_fds.begin() + poll_idx);
+        this->_eraseFdFromPoll(cgiReadFd);
         return;
     }
     int clientFd = it->second;
@@ -315,32 +316,20 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
             std::cout << "[CGI Reader] Sucked " << bytesRead << " bytes from pipe fd " << cgiReadFd << " to client " << clientFd << std::endl;
             continue;
         }
-        else if (bytesRead == 0)
+
+        else if (bytesRead == 0) // EOF 闭环
         {
-            // 🏁 3. 子进程吐货完毕（EOF 闭环）
             std::cout << "[CGI Reader] Reached EOF for pipe fd " << cgiReadFd << "." << std::endl;
 
-            // ============================================================
-            //                  黄金清洗并网安全车间 
-            // ============================================================
-            
-            // 💡 纯净组装 Response 实体
             Response cgi_res = buildCgiResponse(conn->request, conn->cgi_output_buffer);
 
-            // 强力清空已用完的物料箱与发件箱旧内存
             std::string().swap(conn->cgi_output_buffer);
             std::string().swap(conn->write_buffer);
 
-            // 💎 临门一脚：将 Response 洗白组装出来的满血高级 HTTP 报文，一次性安全注入发件箱！
+            // 满血报文注入发件箱
             conn->write_buffer = cgi_res.responseToString();
 
-            // 4. 注销并关闭读端管道
-            ::close(cgiReadFd);
-            this->_poll_fds.erase(this->_poll_fds.begin() + poll_idx);
-            this->_cgi_read_fd_to_client_map.erase(it);
-            conn->cgi_read_fd = -1;
-
-            // 💡 物理双保险：连带清场可能残留的 POST 写端管道，严防 poll 雷达网悬空 FD
+            // 💡 1️⃣ 安全注销写端管道（如果有）
             if (conn->cgi_write_fd != -1)
             {
                 this->_eraseFdFromPoll(conn->cgi_write_fd);
@@ -349,13 +338,19 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
                 conn->cgi_write_fd = -1;
             }
 
-            // 5. 资源清理与子进程回收（带 WNOHANG 护盾）
+            // 💡 2️⃣ 安全注销读端管道
+            this->_eraseFdFromPoll(cgiReadFd);
+            this->_cgi_read_fd_to_client_map.erase(it);
+            ::close(cgiReadFd);
+            conn->cgi_read_fd = -1;
+
             this->_cleanupCgiResources(conn);
 
-            // 🚀 货齐了，拉起客户端写事件，下一轮 TICK 完美发货！
-            this->enableClientWriteEvent(clientFd);
-            return; 
+            // 🚀 💡 🎯 【核心闭环：CGI 完成，将客户端重置为 POLLOUT 准备发货！】
+            this->setClientEvents(clientFd, POLLOUT);
+            return;
         }
+
         else
         {
             // bytesRead == -1：遇到了底层的分水岭
@@ -374,13 +369,7 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
             conn->response.createResponse(500, "CGI Read Error", conn->config.error_pages);
             conn->write_buffer = conn->response.responseToString();
 
-            // 物理擦除读端管道
-            ::close(cgiReadFd);
-            this->_poll_fds.erase(this->_poll_fds.begin() + poll_idx);
-            this->_cgi_read_fd_to_client_map.erase(it);
-            conn->cgi_read_fd = -1;
-
-            // 物理连带擦除写端管道
+            // 💡 1️⃣ 安全物理连带擦除写端管道
             if (conn->cgi_write_fd != -1)
             {
                 this->_eraseFdFromPoll(conn->cgi_write_fd);
@@ -389,10 +378,17 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
                 conn->cgi_write_fd = -1;
             }
 
+            // 💡 2️⃣ 安全物理擦除读端管道
+            this->_eraseFdFromPoll(cgiReadFd);
+            this->_cgi_read_fd_to_client_map.erase(it);
+            ::close(cgiReadFd);
+            conn->cgi_read_fd = -1;
+
             // 🪓 统一交由善后车间：斩杀子进程并回收（带 WNOHANG 护盾，无阻塞隐患）
             this->_cleanupCgiResources(conn);
 
-            this->enableClientWriteEvent(clientFd);
+            // 🚀 💡 🎯 【修正：错误分支也统一重置为 POLLOUT】
+            this->setClientEvents(clientFd, POLLOUT);
             return;
         }
     }

@@ -28,6 +28,21 @@ bool ServerManager::isListenFd(int fd)
     return false;
 }
 
+/*
+成员函数：精准重置客户端 FD 的 poll 监听事件（覆盖原 events，而非 |=）
+*/
+void ServerManager::setClientEvents(int clientFd, short events)
+{
+    for (size_t i = 0; i < this->_poll_fds.size(); ++i)
+    {
+        if (this->_poll_fds[i].fd == clientFd)
+        {
+            this->_poll_fds[i].events = events; // 💡 物理覆盖！不带 POLLIN
+            return;
+        }
+    }
+}
+
 /**
  * 函数：ServerManager::handleClientRead
  * 用途：当已建立连接的普通客户端（clientFd）触发读事件（POLLIN）时，调用该函数通过非阻塞循环吞入浏览器发来的 HTTP 裸请求（Raw Request）文本，并负责处理 TCP 粘包/断包问题。
@@ -110,31 +125,25 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
 
         if (res.getHeader("X-Internal-CGI-Path", script_path))
         {
-            // 💡 提取 X-Internal-CGI-Interpreter 对应的解释器路径
             res.getHeader("X-Internal-CGI-Interpreter", interpreter_path);
 
             CgiHandler cgi(conn->request, script_path, interpreter_path);
             CgiFds fds = cgi.async_launch();
 
+            // ❌ CGI 启动失败 500 熔断
             if (fds.pid < 0 || fds.read_fd < 0 || fds.write_fd < 0)
             {
                 std::cerr << "[CGI] Error: Failed to spawn CGI process for client " << clientFd << std::endl;
-
-                // 1. 生成 500 Response 结构
                 conn->response.createResponse(500, "CGI Spawn Failed", conn->config.error_pages);
-
-                // 2. 💡 关键临门一脚：将 Response 序列化为 HTTP 文本，安全注入发件箱 write_buffer！
                 conn->write_buffer = conn->response.responseToString();
-
-                // 3. 标记发完即断（错误响应完关闭连接）
                 conn->close_after_write = true;
 
-                // 4. 激活 POLLOUT，让 handleClientWrite 能在下一轮 TICK 把 500 报错顺畅吐给客户端
-                this->enableClientWriteEvent(clientFd);
+                // 💡 失败时直接激活 POLLOUT 准备发送 500 错误页
+                this->setClientEvents(clientFd, POLLOUT);
                 return;
             }
 
-            // 🎯 【读端专属账本登记】：完备正名并网！
+            // 🎯 【读端账本登记】
             this->_cgi_read_fd_to_client_map[fds.read_fd] = clientFd;
 
             conn->is_cgi = true;
@@ -142,39 +151,38 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
             conn->cgi_pid = fds.pid;
             conn->cgi_body_bytes_sent = 0;
 
-            // 🧹 强力清空旧内存，为本次 CGI 提取开辟绝对干净的物理舱位！
             std::string().swap(conn->cgi_output_buffer);
 
-            // 1️⃣ 读端（CGI 吐数据给父进程）永远注册 POLLIN 监听
+            // 1️⃣ 读端（CGI 管道）永远注册 POLLIN
             this->registerFdToPoll(fds.read_fd, POLLIN);
 
-            // 💡 2️⃣ 🎯 【问题 11 精准修正：按 Body 充沛度决定写端命运】
+            // 2️⃣ 写端（CGI 管道）按需注册
             if (!conn->request.getBody().empty())
             {
-                // 有 Body 需要推给子进程 (如带数据的 POST/PUT)：装填写端，注册 POLLOUT
                 conn->cgi_write_fd = fds.write_fd;
                 this->_cgi_write_fd_to_client_map[fds.write_fd] = clientFd;
                 this->registerFdToPoll(fds.write_fd, POLLOUT);
             }
             else
             {
-                // 无 Body (如 GET、DELETE 或空 Body 的 POST)：父进程当场关闭写端！
-                // 这一关，子进程的 stdin 瞬间触发物理 EOF，彻底封杀 GET 读死锁！
                 ::close(fds.write_fd);
                 conn->cgi_write_fd = -1;
             }
 
-            std::cout << "[⚡ WebServ Core] Client " << clientFd << " successfully split into CGI pipeline (Read FD: " << fds.read_fd << ", Write FD: " << conn->cgi_write_fd << ") under PID " << fds.pid << std::endl;
+            // 💡 3️⃣ 🎯 【核心防线：暂停客户端 Socket 监听，防止 Request 被覆盖！】
+            this->setClientEvents(clientFd, 0);
+
+            std::cout << "[⚡ WebServ Core] Client " << clientFd << " successfully split into CGI pipeline, client read paused." << std::endl;
             return;
         }
         else
         {
-            // 4. 静态、重定向、404/403 资产完美化一，直接并网导出！
+            // 4. 普通静态响应，直接准备发送
             conn->write_buffer = res.responseToString();
-        }
 
-        // 5. 为当前客户端追加 POLLOUT，原有的 POLLIN 读雷达依然全天候保持警惕！
-        this->enableClientWriteEvent(clientFd);
+            // 💡 普通静态响应生成后，也只监听 POLLOUT（发完再恢复 POLLIN）
+            this->setClientEvents(clientFd, POLLOUT);
+        }
     }
     else if (status == REQUEST_INCOMPLETE)
     {
@@ -189,7 +197,7 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
         conn->write_buffer += error_response;
 
         // 在保持原有读管道监控的同时，追加写事件 400 报错
-        this->enableClientWriteEvent(clientFd);
+        this->setClientEvents(clientFd, POLLOUT);
     }
 }
 
