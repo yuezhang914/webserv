@@ -23,6 +23,10 @@ public:
     pid_t cgi_pid;
     size_t cgi_body_bytes_sent;
     std::string cgi_output_buffer;
+    
+// 💡 新增：CGI 启动时间戳标定
+    std::time_t cgi_started_at;
+
 
     Connection();
     Connection(int clientFd, const ServerConfig &srv_cfg);

@@ -18,7 +18,8 @@ Connection::Connection()
       close_after_write(false), is_cgi(false),
       cgi_read_fd(-1), cgi_write_fd(-1), cgi_pid(-1),
       cgi_body_bytes_sent(0),
-      cgi_output_buffer()
+      cgi_output_buffer(),
+      cgi_started_at(0)
 {
 }
 
@@ -27,7 +28,8 @@ Connection::Connection(int clientFd, const ServerConfig &srv_cfg)
     : socket(new ClientSocket(clientFd)), config(srv_cfg), read_buffer(), write_buffer(),
       request(), response(),
       close_after_write(false), is_cgi(false),
-      cgi_read_fd(-1), cgi_write_fd(-1), cgi_pid(-1), cgi_body_bytes_sent(0), cgi_output_buffer()
+      cgi_read_fd(-1), cgi_write_fd(-1), cgi_pid(-1), cgi_body_bytes_sent(0), cgi_output_buffer(),
+      cgi_started_at(0)
 {
 }
 

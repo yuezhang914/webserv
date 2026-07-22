@@ -32,6 +32,14 @@ private:
     std::map<int, int> _cgi_write_fd_to_client_map; // 写端专属：CGI 写 Fd -> Client Fd
     std::vector<struct pollfd> _fds_to_add;         // 暂存箱，封锁 vector 扩容带来的野指针段错误
 
+    // 💡 精准区分读写管道 FD 身份
+    bool isCgiReadFd(int fd) const;
+    bool isCgiWriteFd(int fd) const;
+
+    // 💡 针对管道物理损坏（POLLERR/POLLNVAL）的专属救援车间
+    void failCgiReadPipe(int cgiReadFd);
+    void failCgiWritePipe(int cgiWriteFd);
+
     // 3. 内部私有工具函数
     void setupSockets();                                     // 砸开所有配置的物理端口
     bool isListenFd(int fd);                                 // 判别是监听端口还是普通客户连接
@@ -55,8 +63,20 @@ private:
     void _cleanupCgiResources(Connection *conn);
     void cleanupConnectionCgi(Connection *conn);
     void _eraseFdFromPoll(int targetFd);
+    void setClientEvents(int clientFd, short events);
 
-    public :
+    // 💡 新增：统一回收 CGI 写端管道资源的原子帮助函数
+    void closeCgiWritePipe(Connection *connection);
+    void closeCgiReadPipe(Connection *conn);
+    void releaseCgiProcess(Connection *conn);
+    void failCgi(Connection *conn, int statusCode);
+
+
+    void reapFinishedCgiChildren();
+
+    void enforceCgiTimeouts();
+
+public:
     // 构造与析构
     ServerManager(const std::vector<ServerConfig> &configs);
     ~ServerManager();
