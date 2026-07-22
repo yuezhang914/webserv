@@ -520,7 +520,7 @@ void ServerManager::handleCgiPipeWrite(int cgiWriteFd, size_t poll_idx)
     // 3. 【非阻塞卡尺切片】：每次最多 safe write 4096 字节
     const char *data_ptr = body.data() + conn->cgi_body_bytes_sent;
     size_t remaining = body.size() - conn->cgi_body_bytes_sent;
-    size_t chunk_size = (remaining > 4096) ? 4096 : remaining;
+    size_t chunk_size = (remaining > BUFFER_SIZE) ? BUFFER_SIZE : remaining;
 
     ssize_t bytes_written = ::write(cgiWriteFd, data_ptr, chunk_size);
 
