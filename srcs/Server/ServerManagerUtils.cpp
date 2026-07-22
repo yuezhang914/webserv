@@ -227,40 +227,59 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
  */
 void ServerManager::handleClientWrite(int clientFd, size_t poll_index)
 {
-    Connection *conn = this->_connections[clientFd];
+    std::map<int, Connection *>::iterator it = this->_connections.find(clientFd);
+    if (it == this->_connections.end() || it->second == NULL)
+        return;
 
-    // 防御：如果发件箱本来就是空的，直接返回
-    if (conn->write_buffer.empty())
-        return;
-    // 1. 推进缓冲区队列
-    ssize_t bytes_sent = conn->socket->write(conn->write_buffer);
-    // 物理测谎判定
-    if (bytes_sent == -2) // 致命故障（如客户端强行断开且引发了 EPIPE 等，返回 -2）
-    {
-        this->closeConnection(clientFd, poll_index);
-        return;
-    }
-    if (bytes_sent == -1) // 正常的非阻塞写阻碍（缓冲区满了，直接返回等待下一轮 POLLOUT）
-        return;
-    // 2. 发出了多少，就从发件箱里切掉多少！
-    if (bytes_sent > 0)
-        conn->write_buffer.erase(0, bytes_sent);
-    // 只有当这一轮的写缓冲区被彻底排空
+    Connection *conn = it->second;
+
     if (conn->write_buffer.empty())
     {
-        // C++98 彻底释放内存空间防止虚胖
-        std::string().swap(conn->write_buffer);
-        // 3. 检查是否有延时自毁标签
+        // 已经发货完毕，按协议切回 POLLIN 监听或关闭连接
         if (conn->close_after_write)
         {
-            std::cout << "[ServerManager] Sent response completely. Now safely closing Client FD " << clientFd << std::endl;
             this->closeConnection(clientFd, poll_index);
-            return;
         }
-        // 4. 重洗 Request 智囊大脑，干干净净迎接下一个请求
-        conn->clearRequest();
-        // 5. 正常情况下（Keep-Alive 连接），发完回包后重新将 events 改回读（POLLIN），等待下一个请求到达
-        this->_poll_fds[poll_index].events = POLLIN;
+        else
+        {
+            this->setClientEvents(clientFd, POLLIN);
+        }
+        return;
+    }
+
+    // 物理切片强攻发送
+    ssize_t bytes_sent = conn->socket->write(conn->write_buffer);
+
+    if (bytes_sent > 0)
+    {
+        // 成功抹去已发送的物理切片
+        conn->write_buffer.erase(0, bytes_sent);
+
+        // 如果全部发货完毕
+        if (conn->write_buffer.empty())
+        {
+            if (conn->close_after_write)
+            {
+                std::cout << "[ServerManager] Sent response completely to FD " << clientFd << ". Closing connection per policy." << std::endl;
+                this->closeConnection(clientFd, poll_index);
+            }
+            else
+            {
+                std::cout << "[ServerManager] Sent response completely to FD " << clientFd << ". Resetting event to POLLIN." << std::endl;
+                this->setClientEvents(clientFd, POLLIN);
+            }
+        }
+    }
+    else if (bytes_sent == -1)
+    {
+        // 💡 -1 语义：内核缓冲区暂态满，不算错，保持 POLLOUT 等下一轮大循环
+        return;
+    }
+    else if (bytes_sent == -2)
+    {
+        // 💡 -2 语义：对端物理断连/管道破裂！直接斩断悬空 Socket
+        std::cerr << "[ServerManager] Fatal send error (-2) on FD " << clientFd << "! Closing connection." << std::endl;
+        this->closeConnection(clientFd, poll_index);
     }
 }
 
