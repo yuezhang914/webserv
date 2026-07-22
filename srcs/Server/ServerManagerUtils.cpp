@@ -56,7 +56,7 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
     Connection *conn = this->_connections[clientFd];
 
     int loop_counter = 0; // 物理计数器
-    
+
     // 1. 强攻非阻塞 Socket，把内核缓冲区捞干净
     while (true)
     {
@@ -94,13 +94,13 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
     // 2. 解析蓄水池里的数据
     size_t consumed = 0;
     int status = RequestParser::parseBuffer(conn->read_buffer, conn->request, &conn->config, consumed);
-   
+
     if (status == REQUEST_OK)
     {
         std::cout << "[ServerManager] Request parsed successfully for FD " << clientFd << std::endl;
-        conn->read_buffer.erase(0, consumed);      
-        Response res = buildResponse(conn->request);  
-        
+        conn->read_buffer.erase(0, consumed);
+        Response res = buildResponse(conn->request);
+
         // 3. 检查这到底是不是一个隐藏的 CGI 请求
         std::string script_path;
         if (res.getHeader("X-Internal-CGI-Path", script_path))
@@ -111,7 +111,7 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
             if (fds.pid < 0 || fds.read_fd < 0 || fds.write_fd < 0)
             {
                 this->_connections[clientFd]->response.createResponse(500, "CGI Spawn Failed", this->_connections[clientFd]->config.error_pages);
-                this->enableClientWriteEvent(clientFd); 
+                this->enableClientWriteEvent(clientFd);
                 return;
             }
 
@@ -119,8 +119,13 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
             this->_cgi_read_fd_to_client_map[fds.read_fd] = clientFd;
 
             conn->is_cgi = true;
-            conn->cgi_pid = fds.pid;
             conn->cgi_read_fd = fds.read_fd;
+            conn->cgi_write_fd = fds.write_fd;
+            conn->cgi_pid = fds.pid;
+            conn->cgi_body_bytes_sent = 0;
+
+            // 🧹 强力清空旧内存，为本次 CGI 提取开辟绝对干净的物理舱位！
+            std::string().swap(conn->cgi_output_buffer);
 
             this->registerFdToPoll(fds.read_fd, POLLIN);
 

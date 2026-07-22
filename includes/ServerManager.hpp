@@ -52,6 +52,7 @@ private:
     void handleCgiPipeRead(int cgiReadFd, size_t poll_idx); // 异步收割 Python 输出
   
     void handleCgiPipeWrite(int cgiWriteFd, size_t poll_idx);
+    void _cleanupCgiResources(Connection *conn);
 
 public:
     // 构造与析构

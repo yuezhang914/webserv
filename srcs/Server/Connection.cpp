@@ -16,7 +16,9 @@ Connection::Connection()
     : socket(NULL), config(), read_buffer(), write_buffer(),
       request(), response(),
       close_after_write(false), is_cgi(false),
-      cgi_read_fd(-1), cgi_write_fd(-1), cgi_pid(-1)
+      cgi_read_fd(-1), cgi_write_fd(-1), cgi_pid(-1),
+      cgi_body_bytes_sent(0),
+      cgi_output_buffer()
 {
 }
 
@@ -25,56 +27,8 @@ Connection::Connection(int clientFd, const ServerConfig &srv_cfg)
     : socket(new ClientSocket(clientFd)), config(srv_cfg), read_buffer(), write_buffer(),
       request(), response(),
       close_after_write(false), is_cgi(false),
-      cgi_read_fd(-1), cgi_write_fd(-1), cgi_pid(-1)
+      cgi_read_fd(-1), cgi_write_fd(-1), cgi_pid(-1), cgi_body_bytes_sent(0), cgi_output_buffer()
 {
-}
-
-// 🟢 1. 拷贝构造函数：必须对齐并网 response 资产，且安全拷贝底层套接字
-// 🟢 1. 拷贝构造函数：遵从 ClientSocket 的不可复制契约，温和地接管指针
-Connection::Connection(const Connection &other)
-    : socket(other.socket), // 🚀 既然不能 new 复制，我们直接共享这个指针
-      config(other.config),
-      read_buffer(other.read_buffer),
-      write_buffer(other.write_buffer),
-      request(other.request),
-      response(other.response),
-      close_after_write(other.close_after_write),
-      is_cgi(other.is_cgi),
-      cgi_read_fd(other.cgi_read_fd),
-      cgi_write_fd(other.cgi_write_fd),
-      cgi_pid(other.cgi_pid)
-{
-    // 💡 顺理成章：由于 map 扩容时会频繁调用这个拷贝构造函数，
-    // 我们在这里直接完成安全的“所有权悄然移交”，原作者使用 const_cast 的直觉是对的，
-    // 只是强行置空会破坏 map 的常态查找。
-    // 我们在此不篡改 other.socket，而是让析构函数（~Connection）采用“引用计数”或者“大管家统一 close”的策略来决定何时 delete 指针。
-}
-
-// 🟢 2. 赋值运算符重载：同步放行
-Connection &Connection::operator=(const Connection &other)
-{
-    if (this != &other) // 强力防卫：自己不赋值给自己
-    {
-        // 🚀 【斩断生死簿】：彻底砍掉 delete this->socket;
-        // Connection 内部只负责资产记录与流转，绝不在赋值或挪动节点时自主销毁底层套接字！
-
-        this->socket = other.socket; // 🎯 纯粹、安全地接管指针物理地址
-        this->config = other.config;
-        this->read_buffer = other.read_buffer;
-        this->write_buffer = other.write_buffer;
-
-        // 协议核心资产并网
-        this->request = other.request;
-        this->response = other.response; // 🟢 完美继承我们刚刚开凿的 Response 资产包
-        this->close_after_write = other.close_after_write;
-
-        // CGI 状态雷达并网同步
-        this->is_cgi = other.is_cgi;
-        this->cgi_read_fd = other.cgi_read_fd;
-        this->cgi_write_fd = other.cgi_write_fd;
-        this->cgi_pid = other.cgi_pid;
-    }
-    return *this;
 }
 
 /**
@@ -98,11 +52,22 @@ Connection::~Connection()
  * 通过与一个空白临时匿名对象进行物理 swap，可以强制让操作系统回收这部分内存堆空间，
  * 实现真正的内存物理回零，防止在高并发连接下出现内存慢性膨胀。
  */
+
 void Connection::clear()
 {
-    std::string().swap(this->read_buffer);
-    std::string().swap(this->write_buffer);
+    this->read_buffer.clear();
+    this->write_buffer.clear();
+
+    // 🧹 彻底重置 CGI 状态与暂存箱（强力清空物理内存）
+    this->is_cgi = false;
+    this->cgi_read_fd = -1;
+    this->cgi_write_fd = -1;
+    this->cgi_pid = -1;
+    this->cgi_body_bytes_sent = 0;
+    std::string().swap(this->cgi_output_buffer);
+
     this->close_after_write = false;
+    this->clearRequest();
 }
 
 /**
