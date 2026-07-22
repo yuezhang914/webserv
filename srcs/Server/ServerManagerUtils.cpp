@@ -165,8 +165,9 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
             }
             else
             {
-                ::close(fds.write_fd);
-                conn->cgi_write_fd = -1;
+               // 无 Body：直接通过辅助函数优雅关闭写端！
+                conn->cgi_write_fd = fds.write_fd; // 临时赋值给 conn 以便 closeCgiWritePipe 识别
+                this->closeCgiWritePipe(conn);
             }
 
             // 💡 3️⃣ 🎯 【核心防线：暂停客户端 Socket 监听，防止 Request 被覆盖！】

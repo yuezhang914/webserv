@@ -57,6 +57,9 @@ private:
     void _eraseFdFromPoll(int targetFd);
     void setClientEvents(int clientFd, short events);
 
+    // 💡 新增：统一回收 CGI 写端管道资源的原子帮助函数
+    void closeCgiWritePipe(Connection *connection);
+
 public:
     // 构造与析构
     ServerManager(const std::vector<ServerConfig> &configs);

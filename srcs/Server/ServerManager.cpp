@@ -269,6 +269,32 @@ void ServerManager::_cleanupCgiResources(Connection *conn)
 }
 
 /*
+帮助函数：原子化回收 CGI 写管道资源
+彻底避免状态清理散落导致的遗漏、重复 close 或 FD 内存泄漏
+*/
+void ServerManager::closeCgiWritePipe(Connection *connection)
+{
+    if (connection == NULL || connection->cgi_write_fd < 0)
+        return;
+
+    int fd = connection->cgi_write_fd;
+
+    // 1. 从反查账本中物理注销
+    this->_cgi_write_fd_to_client_map.erase(fd);
+
+    // 2. 从 poll 监听雷达网中注销
+    this->_eraseFdFromPoll(fd);
+
+    // 3. 物理关闭文件描述符
+    ::close(fd);
+
+    // 4. 重置连接对象内部句柄标志位（防 double-close）
+    connection->cgi_write_fd = -1;
+
+    std::cout << "[CGI Conduit] Successfully safely closed write pipe FD " << fd << std::endl;
+}
+
+/*
 函数用途：物理接管并清洗来自 CGI 子进程管道写端喷射出的全量原始脏报文，直至触发 EOF 或熔断，随后实现资产加冕与主权并网。
 参数与变量：
 - cgiReadFd (传入参数)：多路复用大循环当前弹回、代表子进程数据出货完毕或触发挂断信号的读端物理管道描述符。
@@ -341,14 +367,10 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
 
             conn->write_buffer = cgi_res.responseToString();
 
-            if (conn->cgi_write_fd != -1)
-            {
-                this->_eraseFdFromPoll(conn->cgi_write_fd);
-                this->_cgi_write_fd_to_client_map.erase(conn->cgi_write_fd);
-                ::close(conn->cgi_write_fd);
-                conn->cgi_write_fd = -1;
-            }
+            // 💡 🎯 【问题 15 修正】：一行代码优雅且彻底清理写端，下面的冗余判断全删！
+            this->closeCgiWritePipe(conn);
 
+            // 清理读端管道
             this->_eraseFdFromPoll(cgiReadFd);
             this->_cgi_read_fd_to_client_map.erase(it);
             ::close(cgiReadFd);
@@ -374,14 +396,10 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
             conn->response.createResponse(500, "CGI Read Error", conn->config.error_pages);
             conn->write_buffer = conn->response.responseToString();
 
-            if (conn->cgi_write_fd != -1)
-            {
-                this->_eraseFdFromPoll(conn->cgi_write_fd);
-                this->_cgi_write_fd_to_client_map.erase(conn->cgi_write_fd);
-                ::close(conn->cgi_write_fd);
-                conn->cgi_write_fd = -1;
-            }
+            // 💡 🎯 【问题 15 修正】：一行代码优雅且彻底清理写端
+            this->closeCgiWritePipe(conn);
 
+            // 清理读端管道
             this->_eraseFdFromPoll(cgiReadFd);
             this->_cgi_read_fd_to_client_map.erase(it);
             ::close(cgiReadFd);
@@ -394,7 +412,6 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
         }
     }
 }
-
 /*
 函数用途：物理接管多路复用写雷达（POLLOUT）弹回的 CGI 写端管道，非阻塞、卡尺切片地向子进程标准输入（stdin）灌入 POST 请求体，直至喂饱触发 EOF 闭环。
 参数与变量：
@@ -415,113 +432,98 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
 */
 void ServerManager::handleCgiPipeWrite(int cgiWriteFd, size_t poll_idx)
 {
-    // 1. 【顺藤摸瓜】：一枪反查因果契约，明确知道这个写端管道是在伺候哪个客户端
+    (void)poll_idx; // 💡 统一按 FD 值安全擦除，摒弃不稳定的 poll_idx 索引
+
+    // 1. 【顺藤摸瓜】：反查因果契约
     std::map<int, int>::iterator it = this->_cgi_write_fd_to_client_map.find(cgiWriteFd);
     if (it == this->_cgi_write_fd_to_client_map.end())
     {
-        // 孤儿写端管道，防卫性物理关闭，从雷达网里擦除
+        // 孤儿写端管道，防卫性关闭
         ::close(cgiWriteFd);
-        this->_poll_fds.erase(this->_poll_fds.begin() + poll_idx);
+        this->_eraseFdFromPoll(cgiWriteFd);
         return;
     }
     int clientFd = it->second;
-    Connection *conn = this->_connections[clientFd];
+
+    // 💡 🎯 【问题 14 防线】：用 find() 替代 operator[]，严防插入 NULL 指针导致 SegFault
+    std::map<int, Connection *>::iterator connectionIt = this->_connections.find(clientFd);
+    if (connectionIt == this->_connections.end() || connectionIt->second == NULL)
+    {
+        std::cerr << "[CGI Writer] Warning: Client FD " << clientFd << " already destroyed/NULL! Cleaning pipe." << std::endl;
+        this->_eraseFdFromPoll(cgiWriteFd);
+        this->_cgi_write_fd_to_client_map.erase(it);
+        ::close(cgiWriteFd);
+        return;
+    }
+
+    Connection *conn = connectionIt->second;
     const std::string &body = conn->request.getBody();
 
-    // 2. 极端边界防御：如果进线时发现原本就已经喂饱了，直接走清场流程
+    // 2. 极端边界防御：如果原本就没有 Body 或已经喂饱了，直接优雅关掉写端并给子进程送达 EOF
     if (conn->cgi_body_bytes_sent >= body.size())
     {
-        goto CLOSE_WRITE_Conduit;
+        std::cout << "[CGI Writer] Body already fully fed or empty. Closing write pipe." << std::endl;
+        // 💡 🎯 【问题 15 修正】：原子化关写端，优雅触发物理 EOF
+        this->closeCgiWritePipe(conn);
+        return;
     }
 
     // 3. 【非阻塞卡尺切片】：计算剩余运力，每次最多安全喂入 4096 字节
+    const char *data_ptr = body.data() + conn->cgi_body_bytes_sent;
+    size_t remaining = body.size() - conn->cgi_body_bytes_sent;
+    size_t chunk_size = (remaining > 4096) ? 4096 : remaining;
+
+    ssize_t bytes_written = ::write(cgiWriteFd, data_ptr, chunk_size);
+
+    if (bytes_written > 0)
     {
-        const char *data_ptr = body.data() + conn->cgi_body_bytes_sent;
-        size_t remaining = body.size() - conn->cgi_body_bytes_sent;
-        size_t chunk_size = (remaining > 4096) ? 4096 : remaining;
+        conn->cgi_body_bytes_sent += static_cast<size_t>(bytes_written);
+        std::cout << "[CGI Writer] Fed " << bytes_written << " bytes of body to CGI fd "
+                  << cgiWriteFd << ". Total: " << conn->cgi_body_bytes_sent << "/" << body.size() << std::endl;
 
-        // 强攻非阻塞物理管道写入
-        ssize_t bytes_written = ::write(cgiWriteFd, data_ptr, chunk_size);
-
-        if (bytes_written > 0)
+        // 4. 【大功告成】：判断是否已经全量喂饱子进程？
+        if (conn->cgi_body_bytes_sent >= body.size())
         {
-            conn->cgi_body_bytes_sent += bytes_written;
-            std::cout << "[CGI Writer] Fed " << bytes_written << " bytes of body to CGI fd "
-                      << cgiWriteFd << ". Total: " << conn->cgi_body_bytes_sent << "/" << body.size() << std::endl;
+            std::cout << "[CGI Writer] Finished feeding all POST body (" << body.size() << " bytes). Closing write pipe." << std::endl;
+            // 💡 🎯 【问题 15 修正】：一键安全关闭写端，向子进程传递物理 EOF，驱动 CGI 疯狂计算！
+            this->closeCgiWritePipe(conn);
         }
-        else if (bytes_written == -1)
+        return;
+    }
+    else // bytes_written <= 0
+    {
+        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
         {
-            // 如果遇到系统缓冲区满（EAGAIN），不算错，保留 POLLOUT 下一轮大循环继续进来喂
-            if (errno == EAGAIN || errno == EWOULDBLOCK)
-            {
-                return;
-            }
-            if (errno == EINTR)
-            {
-                return; // 被系统信号打断，不算错，撤退等下一轮
-            }
-
-            // 发生真正的底层管道破裂（如 EPIPE，说明子进程提前崩了拒绝收货）
-            std::cerr << "[CGI Writer] Fatal write error on pipe fd " << cgiWriteFd << ", breaking conduit." << std::endl;
-            goto ERROR_FUSE;
+            return; // 缓冲区满或被信号打断，不算错，撤退等下一轮 POLLOUT 触发
         }
-    }
 
-    // 4. 【大功告成】：判断是否已经全量喂饱子进程？
-    if (conn->cgi_body_bytes_sent >= body.size())
-    {
-    CLOSE_WRITE_Conduit:
-        std::cout << "[CGI Writer] Finished feeding all POST body (" << body.size() << " bytes). Closing write pipe." << std::endl;
+        // ❌ 发生底层管道破裂（如 EPIPE，子进程提前崩溃）
+        std::cerr << "[CGI Writer] Fatal write error on pipe fd " << cgiWriteFd << ", breaking conduit." << std::endl;
 
-        // 物理关闭子进程的输入端管道！
-        // 这样子进程的标准输入（stdin）就会读到一个完美的 EOF。
-        // 绝大多数 CGI 脚本（如 Python 里的 sys.stdin.read()）只有读到 EOF 才会停止挂起、开始疯狂计算并返回结果！
-        ::close(cgiWriteFd);
-        this->_poll_fds.erase(this->_poll_fds.begin() + poll_idx);
-        this->_cgi_write_fd_to_client_map.erase(it);
-        conn->cgi_write_fd = -1;
-    }
-    return;
+        // 1. 💡 🎯 【问题 15 修正】：一键关闭写管道
+        this->closeCgiWritePipe(conn);
 
-ERROR_FUSE:
-    // 1. 【管道擦除】：清理写端管道资产与账本
-    ::close(cgiWriteFd);
-    this->_poll_fds.erase(this->_poll_fds.begin() + poll_idx);
-    this->_cgi_write_fd_to_client_map.erase(it);
-    conn->cgi_write_fd = -1;
-
-    // 2. 🛡️【连带清场】：顺手解除读端管道的雷达监听（若已挂载），防止悬空孤儿
-    if (conn->cgi_read_fd != -1)
-    {
-        for (size_t j = 0; j < this->_poll_fds.size(); ++j)
+        // 2. 🛡️【连带清场】：顺手解除读端管道（若挂载）
+        if (conn->cgi_read_fd != -1)
         {
-            if (this->_poll_fds[j].fd == conn->cgi_read_fd)
-            {
-                this->_poll_fds.erase(this->_poll_fds.begin() + j);
-                break;
-            }
+            this->_eraseFdFromPoll(conn->cgi_read_fd);
+            this->_cgi_read_fd_to_client_map.erase(conn->cgi_read_fd);
+            ::close(conn->cgi_read_fd);
+            conn->cgi_read_fd = -1;
         }
-        this->_cgi_read_fd_to_client_map.erase(conn->cgi_read_fd);
-        ::close(conn->cgi_read_fd);
-        conn->cgi_read_fd = -1;
+
+        // 3. 🪓【统一善后】：斩杀异常子进程并回收
+        this->_cleanupCgiResources(conn);
+
+        // 4. 【降维 500】：重装 500 熔断响应注入 write_buffer
+        conn->response.createResponse(500, "CGI Write Pipe Broken", conn->config.error_pages);
+        std::string().swap(conn->write_buffer);
+        conn->write_buffer = conn->response.responseToString();
+
+        // 5. 💡 🎯 【统一事件】：重新激活客户端 Socket 的 POLLOUT，弹射 500 错误报文！
+        this->setClientEvents(clientFd, POLLOUT);
+        return;
     }
-
-    // 3. 🪓【铁血补枪】：斩杀异常子进程并立刻收尸，坚决不给系统留僵尸！
-    if (conn->cgi_pid > 0)
-    {
-        ::kill(conn->cgi_pid, SIGKILL);
-        ::waitpid(conn->cgi_pid, NULL, 0); // 被 SIGKILL 后必定瞬间沦为尸体，物理秒收
-        conn->cgi_pid = -1;
-    }
-    conn->is_cgi = false;
-
-    // 4. 【降维 500】：重装 500 熔断响应，清空旧缓存并灌入新报文
-    conn->response.createResponse(500, "CGI Write Pipe Broken", conn->config.error_pages);
-    std::string().swap(conn->write_buffer);
-    conn->write_buffer = conn->response.responseToString();
-
-    // 5. 【发货拉起】：激活客户端写事件，下一轮 TICK 直接将 500 报错弹射回浏览器！
-    this->enableClientWriteEvent(clientFd);
 }
 
 /*
