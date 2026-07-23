@@ -51,6 +51,8 @@ void ServerManager::init()
 {
     std::cout << "[ServerManager] Initializing network sockets..." << std::endl;
     this->setupSockets();
+    // 💡 物理告诉内核：所有子进程死后请直接自动销毁，不要留 Zombie！
+    ::signal(SIGCHLD, SIG_IGN);
 }
 
 /*

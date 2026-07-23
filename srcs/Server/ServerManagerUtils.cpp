@@ -436,7 +436,6 @@ void ServerManager::acceptNewConnection(int listenFd)
     {
         // 创建 ClientSocket 实体
         p_socket = new ClientSocket(clientFd);
-        p_socket->setNonBlocking(); // 极速锁定 O_NONBLOCK
 
         // 创建 Connection 业务实体
         conn = new Connection();
