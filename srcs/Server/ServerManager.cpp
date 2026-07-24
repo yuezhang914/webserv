@@ -394,8 +394,17 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
         ::close(cgiReadFd);
         return;
     }
-
     Connection *conn = connectionIt->second;
+    // 💡 1. 在读数据之前，先检查 poll 的底层物理事件！
+    //  如果 poll 已经报了 POLLERR / POLLNVAL，说明 FD 物理坏了，直接 failCgi(500)
+    short revents = this->_poll_fds[poll_idx].revents;
+    if ((revents & POLLERR) || (revents & POLLNVAL))
+    {
+        std::cerr << "[CGI Reader] Poll reported physical error on fd " << cgiReadFd << std::endl;
+        if (conn)
+            this->failCgi(conn, 500);
+        return;
+    }
     char buffer[4096];
 
     while (true)
@@ -449,15 +458,7 @@ void ServerManager::handleCgiPipeRead(int cgiReadFd, size_t poll_idx)
         }
         else // bytesRead == -1
         {
-            if (errno == EAGAIN || errno == EWOULDBLOCK)
-                break; // 缓冲区空，等待下次 poll
-            if (errno == EINTR)
-                continue;
-
-            // 系统读取异常，直接调用 failCgi(500) 一键彻底回收！
-            std::cerr << "[CGI Reader] System read error on fd " << cgiReadFd << ", failing CGI." << std::endl;
-            this->failCgi(conn, 500);
-            return;
+            break;
         }
     }
 }
@@ -767,13 +768,11 @@ void ServerManager::reapFinishedCgiChildren()
             {
                 std::cout << "[CGI Reaper] Deferred reap success for PID " << conn->cgi_pid << std::endl;
                 conn->cgi_pid = -1;
-    
             }
             else if (result < 0)
             {
                 // 出错或找不到进程，重置 pid
                 conn->cgi_pid = -1;
-        
             }
             // 如果 result == 0，说明还没退出，继续留在 map 中，等待下一轮 poll 探测
         }
@@ -826,7 +825,7 @@ void ServerManager::run()
         std::cerr << "[ServerManager] Error: No listening sockets in poll tree. Aborting run()." << std::endl;
         return;
     }
-    
+
     std::cout << "[ServerManager] Main loop started. Entering the matrix..." << std::endl;
 
     int poll_error_retries = 0;
