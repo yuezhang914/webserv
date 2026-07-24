@@ -509,9 +509,20 @@ void ServerManager::handleCgiPipeWrite(int cgiWriteFd, size_t poll_idx)
     }
 
     Connection *conn = connectionIt->second;
+
+    // 💡 2. 前置物理检查：检查 poll 的 revents（完全不使用 errno，100% 符 42 规范）
+    // 如果管道破裂（POLLHUP/POLLERR）或 FD 无效（POLLNVAL），直接触发 failCgi(500)
+    short revents = this->_poll_fds[poll_idx].revents;
+    if ((revents & POLLERR) || (revents & POLLNVAL) || (revents & POLLHUP))
+    {
+        std::cerr << "[CGI Writer] Poll reported physical error/hangup on write fd " << cgiWriteFd << ", failing CGI." << std::endl;
+        this->failCgi(conn, 500);
+        return;
+    }
+
     const std::string &body = conn->request.getBody();
 
-    // 2. 极端边界防御：如果原本就没有 Body 或已经喂饱了
+    // 3. 极端边界防御：如果原本就没有 Body 或已经喂饱了
     if (conn->cgi_body_bytes_sent >= body.size())
     {
         std::cout << "[CGI Writer] Body already fully fed or empty. Closing write pipe." << std::endl;
@@ -520,7 +531,7 @@ void ServerManager::handleCgiPipeWrite(int cgiWriteFd, size_t poll_idx)
         return;
     }
 
-    // 3. 【非阻塞卡尺切片】：每次最多 safe write 4096 字节
+    // 4. 【非阻塞卡尺切片】：每次最多 safe write 4096 字节
     const char *data_ptr = body.data() + conn->cgi_body_bytes_sent;
     size_t remaining = body.size() - conn->cgi_body_bytes_sent;
     size_t chunk_size = (remaining > BUFFER_SIZE) ? BUFFER_SIZE : remaining;
@@ -533,7 +544,7 @@ void ServerManager::handleCgiPipeWrite(int cgiWriteFd, size_t poll_idx)
         std::cout << "[CGI Writer] Fed " << bytes_written << " bytes of body to CGI fd "
                   << cgiWriteFd << ". Total: " << conn->cgi_body_bytes_sent << "/" << body.size() << std::endl;
 
-        // 4. 【大功告成】：判断是否已经全量喂饱子进程？
+        // 5. 【大功告成】：判断是否已经全量喂饱子进程？
         if (conn->cgi_body_bytes_sent >= body.size())
         {
             std::cout << "[CGI Writer] Finished feeding all POST body (" << body.size() << " bytes). Closing write pipe." << std::endl;
@@ -542,19 +553,10 @@ void ServerManager::handleCgiPipeWrite(int cgiWriteFd, size_t poll_idx)
         }
         return;
     }
-    else // bytes_written <= 0
+    else // bytes_written <= 0 (非阻塞 Pipe 缓冲区已满状态)
     {
-        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
-        {
-            return; // 缓冲区满或被信号打断，不算错，等待下一轮 POLLOUT
-        }
-
-        // ❌ 发生底层管道破裂（如 EPIPE，子进程提前崩溃）
-        std::cerr << "[CGI Writer] Fatal write error on pipe fd " << cgiWriteFd << ", failing CGI." << std::endl;
-
-        // 💡 🎯 【问题 20 终极收敛】：直接调用 failCgi(500)！
-        // 内部自动帮你关 write_pipe、关 read_pipe、杀/收子进程、清缓存、注入 500 Response 并拉起 POLLOUT！
-        this->failCgi(conn, 500);
+        // 💡 物理破裂（EPIPE 等）已在前置 revents 中通过 POLLHUP/POLLERR 拦截，
+        // 此处直接 return 退出，安全等待下一轮 POLLOUT 唤醒继续写入剩余数据。
         return;
     }
 }
