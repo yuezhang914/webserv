@@ -832,7 +832,9 @@ void ServerManager::enforceCgiTimeouts()
 2. 永动机全天候死循环（while (true)）：
    -第一步（prePollCleanup）：在前置位清理上一轮循环中被标记为脏、死、或已过期的僵尸资产与长连接，保持核心底盘绝对纯净。
    - 第二步（executePoll）：物理拉起多路复用大闸，主线程让出 CPU 陷入非阻塞全天候休眠，并向外部引入弹性防线计数器保护。若返回负数（即连续打断超过 3 次红线），说明遭遇毁灭性灾难，果断强行跳出循环（break）安全撤退。
-   - 第三步（dispatchEvents）：若成功捕获有效网络事件，立刻开启倒序卡尺，将事件精准分流至对应的读/写/异常/CGI 业务车间进行最终的弹射交货！
+   - 第三步（dispatchEvents）：若成功捕获有效网络事件，立刻开启倒序卡尺，将事件精准分
+        std::cerr << "[ServerManager] Error: No listening sockets in poll tree. Aborting run()." << std::endl;
+        return;流至对应的读/写/异常/CGI 业务车间进行最终的弹射交货！
 */
 void ServerManager::run()
 {
