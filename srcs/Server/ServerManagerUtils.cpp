@@ -154,13 +154,8 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
             // 🎯 【读端账本登记】
             this->_cgi_read_fd_to_client_map[fds.read_fd] = clientFd;
 
-            conn->is_cgi = true;
-            conn->cgi_read_fd = fds.read_fd;
-            conn->cgi_pid = fds.pid;
-            conn->cgi_body_bytes_sent = 0;
-            conn->cgi_started_at = std::time(NULL); // 🎯 装填物理起始时间戳！
-
-            std::string().swap(conn->cgi_output_buffer);
+            // 💡 【原子起航】：一行代码拉起 is_cgi、read_fd、write_fd、pid 并自动完成 time(NULL) 时间戳打点！
+            conn->startCgi(fds.read_fd, fds.write_fd, fds.pid);
 
             // 1️⃣ 读端（CGI 管道）永远注册 POLLIN
             this->registerFdToPoll(fds.read_fd, POLLIN);
@@ -168,14 +163,12 @@ void ServerManager::handleClientRead(int clientFd, size_t poll_index)
             // 2️⃣ 写端（CGI 管道）按需注册
             if (!conn->request.getBody().empty())
             {
-                conn->cgi_write_fd = fds.write_fd;
                 this->_cgi_write_fd_to_client_map[fds.write_fd] = clientFd;
                 this->registerFdToPoll(fds.write_fd, POLLOUT);
             }
             else
             {
-                // 无 Body：直接通过辅助函数优雅关闭写端！
-                conn->cgi_write_fd = fds.write_fd; // 临时赋值给 conn 以便 closeCgiWritePipe 识别
+                // 无 Body：通过 closeCgiWritePipe 安全清空写管道！
                 this->closeCgiWritePipe(conn);
             }
 
@@ -251,8 +244,8 @@ void ServerManager::handleClientWrite(int clientFd, size_t poll_index)
         }
         else
         {
-            // 💡 Keep-Alive 复用：复位请求对象，切回 POLLIN 等待下一个 Request
-            conn->clearRequest(); // 清空上一轮 HTTP 请求结构体
+            // 💡 Keep-Alive 长连接复用：调用 clear() 彻底洗白 Connection 上下文（防残余数据污染下一个请求）
+            conn->clear();
             this->setClientEvents(clientFd, POLLIN);
         }
         return;
@@ -277,9 +270,8 @@ void ServerManager::handleClientWrite(int clientFd, size_t poll_index)
             else
             {
                 std::cout << "[ServerManager] Sent response completely to FD " << clientFd << ". Resetting event to POLLIN." << std::endl;
-                // 💡 🎯 核心重置： Keep-Alive 长连接复用，重置 Request 状态机
-                conn->clearRequest();
-                conn->is_cgi = false;
+                // 💡 🎯 核心重置： Keep-Alive 长连接复用，一句话原子化洗白 Request、Response 与 CGI 状态！
+                conn->clear();
                 this->setClientEvents(clientFd, POLLIN);
             }
         }
@@ -331,10 +323,10 @@ void ServerManager::cleanupConnectionCgi(Connection *conn)
     if (conn == NULL)
         return;
 
-    // 1. 🪓 斩杀暴走/残存的 CGI 子进程（防中途断开留僵尸进程）
-    if (conn->cgi_pid > 0)
+    // 1. 🪓 斩杀暴走/残存的 CGI 子进程（防客户端中途断开留僵尸进程）
+    if (conn->getCgiPid() > 0)
     {
-        ::kill(conn->cgi_pid, SIGKILL);
+        ::kill(conn->getCgiPid(), SIGKILL);
     }
 
     // 2. 🧹 直接复用底层物理资源清理车间！
@@ -342,7 +334,7 @@ void ServerManager::cleanupConnectionCgi(Connection *conn)
     // -> closeCgiWritePipe(conn)  (注销 Poll + 擦 Map + physical close)
     // -> closeCgiReadPipe(conn)   (注销 Poll + 擦 Map + physical close)
     // -> releaseCgiProcess(conn)  (纯非阻塞 waitpid WNOHANG 回收子进程！)
-    // -> 重置 is_cgi, cgi_started_at, cgi_body_bytes_sent
+    // -> 内部原子化 resetCgi() 重置 _is_cgi, _cgi_started_at, cgi_body_bytes_sent 并 Swap 清空 cgi_output_buffer
     this->cleanupCgiResources(conn);
 }
 /*

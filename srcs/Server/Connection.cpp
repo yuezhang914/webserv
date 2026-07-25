@@ -1,86 +1,127 @@
 #include "Webserv.hpp"
 
 /**
+ * @brief 默认构造函数
+ */
+Connection::Connection()
+    : socket(NULL), config(), read_buffer(), write_buffer(),
+      request(), response(),
+      close_after_write(false),
+      cgi_output_buffer(), cgi_body_bytes_sent(0),
+      _is_cgi(false), _cgi_read_fd(-1), _cgi_write_fd(-1), _cgi_pid(-1), _cgi_started_at(0)
+{
+}
+
+/**
  * @brief 有参构造函数：接管已被 accept 的客户端 FD，并绑定关联的虚拟主机配置 (RAII)
  *
  * @param clientFd 客户端的文件描述符
  * @param srv_cfg 匹配到的虚拟主机配置副本
- *
- * @details
- * 在连接诞生的第一秒，通过 new 物理托管 ClientSocket 实例。
- * 随后立即让该套接字成员执行 setNonBlocking() 设置非阻塞钢印，
- * 确保该连接后续的所有 I/O 吞吐都能融入 poll/epoll 的非阻塞环流中。
  */
-// 在 Connection.cpp 中检查你的默认构造函数
-Connection::Connection()
-    : socket(NULL), config(), read_buffer(), write_buffer(),
-      request(), response(),
-      close_after_write(false), is_cgi(false),
-      cgi_read_fd(-1), cgi_write_fd(-1), cgi_pid(-1),
-      cgi_body_bytes_sent(0),
-      cgi_output_buffer(),
-      cgi_started_at(0)
-{
-}
-
-// 还有带参数的构造函数
 Connection::Connection(int clientFd, const ServerConfig &srv_cfg)
     : socket(new ClientSocket(clientFd)), config(srv_cfg), read_buffer(), write_buffer(),
       request(), response(),
-      close_after_write(false), is_cgi(false),
-      cgi_read_fd(-1), cgi_write_fd(-1), cgi_pid(-1), cgi_body_bytes_sent(0), cgi_output_buffer(),
-      cgi_started_at(0)
+      close_after_write(false),
+      cgi_output_buffer(), cgi_body_bytes_sent(0),
+      _is_cgi(false), _cgi_read_fd(-1), _cgi_write_fd(-1), _cgi_pid(-1), _cgi_started_at(0)
 {
 }
 
 /**
  * @brief 析构函数：践行严格的 RAII 规范，物理终结并释放连接资源
- *
- * @note
- * 物理执行 delete socket。若指针未被剥夺（即非空），则会触发 ClientSocket 的析构函数，
- * 从而物理调用 close() 关掉网线描述符。这保证了连接消亡时，内存与套接字 FD 100% 被干净回收。
  */
 Connection::~Connection()
 {
     delete this->socket;
 }
 
-/**
- * @brief 清洗并回收读写缓冲区，重置状态标志
- *
- * @details
- * 使用 C++98 标准的【swap 物理收缩内存技巧】（`std::string().swap(...)`）。
- * 传统的 clear() 往往只是将字符长度设为 0，而保留了原本分配的 capacity 内存不还。
- * 通过与一个空白临时匿名对象进行物理 swap，可以强制让操作系统回收这部分内存堆空间，
- * 实现真正的内存物理回零，防止在高并发连接下出现内存慢性膨胀。
- */
+// -------------------------------------------------------------
+// 2. CGI 状态区: 将易错的状态修改【收拢为原子方法】！
+// -------------------------------------------------------------
+// 💡 保持变量只读视角 (Read-only access)，通过内部统一控制
+bool Connection::isCgi() const 
+{ 
+    return _is_cgi; 
+}
+
+int Connection::getCgiReadFd() const 
+{ 
+    return _cgi_read_fd; 
+}
+
+int Connection::getCgiWriteFd() const
+{ 
+    return _cgi_write_fd; 
+}
+
+pid_t Connection::getCgiPid() const 
+{ 
+    return _cgi_pid; 
+}
+
+std::time_t Connection::getCgiStartedAt() const 
+{ 
+    return _cgi_started_at; 
+}
+
+std::string cgi_output_buffer; // Buffer 依然允许外部直接 append
+size_t cgi_body_bytes_sent;
+
+void Connection::startCgi(int readFd, int writeFd, pid_t pid)
+{
+    this->_is_cgi = true;
+    this->_cgi_read_fd = readFd;
+    this->_cgi_write_fd = writeFd;
+    this->_cgi_pid = pid;
+    this->_cgi_started_at = std::time(NULL); // 自动防卡死打点！
+}
+
+
+void Connection::resetCgi()
+{
+    this->_is_cgi = false;
+    this->_cgi_read_fd = -1;
+    this->_cgi_write_fd = -1;
+    this->_cgi_pid = -1;
+    this->_cgi_started_at = 0;
+    this->cgi_body_bytes_sent = 0;
+    std::string().swap(this->cgi_output_buffer);
+}
 
 void Connection::clear()
 {
-    this->read_buffer.clear();
-    this->write_buffer.clear();
+    // 1. 使用 std::string().swap 物理回零收缩内存容量
+    std::string().swap(this->read_buffer);
+    std::string().swap(this->write_buffer);
 
-    // 🧹 彻底重置 CGI 状态与暂存箱（强力清空物理内存）
-    this->is_cgi = false;
-    this->cgi_read_fd = -1;
-    this->cgi_write_fd = -1;
-    this->cgi_pid = -1;
-    this->cgi_body_bytes_sent = 0;
-    std::string().swap(this->cgi_output_buffer);
+    // 2. 🧹 统一调用原子化 resetCgi() 方法，彻底复位 CGI 状态并释放 cgi_output_buffer 内存
+    this->resetCgi();
 
     this->close_after_write = false;
+
+    // 3. 🧹 原地重构 Request 与 Response（彻底防长连接 Keep-Alive 上下文残余污染）
     this->clearRequest();
+
+    // 如果 Response 需要清空，亦可以像 placement new 一样重置：
+    this->response.~Response();
+    new (&this->response) Response(this->request);
+}
+
+
+void Connection::closeWriteFd() {
+    this->_cgi_write_fd = -1;
+}
+
+void Connection::closeReadFd() {
+    this->_cgi_read_fd = -1;
+}
+
+void Connection::clearCgiPid() {
+    this->_cgi_pid = -1;
 }
 
 /**
- * @brief 原地重构请求解析器 Request（ placement new 定位放置重构）
- *
- * @details
- * 在 Keep-Alive 管道化长连接复用时，为了迎接同一个 FD 传来的下一个 HTTP 请求，
- * 我们必须彻底重置 Connection 内部的 Request 状态：
- * 1. 显式调用 `this->request.~Request()` 物理析构旧的 Request。
- * 2. 利用 placement new 在这块已经开辟好的、原地保留的内存空间上，重新调用无参构造函数重新诞生成员。
- * 这样做不仅极其优雅地恢复了一张白纸，还规避了在堆上频繁释放与重分配 Request 的 CPU 物理时钟开销！
+ * @brief 原地重构请求解析器 Request（placement new 定位放置重构）
  */
 void Connection::clearRequest()
 {
