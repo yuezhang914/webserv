@@ -40,6 +40,7 @@
 #include "ClientSocket.hpp"
 
 #include "CgiHandler.hpp"
+#include "CgiManager.hpp"
 
 
 #include "Response.hpp"
