@@ -1,75 +1,79 @@
-#ifndef CGI_MANAGER_HPP
-#define CGI_MANAGER_HPP
+// includes/CgiManager.hpp
+#ifndef CGIMANAGER_HPP
+#define CGIMANAGER_HPP
 
-#include "Webserv.hpp"
 #include <map>
-#include <sys/types.h>
+#include <string>
+#include <vector>
 #include <ctime>
+#include <sys/types.h>
 
-// 前置声明，打破 CgiManager 与 ServerManager / Connection 的循环引用
-class ServerManager;
-class Connection;
+// 💡 纯粹的数据任务（零 Connection！零 ServerManager！）
+struct CgiTask
+{
+    int clientFd;
+    int readFd;
+    int writeFd;
+    pid_t pid;
 
-/**
- * @brief CGI 全生命周期调度器 (CGI Lifecycle Controller)
- * 
- * @details 
- * 将所有与 CGI 管道 I/O、子进程 Fork/Waitpid、看门狗超时熔断、卡尺切片等业务逻辑
- * 从 ServerManager 中彻底剥离，充当独立的 CGI 管理服务。
- */
+    std::string inputBody;    // 需要喂给 CGI 的 POST Data
+    size_t bodyBytesSent;     // 已喂字节数
+    std::string outputBuffer; // CGI 产出的原始 Response 字节流
+    std::time_t startTime;    // 启动时间
+
+    CgiTask() : clientFd(-1), readFd(-1), writeFd(-1), pid(-1), bodyBytesSent(0), startTime(0) {}
+};
+
+// 💡 CGI 事件响应结果
+enum CgiStatus
+{
+    CGI_CONTINUE,
+    CGI_FINISHED,
+    CGI_ERROR
+};
+
+struct CgiEventResult
+{
+    CgiStatus status;
+    int clientFd;
+    int statusCode;        // 500, 502, 504
+    std::string rawOutput; // 拿到的完整 CGI 原始输出
+
+    CgiEventResult(CgiStatus s = CGI_CONTINUE, int cFd = -1, int code = 200, const std::string &out = "")
+        : status(s), clientFd(cFd), statusCode(code), rawOutput(out) {}
+};
+
 class CgiManager
 {
 public:
     CgiManager();
     ~CgiManager();
 
-    // -------------------------------------------------------------
-    // 1. CGI 管道启动与接管 (Pipeline Spawner)
-    // -------------------------------------------------------------
-    /**
-     * @brief 尝试为连接启动 CGI 进程，并把管道 FD 注册到 ServerManager 的 Poll 监听网中
-     */
-    bool startCgiPipeline(Connection *conn, ServerManager &serverManager, 
-                          const std::string &scriptPath, const std::string &interpreterPath);
+    // 🎯 100% 纯粹接口：只接收 clientFd、脚本路径、环境变量数组、Body 字符串！
+    bool launchTask(int clientFd,
+                    const std::string &scriptPath,
+                    const std::string &interpreterPath,
+                    const std::string &method,
+                    const std::string &query,
+                    const std::string &path,
+                    const std::map<std::string, std::string> &headers,
+                    const std::string &reqBody,
+                    int &outReadFd,
+                    int &outWriteFd);
 
-    // -------------------------------------------------------------
-    // 2. 管道事件回调 (Reactor Handlers) - 由 ServerManager 的 poll 主循环触发
-    // -------------------------------------------------------------
-    void handlePipeRead(int cgiReadFd, size_t pollIdx, ServerManager &serverManager);
-    void handlePipeWrite(int cgiWriteFd, size_t pollIdx, ServerManager &serverManager);
+    CgiEventResult handlePipeRead(int cgiReadFd);
+    CgiEventResult handlePipeWrite(int cgiWriteFd);
 
-    // -------------------------------------------------------------
-    // 3. 看门狗与后台回收 (Watchdog & Reaper)
-    // -------------------------------------------------------------
-    void enforceTimeouts(ServerManager &serverManager);
-    void reapFinishedChildren(ServerManager &serverManager);
-
-    // -------------------------------------------------------------
-    // 4. 熔断与物理清理 (Failover & Teardown)
-    // -------------------------------------------------------------
-    void failCgi(Connection *conn, int statusCode, ServerManager &serverManager);
-    void cleanupCgiResources(Connection *conn, ServerManager &serverManager);
-    void cleanupConnectionCgi(Connection *conn, ServerManager &serverManager);
-
-    // -------------------------------------------------------------
-    // 5. 快速反查账本 Setter/Getter
-    // -------------------------------------------------------------
-    bool isCgiReadFd(int fd) const;
-    bool isCgiWriteFd(int fd) const;
+    std::vector<CgiEventResult> checkTimeouts(); // 巡检超时
+    void reapChildren();                         // 非阻塞回收 PID
+    void removeTaskByClientFd(int clientFd);     // 当客户端异常断开时调用，物理销毁任务与杀掉 PID
 
 private:
-    // 🧹 将原先 ServerManager 内部的私有反查账本全面收拢到这里！
-    std::map<int, Connection *> _read_fd_to_conn_map;  // cgi_read_fd -> Connection*
-    std::map<int, Connection *> _write_fd_to_conn_map; // cgi_write_fd -> Connection*
+    // 💡 彻底抛弃 Connection*！改为私有管理自己的 Task 对象！
+    std::map<int, CgiTask> _read_fd_to_task_map;  // cgiReadFd  -> CgiTask
+    std::map<int, CgiTask> _write_fd_to_task_map; // cgiWriteFd -> CgiTask
 
-    // 私有管道关闭 Helper
-    void closeCgiWritePipe(Connection *conn, ServerManager &serverManager);
-    void closeCgiReadPipe(Connection *conn, ServerManager &serverManager);
-    void releaseCgiProcess(Connection *conn);
-
-    // 禁用拷贝构造与赋值
-    CgiManager(const CgiManager &other);
-    CgiManager &operator=(const CgiManager &other);
+    void forceKillAndClean(CgiTask &task);
 };
 
 #endif
