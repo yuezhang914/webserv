@@ -225,32 +225,6 @@ void ServerManager::registerFdToPoll(int fd, short events)
     std::cout << "[ServerManager] FD " << fd << " successfully registered to poll tree with events: " << events << std::endl;
 }
 
-/*
-帮助函数：原子化回收 CGI 写管道资源
-彻底避免状态清理散落导致的遗漏、重复 close 或 FD 内存泄漏
-*/
-void ServerManager::closeCgiWritePipe(Connection *connection)
-{
-    // 💡 使用 Getter 方法安全获取私有句柄，并做防卫性检查
-    if (connection == NULL || connection->getCgiWriteFd() < 0)
-        return;
-
-    int fd = connection->getCgiWriteFd();
-
-    // 1. 从反查账本中物理注销
-    this->_cgi_write_fd_to_client_map.erase(fd);
-
-    // 2. 从 poll 监听雷达网中注销
-    this->eraseFdFromPoll(fd);
-
-    // 3. 物理关闭文件描述符
-    ::close(fd);
-
-    // 4. 💡 通过 Connection 内部安全方法复位私有句柄（防 double-close）
-    connection->closeWriteFd();
-
-    std::cout << "[CGI Conduit] Successfully safely closed write pipe FD " << fd << std::endl;
-}
 
 void ServerManager::closeCgiReadPipe(Connection *conn)
 {
