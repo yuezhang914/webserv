@@ -1,5 +1,26 @@
 #include "Webserv.hpp"
 
+// 💡 1. 默认构造函数
+CgiManager::CgiManager()
+{
+}
+
+// 💡 2. 析构函数：RAII 物理安全保障车间
+// 当 CgiManager 随 ServerManager 一起销毁时，自动扫尾强杀所有残余 CGI 进程
+CgiManager::~CgiManager()
+{
+    std::map<int, CgiTask>::iterator it = this->_read_fd_to_task_map.begin();
+    while (it != this->_read_fd_to_task_map.end())
+    {
+        // C++98 迭代器安全自增备份
+        std::map<int, CgiTask>::iterator current = it++;
+        this->forceKillAndClean(current->second);
+    }
+
+    this->_read_fd_to_task_map.clear();
+    this->_write_fd_to_task_map.clear();
+}
+
 bool CgiManager::launchTask(int clientFd,
                             const std::string &scriptPath,
                             const std::string &interpreterPath,

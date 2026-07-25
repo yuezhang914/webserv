@@ -41,9 +41,9 @@ private:
     void setupSockets();                                     // 砸开所有配置端口
     bool isListenFd(int fd);                                 // 判别监听套接字 vs 客户连接
     void acceptNewConnection(int listenFd);                  // 建立新 Client 连接
-    void handleClientRead(int clientFd, size_t poll_index);  // 读取客户端 HTTP 请求
-    void handleClientWrite(int clientFd, size_t poll_index); // 发送 HTTP Response 给客户端
-    void closeConnection(int clientFd);                      // 断开连接（无 poll_index 传参更安全）
+    void handleClientRead(int clientFd, size_t pollIndex);  // 读取客户端 HTTP 请求
+    void handleClientWrite(int clientFd, size_t pollIndex); // 发送 HTTP Response 给客户端
+    void closeConnection(int clientFd, size_t pollIndex);                      // 断开连接（无 poll_index 传参更安全）
 
     void prePollCleanup();
     int  executePoll(int &retries);
