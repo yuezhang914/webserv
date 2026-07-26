@@ -259,7 +259,7 @@ void CgiManager::reapChildren()
             if (task.pid == pid)
             {
                 // 标记 PID 为已回收，防止 forceKillAndClean 里重复 kill / waitpid
-                task.pid = -1; 
+                task.pid = -1;
                 this->forceKillAndClean(task);
                 break; // 一个 PID 只对应一个 Task，找到后提前跳出
             }
@@ -283,7 +283,7 @@ std::vector<CgiEventResult> CgiManager::checkTimeouts()
         // 💡 2. 检查运行时间是否超forceKillAndClean(task)过阈值（例如 10 秒）
         if (task.startTime > 0 && (now - task.startTime > 10))
         {
-            std::cerr << "[CgiManager] Timeout Warning: CGI PID " << task.pid 
+            std::cerr << "[CgiManager] Timeout Warning: CGI PID " << task.pid
                       << " exceeded 10s timeout! Killing..." << std::endl;
 
             int clientFd = task.clientFd;
@@ -322,7 +322,7 @@ void CgiManager::removeTaskByClientFd(int clientFd)
         // 💡 2. 匹配到对应的客户端 Socket FD
         if (task.clientFd == clientFd)
         {
-            std::cout << "[CgiManager] Client FD " << clientFd 
+            std::cout << "[CgiManager] Client FD " << clientFd
                       << " disconnected early. Force killing CGI PID " << task.pid << std::endl;
 
             // 物理 kill PID、close(readFd/writeFd) 并擦除 map 账本

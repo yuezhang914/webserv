@@ -1,17 +1,6 @@
 #ifndef CGIHANDLER_HPP
 # define CGIHANDLER_HPP
 
-# include <string>
-# include <map>
-# include <vector>
-# include <iostream>
-# include <sstream>
-# include <cstring>
-# include <cstdlib>
-# include <unistd.h>
-# include <fcntl.h>
-# include <sys/types.h>
-# include <sys/wait.h>
 
 // 💡 物理管道 FD 与 PID 承载包
 struct CgiFds {

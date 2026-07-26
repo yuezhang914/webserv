@@ -150,7 +150,14 @@ CgiFds CgiHandler::async_launch()
         }
         else
         {
-            std::string executable = "./" + scriptName;
+            // 无解释器（直接执行二进制或带 Shebang 的脚本）：
+            std::string executable = _script_path;
+
+            // 如果是相对路径且没带 ./，补上 ./
+            if (executable.find('/') != 0 && executable.find("./") != 0)
+            {
+                executable = "./" + executable;
+            }
 
             args[0] = const_cast<char *>(executable.c_str());
             args[1] = NULL;
@@ -180,16 +187,16 @@ char **CgiHandler::_buildEnvironment() const
     std::map<std::string, std::string> envMap;
 
     envMap["GATEWAY_INTERFACE"] = "CGI/1.1";
-    envMap["SERVER_PROTOCOL"]    = "HTTP/1.1";
-    envMap["REQUEST_METHOD"]     = _method;
-    envMap["QUERY_STRING"]       = _query;
+    envMap["SERVER_PROTOCOL"] = "HTTP/1.1";
+    envMap["REQUEST_METHOD"] = _method;
+    envMap["QUERY_STRING"] = _query;
 
-    envMap["SCRIPT_NAME"]     = _path;
+    envMap["SCRIPT_NAME"] = _path;
     envMap["SCRIPT_FILENAME"] = _script_path;
-    envMap["PATH_INFO"]       = "";
+    envMap["PATH_INFO"] = "";
 
-    envMap["SERVER_NAME"]   = _host;
-    envMap["SERVER_PORT"]   = _port;
+    envMap["SERVER_NAME"] = _host;
+    envMap["SERVER_PORT"] = _port;
     envMap["DOCUMENT_ROOT"] = _root;
 
     // 自动透传所有转为小写/大写的 HTTP Header (根据 RFC 规范)
