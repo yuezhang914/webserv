@@ -1,9 +1,9 @@
 #ifndef CGIHANDLER_HPP
-# define CGIHANDLER_HPP
-
+#define CGIHANDLER_HPP
 
 // 💡 物理管道 FD 与 PID 承载包
-struct CgiFds {
+struct CgiFds
+{
     int read_fd;  // 父进程读端 (CGI stdout)
     int write_fd; // 父进程写端 (CGI stdin)
     pid_t pid;    // 子进程 PID
@@ -42,6 +42,8 @@ private:
     std::string _port;
     std::string _root;
 
+    bool _setupPipes(int pipe_to_parent[2], int pipe_to_child[2]);
+    void _executeChildProcess(int childReadFd, int parentWriteFd);
     char **_buildEnvironment() const;
     void _freeEnvironment(char **env) const;
 };
