@@ -143,53 +143,40 @@ void ServerManager::acceptNewConnection(int listenFd)
     int clientFd = ::accept(listenFd, (struct sockaddr *)&client_addr, &client_len);
     if (clientFd < 0)
     {
-        // 过滤假唤醒/高并发暂态无连接情况（不属于真正报错）
-        if (errno != EAGAIN && errno != EWOULDBLOCK)
-        {
-            std::cerr << "[Acceptor] Error: accept() failed on Listen FD " << listenFd << std::endl;
-        }
         return;
     }
-
     ClientSocket *p_socket = NULL;
     Connection *conn = NULL;
-
     // 2.  RAII 异常安全防护：防止 new 失败导致的 FD / 堆内存物理泄漏
     try
     {
         // 创建 ClientSocket 实体
         p_socket = new ClientSocket(clientFd);
-
         // 创建 Connection 业务实体
         conn = new Connection();
         conn->socket = p_socket;
-
         // 3. 安全抽取虚拟主机配置实体
         std::map<int, ServerConfig>::iterator config_it = this->_listen_socket_map.find(listenFd);
         if (config_it != this->_listen_socket_map.end())
         {
             conn->config = config_it->second;
         }
-
         // 4. 彻底锁进大户籍 Map 账本
         this->_connections[clientFd] = conn;
 
         // 5. 挂载到 poll 雷达网上监听读事件 (POLLIN)
         this->registerFdToPoll(clientFd, POLLIN);
-
         std::cout << "[ServerManager] Accepted new connection -> Allocated Client FD: "
                   << clientFd << " (SUCCESSFULLY SET O_NONBLOCK!)" << std::endl;
     }
     catch (const std::exception &e)
     {
         std::cerr << "[Acceptor] Critical allocation error: " << e.what() << std::endl;
-
-        // 🧹 极速打扫战场：如果有任何对象建出来了一半，一律安全的释放 + 物理 close(clientFd)
+        // 如果有任何对象建出来了一半，一律安全的释放 + 物理 close(clientFd)
         if (p_socket != NULL)
             delete p_socket; // ClientSocket 析构会自动 ::close(clientFd)
         else
             ::close(clientFd);
-
         if (conn != NULL)
             delete conn;
     }
