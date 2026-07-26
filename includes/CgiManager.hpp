@@ -8,7 +8,7 @@
 #include <ctime>
 #include <sys/types.h>
 
-// 💡 纯粹的数据任务（零 Connection！零 ServerManager！）
+// 纯粹的数据任务
 struct CgiTask
 {
     int clientFd;
@@ -24,7 +24,7 @@ struct CgiTask
     CgiTask() : clientFd(-1), readFd(-1), writeFd(-1), pid(-1), bodyBytesSent(0), startTime(0) {}
 };
 
-// 💡 CGI 事件响应结果
+// CGI 事件响应结果
 enum CgiStatus
 {
     CGI_CONTINUE,
@@ -49,7 +49,7 @@ public:
     CgiManager();
     ~CgiManager();
 
-    // 🎯 100% 纯粹接口：只接收 clientFd、脚本路径、环境变量数组、Body 字符串！
+    // 100% 纯粹接口：只接收 clientFd、脚本路径、环境变量数组、Body 字符串
     bool launchTask(int clientFd,
                     const std::string &scriptPath,
                     const std::string &interpreterPath,
@@ -69,7 +69,6 @@ public:
     void removeTaskByClientFd(int clientFd);     // 当客户端异常断开时调用，物理销毁任务与杀掉 PID
 
 private:
-    // 💡 彻底抛弃 Connection*！改为私有管理自己的 Task 对象！
     std::map<int, CgiTask> _read_fd_to_task_map;  // cgiReadFd  -> CgiTask
     std::map<int, CgiTask> _write_fd_to_task_map; // cgiWriteFd -> CgiTask
 
