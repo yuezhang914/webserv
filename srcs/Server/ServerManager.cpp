@@ -219,7 +219,7 @@ void ServerManager::acceptNewConnection(int listenFd)
  */
 void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
 {
-    // 💡 1. 🎯 【问题 14 防线】：用 find() 替代 operator[]，严格防御 NULL 指针解引用
+    // 💡 1. 用 find() 替代 operator[]，严格防御 NULL 指针解引用
     std::map<int, Connection *>::iterator connIt = this->_connections.find(clientFd);
     if (connIt == this->_connections.end() || connIt->second == NULL)
     {
@@ -227,11 +227,9 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
         this->closeConnection(clientFd, pollIndex);
         return;
     }
-
     Connection *conn = connIt->second;
     char buffer[BUFFER_SIZE];
     int loop_counter = 0; // 物理计数器
-
     // 2. 强攻非阻塞 Socket，把内核缓冲区捞干净
     while (true)
     {
@@ -240,10 +238,8 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
             std::cerr << "[ServerManager] DEAD LOOP DETECTED IN READ VALVE! Force breaking..." << std::endl;
             break;
         }
-
         ssize_t bytes_read = conn->socket->read(buffer, BUFFER_SIZE - 1);
-
-        if (bytes_read == 0) // EOF（客户端优雅断开）
+        if (bytes_read == 0) // EOF
         {
             std::cout << "[ServerManager] Client FD " << clientFd << " closed connection (EOF)." << std::endl;
             this->closeConnection(clientFd, pollIndex);
@@ -264,20 +260,16 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
             conn->read_buffer.append(buffer, bytes_read);
         }
     }
-
     // 3. 解析蓄水池里的数据
     size_t consumed = 0;
     int status = RequestParser::parseBuffer(conn->read_buffer, conn->request, &conn->config, consumed);
-
     if (status == REQUEST_OK)
     {
         std::cout << "[ServerManager] Request parsed successfully for FD " << clientFd << std::endl;
         conn->read_buffer.erase(0, consumed);
-
-        // 💡 缝合 SessionStore 机制
+        // 缝合 SessionStore 机制
         static SessionStore sessionStore;
         Response res = buildResponse(conn->request, sessionStore);
-
         // 4. 检查这到底是不是一个隐藏的 CGI 请求
         std::string script_path;
         std::string interpreter_path;
@@ -289,7 +281,7 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
             int outReadFd = -1;
             int outWriteFd = -1;
 
-            // 🚀 【全新解耦并网】：将纯数据解包传给 CgiManager 拉起 Task
+            // 将纯数据解包传给 CgiManager 拉起 Task
             bool launched = this->_cgiManager.launchTask(
                 clientFd,
                 script_path,
@@ -302,20 +294,19 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
                 outReadFd,
                 outWriteFd);
 
-            // ❌ CGI 启动失败 500 熔断
+            // CGI 启动失败 500 熔断
             if (!launched)
             {
                 std::cerr << "[CGI] Error: Failed to spawn CGI process for client " << clientFd << std::endl;
                 conn->response.createResponse(500, "CGI Spawn Failed", conn->config.error_pages);
                 conn->write_buffer = conn->response.responseToString();
                 conn->close_after_write = true;
-
                 // 失败时直接激活 POLLOUT 准备发送 500 错误页
                 this->setClientEvents(clientFd, POLLOUT);
                 return;
             }
 
-            // 🎯 【读写雷达绑定与 Reactor 注册】
+            // 读写雷达绑定与 Reactor 注册
             if (outReadFd != -1)
             {
                 this->_cgi_read_fd_to_client_map[outReadFd] = clientFd;
@@ -327,18 +318,15 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
                 this->_cgi_write_fd_to_client_map[outWriteFd] = clientFd;
                 this->registerFdToPoll(outWriteFd, POLLOUT); // 有 Body 时写端挂在 POLLOUT 上
             }
-
-            // 💡 🎯 【核心防线】：暂停客户端 Socket 监听，防止 Request 被后续数据覆盖！
+            // 暂停客户端 Socket 监听，防止 Request 被后续数据覆盖！
             this->setClientEvents(clientFd, 0);
-
             std::cout << "[⚡ WebServ Core] Client " << clientFd << " successfully split into CGI pipeline, client read paused." << std::endl;
             return;
         }
         else
         {
-            // 5. 普通静态响应，直接准备发送
+            // 普通静态响应，直接准备发送
             conn->write_buffer = res.responseToString();
-
             // 普通静态响应生成后，只监听 POLLOUT（发完再恢复 POLLIN）
             this->setClientEvents(clientFd, POLLOUT);
         }
@@ -351,10 +339,8 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
     {
         std::cerr << "[ServerManager] Request error (" << status << ") on FD " << clientFd << ". Pre-writing 400 response." << std::endl;
         conn->close_after_write = true;
-
         std::string error_response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         conn->write_buffer += error_response;
-
         // 追加写事件 400 报错发货
         this->setClientEvents(clientFd, POLLOUT);
     }
@@ -384,14 +370,12 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
  */
 void ServerManager::handleClientWrite(int clientFd, size_t pollIndex)
 {
-    // 💡 1. 用 find() 探查，防野指针与隐式插入
+    // 用 find() 探查，防野指针与隐式插入
     std::map<int, Connection *>::iterator it = this->_connections.find(clientFd);
     if (it == this->_connections.end() || it->second == NULL)
         return;
-
     Connection *conn = it->second;
-
-    // 💡 2. 缓冲区本来就是空的边界处理
+    // 缓冲区本来就是空的边界处理
     if (conn->write_buffer.empty())
     {
         if (conn->close_after_write)
@@ -400,21 +384,20 @@ void ServerManager::handleClientWrite(int clientFd, size_t pollIndex)
         }
         else
         {
-            // 💡 Keep-Alive 长连接复用：调用 clear() 彻底洗白 Connection 上下文
+            // Keep-Alive 长连接复用：调用 clear() 彻底洗白 Connection 上下文
             conn->clear();
             this->setClientEvents(clientFd, POLLIN);
         }
         return;
     }
 
-    // 💡 3. 物理切片非阻塞发送
+    // 物理切片非阻塞发送
     ssize_t bytes_sent = conn->socket->write(conn->write_buffer);
 
     if (bytes_sent > 0)
     {
         // 抹去已成功发货的切片
         conn->write_buffer.erase(0, bytes_sent);
-
         // 如果发货完毕
         if (conn->write_buffer.empty())
         {
@@ -426,7 +409,7 @@ void ServerManager::handleClientWrite(int clientFd, size_t pollIndex)
             else
             {
                 std::cout << "[ServerManager] Sent response completely to FD " << clientFd << ". Resetting event to POLLIN." << std::endl;
-                // 💡 🎯 核心重置：Keep-Alive 长连接复用，洗白 Request 和 Response 状态，准备迎接下一个 HTTP 请求！
+                // 核心重置：Keep-Alive 长连接复用，洗白 Request 和 Response 状态，准备迎接下一个 HTTP 请求！
                 conn->clear();
                 this->setClientEvents(clientFd, POLLIN);
             }
@@ -434,12 +417,12 @@ void ServerManager::handleClientWrite(int clientFd, size_t pollIndex)
     }
     else if (bytes_sent == -1)
     {
-        // 💡 -1 语义：内核缓冲区暂态满 (EAGAIN/EWOULDBLOCK)，不算错，保持 POLLOUT 等下一轮 poll 滴答
+        // 内核缓冲区暂态满 (EAGAIN/EWOULDBLOCK)，不算错，保持 POLLOUT 等下一轮 poll 滴答
         return;
     }
     else if (bytes_sent == -2)
     {
-        // 💡 -2 语义：对端物理断连/管道破裂！直接斩断悬空 Socket
+        // 对端物理断连/管道破裂！直接斩断悬空 Socket
         std::cerr << "[ServerManager] Fatal send error (-2) on FD " << clientFd << "! Closing connection." << std::endl;
         this->closeConnection(clientFd, pollIndex);
     }
@@ -471,25 +454,21 @@ void ServerManager::handleCgiRead(int cgiReadFd)
 
     if (res.status == CGI_FINISHED)
     {
-        // 1. 擦除雷达映射与 pollfd 挂载
         this->_cgi_read_fd_to_client_map.erase(cgiReadFd);
         this->eraseFdFromPoll(cgiReadFd);
 
-        // 2. 找到对应的 Client Connection 渲染 Response 并恢复发送
         Connection *conn = this->_connections[res.clientFd];
         if (conn)
         {
-            // 💡 解析 CGI 吐出的 rawOutput (含 Content-type header) 并构造 Response
             Response cgiResponse = buildCgiResponse(conn->request, res.rawOutput);
             conn->response = cgiResponse;
             conn->write_buffer = cgiResponse.responseToString();
             conn->close_after_write = true;
-
-            // 恢复客户端 Socket 的 POLLOUT 监听，准备把数据发给客户端！
             this->setClientEvents(res.clientFd, POLLOUT);
         }
     }
-    else if (res.status == CGI_ERROR)
+    else if (res.status == CGI_ERROR) // 🟢 若 hasWriteTask(cgiWriteFd) 仍为 true，说明 Body 还没写完！
+                                      // 啥都不做，保留在 poll_fds 里，等待下一个 Tick 继续写入！
     {
         this->_cgi_read_fd_to_client_map.erase(cgiReadFd);
         this->eraseFdFromPoll(cgiReadFd);
@@ -505,6 +484,24 @@ void ServerManager::handleCgiRead(int cgiReadFd)
     }
 }
 
+/*
+函数：ServerManager::handleCgiWrite
+用途：Reactor 事件回调函数。当 CGI 输入管道（pipe_to_child[1]）触发可写事件（POLLOUT）时，负责调度 POST Body 的非阻塞切片写入与写管道的生命周期管理。
+参数：
+    - int cgiWriteFd: 触发 POLLOUT 可写事件的 CGI 管道写端文件描述符。
+返回值：
+    - void（无返回值）。
+实现逻辑或说明：
+    1. 驱动写入：调用 _cgiManager.handlePipeWrite(cgiWriteFd) 尝试向 CGI stdin 管道非阻塞写入 Body 数据切片。
+    2. 错误处理分支（res.status == CGI_ERROR）：
+       - 说明管道写入发生物理破裂（如 EPIPE 或子进程挂掉）；
+       - 从 _cgi_write_fd_to_client_map 账本与 poll 监听列表中抹除该 cgiWriteFd；
+       - 通过 res.clientFd 匹配对应的 Connection，构建 500 状态码的错误 Response 并挂载客户端 Socket 的 POLLOUT 事件，准备回复错误页面。
+    3. 正常传输与完工分支（res.status == CGI_CONTINUE）：
+       - 完工判定：调用 _cgiManager.hasWriteTask(cgiWriteFd) 检查该写管道是否已被 CgiManager 在内部关闭并注销；
+       - 若 hasWriteTask 返回 false（ Body 已完整发完并发送 EOF）：从 Server 侧映射表擦除并调用 eraseFdFromPoll 从 poll 监听队列中注销该写 FD；
+       - 若 hasWriteTask 返回 true（ Body 尚未写完）：不做任何注销操作，保持其在 poll_fds 中的 POLLOUT 监听状态，等待下一个事件 Tick 继续写入剩余数据切片。
+*/
 void ServerManager::handleCgiWrite(int cgiWriteFd)
 {
     CgiEventResult res = this->_cgiManager.handlePipeWrite(cgiWriteFd);
@@ -525,37 +522,59 @@ void ServerManager::handleCgiWrite(int cgiWriteFd)
     }
     else
     {
-        // 🟢 如果 Body 写完，CgiManager 内部已经关闭了 cgiWriteFd，我们只需从 Reactor 注销这个 FD
-        if (this->_cgi_write_fd_to_client_map.find(cgiWriteFd) != this->_cgi_write_fd_to_client_map.end())
+        if (!this->_cgiManager.hasWriteTask(cgiWriteFd))
         {
-            // 检查如果底层 CgiManager 的 writeFd 已经置为 -1，说明写管道已优雅关闭
             this->_cgi_write_fd_to_client_map.erase(cgiWriteFd);
             this->eraseFdFromPoll(cgiWriteFd);
         }
     }
 }
 
+/*
+函数：ServerManager::dispatchEvents
+用途：Reactor 事件分发核心引擎。负责轮询 _poll_fds 队列中捕获到的就绪事件（I/O 读写与异常），并精确路由至相对应的处理函数。
+参数：
+    - 无（直接读取类成员变量 _poll_fds 以及各项映射账本）。
+返回值：
+    - void（无返回值）。
+实现逻辑或说明：
+    1. 倒序安全遍历（Reverse Iteration）：
+       - 使用 for (size_t i = _poll_fds.size(); i > 0; --i) 进行倒序遍历；
+       - 结合防卫检查（idx >= size() || fd == -1 || revents == 0），彻底消除在分发过程中因 eraseFdFromPoll 或 closeConnection 导致 vector 元素前移引发的索引越界与迭代器失效问题。
+    2. 分支一：CGI 读管道事件（isCgiReadFd）：
+       - 若触发 POLLIN 或 POLLHUP，路由至 handleCgiRead（POLLHUP 必须走 handleCgiRead 读取管道内核缓冲区中残存的最后一批数据）；
+       - 若触发 POLLERR 或 POLLNVAL，判定为管道物理破坏，解绑关联的 clientFd，强杀 CGI 任务并给客户端回派 500 响应。
+    3. 分支二：CGI 写管道事件（isCgiWriteFd）：
+       - 若触发 POLLOUT，路由至 handleCgiWrite 向 CGI stdin 异步切片写入 POST Body；
+       - 若触发 POLLERR、POLLHUP 或 POLLNVAL，说明 CGI 提前关闭了 stdin，强杀任务并给客户端回派 500 响应。
+    4. 分支三：普通 Socket 异常事件（POLLERR / POLLHUP / POLLNVAL）：
+       - 若为监听 Socket（Listen FD）物理故障，打印 CRITICAL 级日志并将 fd 置为 -1 挂起；
+       - 若为客户端 Socket，路由至 closeConnection 清理客户端连接与上下文。
+    5. 分支四：普通 Socket 可读事件（POLLIN）：
+       - 若为 Listen FD，路由至 acceptNewConnection 接收新客户端连接；
+       - 若为客户端 Socket，路由至 handleClientRead 读取 HTTP 请求数据。
+    6. 分支五：普通 Socket 可写事件（POLLOUT）：
+       - 再次防卫检查，防止在前面 POLLIN 处理中客户端已提前断开或 FD 被 swap 置换；
+       - 若 FD 依然有效且匹配，路由至 handleClientWrite 向客户端发送响应 Body。
+*/
 void ServerManager::dispatchEvents()
 {
-    // 🚀 保持精妙的倒序遍历（防御 Vector erase 导致的索引失效）
+    // 保持精妙的倒序遍历（防御 Vector erase 导致的索引失效）
     for (size_t i = this->_poll_fds.size(); i > 0; --i)
     {
         size_t idx = i - 1;
-
         // 极端防卫：防止在前面几轮循环中已经被物理注销或越界的 FD
         if (idx >= this->_poll_fds.size() || this->_poll_fds[idx].fd == -1 || this->_poll_fds[idx].revents == 0)
             continue;
-
         int activeFd = this->_poll_fds[idx].fd;
         short revents = this->_poll_fds[idx].revents;
 
         if (revents == 0)
             continue;
-
         // ==================== 1. CGI 读管道事件分发 (CGI stdout -> Webserv) ====================
         if (this->isCgiReadFd(activeFd))
         {
-            // 🎯 POLLHUP 必须走 handleCgiRead：管道里可能还有最后一批未读完的数据！
+            // POLLHUP 必须走 handleCgiRead：管道里可能还有最后一批未读完的数据！
             if (revents & (POLLIN | POLLHUP))
             {
                 std::cout << "[Radar] -> Routing CGI Read FD " << activeFd << " to handleCgiRead (POLLIN/POLLHUP)" << std::endl;
@@ -569,7 +588,6 @@ void ServerManager::dispatchEvents()
                 this->_cgi_read_fd_to_client_map.erase(activeFd);
                 this->_cgiManager.removeTaskByClientFd(clientFd);
                 this->eraseFdFromPoll(activeFd);
-
                 Connection *conn = this->_connections[clientFd];
                 if (conn)
                 {
@@ -598,7 +616,6 @@ void ServerManager::dispatchEvents()
                 this->_cgi_write_fd_to_client_map.erase(activeFd);
                 this->_cgiManager.removeTaskByClientFd(clientFd);
                 this->eraseFdFromPoll(activeFd);
-
                 Connection *conn = this->_connections[clientFd];
                 if (conn)
                 {
@@ -670,7 +687,7 @@ void ServerManager::dispatchEvents()
 实现逻辑：
 1. 空舱拦截防线：进线首先点验核心名册。若发现没有任何套接字入籍（_poll_fds 为空），则当场安全熔断折返，严防引发空转血崩。
 2. 永动机全天候死循环（while (true)）：
-   -第一步（prePollCleanup）：在前置位清理上一轮循环中被标记为脏、死、或已过期的僵尸资产与长连接，保持核心底盘绝对纯净。
+   - 第一步（prePollCleanup）：在前置位清理上一轮循环中被标记为脏、死、或已过期的僵尸资产与长连接，保持核心底盘绝对纯净。
    - 第二步（executePoll）：物理拉起多路复用大闸，主线程让出 CPU 陷入非阻塞全天候休眠，并向外部引入弹性防线计数器保护。若返回负数（即连续打断超过 3 次红线），说明遭遇毁灭性灾难，果断强行跳出循环（break）安全撤退。
    - 第三步（dispatchEvents）：若成功捕获有效网络事件，立刻开启倒序卡尺，将事件精准分
         std::cerr << "[ServerManager] Error: No listening sockets in poll tree. Aborting run()." << std::endl;
@@ -687,12 +704,12 @@ void ServerManager::run()
     std::cout << "[ServerManager] Main loop started. Entering the matrix..." << std::endl;
 
     int poll_error_retries = 0;
-    while (true) // 💡 提示：若有全局信号标志位（如 g_server_running），也可替换 while(true) 方便 Ctrl+C 优雅退出
+    while (true) // 提示：若有全局信号标志位（如 g_server_running），也可替换 while(true) 方便 Ctrl+C 优雅退出
     {
-        // 1. 🧹 轮询前的账本与死链清理车间（如追加 fds_to_add 到 poll_fds）
+        // 1. 轮询前的账本与死链清理车间（如追加 fds_to_add 到 poll_fds）
         this->prePollCleanup();
 
-        // 2. 📡 执行 1000ms 物理超时/阻塞轮询
+        // 2. 执行 1000ms 物理超时/阻塞轮询
         int ret = this->executePoll(poll_error_retries);
         if (ret < 0)
         {
@@ -706,7 +723,7 @@ void ServerManager::run()
             this->dispatchEvents();
         }
 
-        // 4. ⏱️ 盘点车间 A：巡检 CGI 超时任务，统一渲染 504 Gateway Timeout 报错
+        // 4. ⏱盘点车间 A：巡检 CGI 超时任务，统一渲染 504 Gateway Timeout 报错
         std::vector<CgiEventResult> timeouts = this->_cgiManager.checkTimeouts();
         for (size_t i = 0; i < timeouts.size(); ++i)
         {
@@ -728,7 +745,6 @@ void ServerManager::run()
                     ++it;
                 }
             }
-
             // 找到客户端连接，生成 504 响应并准备发货
             Connection *conn = this->_connections[clientFd];
             if (conn)
@@ -739,10 +755,7 @@ void ServerManager::run()
                 this->setClientEvents(clientFd, POLLOUT);
             }
         }
-
-        // 5. 🪓 盘点车间 B：纯非阻塞 WNOHANG 回收 CGI 僵尸进程
         this->_cgiManager.reapChildren();
     }
-
     std::cout << "[ServerManager] Main loop safely terminated." << std::endl;
 }

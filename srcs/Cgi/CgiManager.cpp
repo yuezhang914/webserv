@@ -376,3 +376,20 @@ void CgiManager::removeTaskByClientFd(int clientFd)
         }
     }
 }
+
+/*
+函数：CgiManager::hasWriteTask
+用途：查询指定的 CGI 管道写端文件描述符（cgiWriteFd）是否仍处于活跃的 POST Body 写入任务队列中。
+参数：
+    - int cgiWriteFd: 待查询的 CGI 管道写端文件描述符。
+返回值：
+    - bool: 若写任务仍有效（Body 尚未发送完毕）返回 true；若任务已发完注销或 FD 无效则返回 false。
+实现逻辑或说明：
+    1. 在私有写账本 _write_fd_to_task_map 中执行 find(cgiWriteFd) 查找。
+    2. 将迭代器与 _write_fd_to_task_map.end() 进行比较。
+    3. 供 ServerManager::handleCgiWrite 在处理 CGI_CONTINUE 时进行精准判定，以决定是保留 poll 监听继续发送切片，还是安全注销写 FD。
+*/
+bool CgiManager::hasWriteTask(int cgiWriteFd) const
+{
+    return this->_write_fd_to_task_map.find(cgiWriteFd) != this->_write_fd_to_task_map.end();
+}
