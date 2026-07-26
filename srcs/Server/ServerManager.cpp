@@ -39,13 +39,13 @@ ServerManager::~ServerManager()
 }
 
 /*
-函数用途：物理拉起 Webserv 网络的奠基点火仪式（巢穴孵化），全量启动底层服务器级网络套接字的物理实例化。
+函数用途：开始
 参数与变量：
 - setupSockets (类内部核心函数)：专职读取配置文件、循环创建 Socket、绑定端口（bind）并将其切入被动监听状态（listen）的基建车间。
 实现逻辑：
-1. 宣告主权：向控制台抛出高亮初始化日志，宣告大管家网络骨架正式破土动工。
-2. 物理孵化：果断向下调用 setupSockets 核心基建车间，将配置文件里规划的所有虚拟端口，全量具象化为操作系统的 ListenFD（监听套接字），
-   并手工将这些元老级 FD 编入全局轮询名册（_poll_fds），为后续 run() 引擎进入多路复用矩阵焊死第一块钢铁基石！
+1. 向控制台抛出初始化日志
+2. 调用 setupSockets 核心，将配置文件里规划的所有虚拟端口，全量化为操作系统的 ListenFD（监听套接字），
+   并手工将FD 编入全局轮询名册（_poll_fds），为后续 run()使用
 */
 void ServerManager::init()
 {
@@ -195,42 +195,29 @@ void ServerManager::acceptNewConnection(int listenFd)
     }
 }
 
-/**
- * 函数：ServerManager::handleClientRead
- * 用途：当已建立连接的普通客户端（clientFd）触发读事件（POLLIN）时，调用该函数通过非阻塞循环吞入浏览器发来的 HTTP 裸请求（Raw Request）文本，并负责处理 TCP 粘包/断包问题。
- * 参数来源：来自 run() 大循环，其中 clientFd = _poll_fds[poll_index].fd，poll_index 是该节点在全局 _poll_fds 阵列中的实时下标。
- * 变量解释：
- *     - clientFd：正在源源不断喷射请求数据的目标客户端套接字。
- *     - poll_index：该客户端在 poll 监视大阵列中的位置下标，用来在断开连接时配合执行清理。
- *     - BUFFER_SIZE：在头文件或本文件定义的宏（通常为 4096），规定单次 recv() 探入内核缓冲区的勺子大小。
- *     - buffer：局部栈内存临时数组，用来物理承接单次从内核捞出的裸字节流。
- *     - bytes_read：单次 recv() 调用后实际吸入的合法字节数。
- * 实现逻辑：
- *     1. 挺进 while(true) 异步吞噬大循环。因为 clientFd 是非阻塞的，必须用死循环榨干内核缓冲区。
- *     2. 呼叫 bytes_read = recv(clientFd, buffer, BUFFER_SIZE, 0) 捞取数据。
- *     3. **【判别断开】**：若 bytes_read 等于 0，说明浏览器主动挥手断开（EOF），立刻功德圆满地调用 closeConnection() 销毁通道并安全折返。
- *     4. **【判别抖动】**：若 bytes_read 小于 0，深入核验 errno：
- *        - 若为 EAGAIN 或 EWOULDBLOCK，代表当前能读的已被全部吸干，属于完美的非阻塞退出信号，直接 break 退出吞噬循环；
- *        - 若为 EINTR（被系统信号中断），属于无辜躺枪，继续 continue 强攻；
- *        - 若为其他异常（如 ECONNRESET 客户端猝死），打印警告并调用 closeConnection() 强制拔线。
- *     5. **【拼接蓄水】**：若成功读到正数，将原始数据转换为 std::string，追加（+=）到该客户在 _client_buffers[clientFd] 里的专属蓄水抽屉中。
- *     6. **【交接分流预备】**：在退出吞噬后，检查抽屉中的字符串是否已经包揽了 HTTP 协议规定的完整请求终结符 "\r\n\r\n"。若完整，说明接收完毕，此时修改大阵列对应的关注事件为 `_poll_fds[poll_index].events = POLLOUT`（转换成关注可写事件），准备把接力棒递给业务层做 Response 喷吐。
- * 后续影响：客户端的 buffer 蓄水成功。一旦切换为 POLLOUT 状态，主 poll 大循环在下一个滴答里就会立马感知到该套接字“可写”，从而把控制权无缝移交给写车间 handleClientWrite()。
- */
-void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
+/*
+函数：ServerManager::readSocketDataToBuffer
+用途：从客户端非阻塞 Socket 中读取所有就绪的数据字节，追加至 Connection 的 read_buffer 蓄水池。
+参数：
+    - Connection *conn: 目标客户端连接对象指针。
+    - int clientFd    : 客户端 Socket 文件描述符。
+    - size_t pollIndex: 在 poll_fds 中的监听下标。
+返回值：
+    - bool: 成功读取或读空返回 true；若遇到 EOF (0) 或物理崩溃 (-2) 导致连接关闭则返回 false。
+实现逻辑或说明：
+    1. 使用 while(true) 循环调用 conn->socket->read 读取数据。
+    2. 设置死循环计数器 loop_counter 防卫，防止底层 Socket 挂起触发死循环。
+    3. 状态分支判定：
+       - bytes_read == 0  : 客户端主动关闭连接 (EOF)，调用 closeConnection 并返回 false；
+       - bytes_read == -1 : 正常的非阻塞缓冲区读空，安全 break 跳出循环并返回 true；
+       - bytes_read == -2 : 物理链路崩溃，调用 closeConnection 并返回 false；
+       - bytes_read > 0  : 追加数据至 conn->read_buffer。
+*/
+bool ServerManager::readSocketDataToBuffer(Connection *conn, int clientFd, size_t pollIndex)
 {
-    // 💡 1. 用 find() 替代 operator[]，严格防御 NULL 指针解引用
-    std::map<int, Connection *>::iterator connIt = this->_connections.find(clientFd);
-    if (connIt == this->_connections.end() || connIt->second == NULL)
-    {
-        std::cerr << "[ServerManager] Error: Client FD " << clientFd << " is NULL or unmapped in handleClientRead!" << std::endl;
-        this->closeConnection(clientFd, pollIndex);
-        return;
-    }
-    Connection *conn = connIt->second;
     char buffer[BUFFER_SIZE];
-    int loop_counter = 0; // 物理计数器
-    // 2. 强攻非阻塞 Socket，把内核缓冲区捞干净
+    int loop_counter = 0;
+
     while (true)
     {
         if (++loop_counter > 1000)
@@ -243,16 +230,16 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
         {
             std::cout << "[ServerManager] Client FD " << clientFd << " closed connection (EOF)." << std::endl;
             this->closeConnection(clientFd, pollIndex);
-            return;
+            return false;
         }
-        if (bytes_read == -1) // 正常的非阻塞读空，安全退出缓冲区读取
+        if (bytes_read == -1) // 非阻塞读空
         {
             break;
         }
-        if (bytes_read == -2) // 物理崩溃，强行断开
+        if (bytes_read == -2) // 物理崩溃
         {
             this->closeConnection(clientFd, pollIndex);
-            return;
+            return false;
         }
         if (bytes_read > 0)
         {
@@ -260,76 +247,149 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
             conn->read_buffer.append(buffer, bytes_read);
         }
     }
-    // 3. 解析蓄水池里的数据
+    return true;
+}
+
+/*
+函数：ServerManager::dispatchCgiTask
+用途：解包内部 CGI 标头，拉起 CGI 子进程任务并将管道 FD 挂载至 Reactor 事件雷达。
+参数：
+    - Connection *conn     : 目标客户端连接对象指针。
+    - int clientFd        : 客户端 Socket 文件描述符。
+    - const Response &res : 内部构建好的 Header 响应模板对象。
+返回值：
+    - void（无返回值）。
+实现逻辑或说明：
+    1. 从 res 中解包提取 X-Internal-CGI-Path 与 X-Internal-CGI-Interpreter 标头。
+    2. 调用 _cgiManager.launchTask 裂变子进程，获得双向管道的 outReadFd 与 outWriteFd。
+    3. 熔断处理：若 launchTask 失败，生成 500 响应并设置 setClientEvents(clientFd, POLLOUT)。
+    4. 雷达注册：
+       - 若 outReadFd >= 0，绑定 _cgi_read_fd_to_client_map 并注册 registerFdToPoll(outReadFd, POLLIN)；
+       - 若 outWriteFd >= 0，绑定 _cgi_write_fd_to_client_map 并注册 registerFdToPoll(outWriteFd, POLLOUT)。
+    5. 暂停客户端 Socket 读监听（setClientEvents(clientFd, 0)），防止后续数据打乱 CGI 管道状态。
+*/
+void ServerManager::dispatchCgiTask(Connection *conn, int clientFd, const Response &res)
+{
+    std::string script_path;
+    std::string interpreter_path;
+
+    res.getHeader("X-Internal-CGI-Path", script_path);
+    res.getHeader("X-Internal-CGI-Interpreter", interpreter_path);
+
+    int outReadFd = -1;
+    int outWriteFd = -1;
+
+    bool launched = this->_cgiManager.launchTask(
+        clientFd,
+        script_path,
+        interpreter_path,
+        conn->request.getMethod(),
+        conn->request.getQuery(),
+        conn->request.getPath(),
+        conn->request.getHeaders(),
+        conn->request.getBody(),
+        outReadFd,
+        outWriteFd);
+
+    if (!launched)
+    {
+        std::cerr << "[CGI] Error: Failed to spawn CGI process for client " << clientFd << std::endl;
+        conn->response.createResponse(500, "CGI Spawn Failed", conn->config.error_pages);
+        conn->write_buffer = conn->response.responseToString();
+        conn->close_after_write = true;
+        this->setClientEvents(clientFd, POLLOUT);
+        return;
+    }
+
+    if (outReadFd != -1)
+    {
+        this->_cgi_read_fd_to_client_map[outReadFd] = clientFd;
+        this->registerFdToPoll(outReadFd, POLLIN);
+    }
+
+    if (outWriteFd != -1)
+    {
+        this->_cgi_write_fd_to_client_map[outWriteFd] = clientFd;
+        this->registerFdToPoll(outWriteFd, POLLOUT);
+    }
+
+    // 暂停客户端 Socket 监听
+    this->setClientEvents(clientFd, 0);
+    std::cout << "[⚡ WebServ Core] Client " << clientFd << " successfully split into CGI pipeline, client read paused." << std::endl;
+}
+
+/*
+函数：ServerManager::processParsedRequest
+用途：处理解析完结的 HTTP Request，完成 Session 缝合、路由判定与 CGI/静态响应分发。
+参数：
+    - Connection *conn: 目标客户端连接对象指针。
+    - int clientFd    : 客户端 Socket 文件描述符。
+返回值：
+    - void（无返回值）。
+实现逻辑或说明：
+    1. 实例化 SessionStore 机制并通过 buildResponse 构建 HTTP 响应模板。
+    2. 检查响应中是否包含 X-Internal-CGI-Path 标头：
+       - 若包含：说明是 CGI 请求，转交 dispatchCgiTask 处理；
+       - 若不包含：说明是普通静态请求，生成 responseToString() 赋值给 conn->write_buffer，并将客户端事件重置为 POLLOUT 等待发货。
+*/
+void ServerManager::processParsedRequest(Connection *conn, int clientFd)
+{
+    static SessionStore sessionStore;
+    Response res = buildResponse(conn->request, sessionStore);
+
+    std::string script_path;
+    if (res.getHeader("X-Internal-CGI-Path", script_path))
+    {
+        this->dispatchCgiTask(conn, clientFd, res);
+    }
+    else
+    {
+        conn->write_buffer = res.responseToString();
+        this->setClientEvents(clientFd, POLLOUT);
+    }
+}
+
+/*
+函数：ServerManager::handleClientRead
+用途：客户端 Socket 可读（POLLIN）事件入口函数。调度 Socket 缓冲区读取、协议解析与响应分发。
+参数：
+    - int clientFd    : 触发 POLLIN 事件的客户端 Socket 文件描述符。
+    - size_t pollIndex: 该 FD 在 _poll_fds 中的当前下标。
+返回值：
+    - void（无返回值）。
+实现逻辑或说明：
+    1. 指针防卫：使用 find() 检查 clientFd 对应 Connection 指针的合法性，若非法则安全 closeConnection。
+    2. Socket 捞取：调用 readSocketDataToBuffer 将内核缓冲区数据拉入 conn->read_buffer，若遇到关闭事件则提前结束。
+    3. HTTP 协议解析：调用 RequestParser::parseBuffer 尝试解析：
+       - REQUEST_OK         : 解析成功，擦除已消费字节，调用 processParsedRequest 路由处理；
+       - REQUEST_INCOMPLETE : 数据未完结，静默等待下一个 poll 滴答继续接收；
+       - 其它解析错误        : 构建 400 Bad Request 响应报文，将事件切换为 POLLOUT 准备回复错误。
+*/
+void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
+{
+    // 防御 NULL 指针解引用
+    std::map<int, Connection *>::iterator connIt = this->_connections.find(clientFd);
+    if (connIt == this->_connections.end() || connIt->second == NULL)
+    {
+        std::cerr << "[ServerManager] Error: Client FD " << clientFd << " is NULL or unmapped in handleClientRead!" << std::endl;
+        this->closeConnection(clientFd, pollIndex);
+        return;
+    }
+    Connection *conn = connIt->second;
+
+    // 抽取数据到 read_buffer 蓄水池
+    if (!this->readSocketDataToBuffer(conn, clientFd, pollIndex))
+        return;
+
+    // 解析蓄水池里的 HTTP 数据
     size_t consumed = 0;
     int status = RequestParser::parseBuffer(conn->read_buffer, conn->request, &conn->config, consumed);
+
     if (status == REQUEST_OK)
     {
         std::cout << "[ServerManager] Request parsed successfully for FD " << clientFd << std::endl;
         conn->read_buffer.erase(0, consumed);
-        // 缝合 SessionStore 机制
-        static SessionStore sessionStore;
-        Response res = buildResponse(conn->request, sessionStore);
-        // 4. 检查这到底是不是一个隐藏的 CGI 请求
-        std::string script_path;
-        std::string interpreter_path;
-
-        if (res.getHeader("X-Internal-CGI-Path", script_path))
-        {
-            res.getHeader("X-Internal-CGI-Interpreter", interpreter_path);
-
-            int outReadFd = -1;
-            int outWriteFd = -1;
-
-            // 将纯数据解包传给 CgiManager 拉起 Task
-            bool launched = this->_cgiManager.launchTask(
-                clientFd,
-                script_path,
-                interpreter_path,
-                conn->request.getMethod(),
-                conn->request.getQuery(),
-                conn->request.getPath(),
-                conn->request.getHeaders(),
-                conn->request.getBody(),
-                outReadFd,
-                outWriteFd);
-
-            // CGI 启动失败 500 熔断
-            if (!launched)
-            {
-                std::cerr << "[CGI] Error: Failed to spawn CGI process for client " << clientFd << std::endl;
-                conn->response.createResponse(500, "CGI Spawn Failed", conn->config.error_pages);
-                conn->write_buffer = conn->response.responseToString();
-                conn->close_after_write = true;
-                // 失败时直接激活 POLLOUT 准备发送 500 错误页
-                this->setClientEvents(clientFd, POLLOUT);
-                return;
-            }
-
-            // 读写雷达绑定与 Reactor 注册
-            if (outReadFd != -1)
-            {
-                this->_cgi_read_fd_to_client_map[outReadFd] = clientFd;
-                this->registerFdToPoll(outReadFd, POLLIN); // 读端永远挂在 POLLIN 上
-            }
-
-            if (outWriteFd != -1)
-            {
-                this->_cgi_write_fd_to_client_map[outWriteFd] = clientFd;
-                this->registerFdToPoll(outWriteFd, POLLOUT); // 有 Body 时写端挂在 POLLOUT 上
-            }
-            // 暂停客户端 Socket 监听，防止 Request 被后续数据覆盖！
-            this->setClientEvents(clientFd, 0);
-            std::cout << "[⚡ WebServ Core] Client " << clientFd << " successfully split into CGI pipeline, client read paused." << std::endl;
-            return;
-        }
-        else
-        {
-            // 普通静态响应，直接准备发送
-            conn->write_buffer = res.responseToString();
-            // 普通静态响应生成后，只监听 POLLOUT（发完再恢复 POLLIN）
-            this->setClientEvents(clientFd, POLLOUT);
-        }
+        this->processParsedRequest(conn, clientFd);
     }
     else if (status == REQUEST_INCOMPLETE)
     {
@@ -341,7 +401,6 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
         conn->close_after_write = true;
         std::string error_response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         conn->write_buffer += error_response;
-        // 追加写事件 400 报错发货
         this->setClientEvents(clientFd, POLLOUT);
     }
 }
@@ -467,7 +526,7 @@ void ServerManager::handleCgiRead(int cgiReadFd)
             this->setClientEvents(res.clientFd, POLLOUT);
         }
     }
-    else if (res.status == CGI_ERROR) // 🟢 若 hasWriteTask(cgiWriteFd) 仍为 true，说明 Body 还没写完！
+    else if (res.status == CGI_ERROR) // 若 hasWriteTask(cgiWriteFd) 仍为 true，说明 Body 还没写完！
                                       // 啥都不做，保留在 poll_fds 里，等待下一个 Tick 继续写入！
     {
         this->_cgi_read_fd_to_client_map.erase(cgiReadFd);
@@ -559,11 +618,11 @@ void ServerManager::handleCgiWrite(int cgiWriteFd)
 */
 void ServerManager::dispatchEvents()
 {
-    // 保持精妙的倒序遍历（防御 Vector erase 导致的索引失效）
+    // 倒序遍历（防御 Vector erase 导致的索引失效）
     for (size_t i = this->_poll_fds.size(); i > 0; --i)
     {
         size_t idx = i - 1;
-        // 极端防卫：防止在前面几轮循环中已经被物理注销或越界的 FD
+        // 防止在前面几轮循环中已经被物理注销或越界的 FD
         if (idx >= this->_poll_fds.size() || this->_poll_fds[idx].fd == -1 || this->_poll_fds[idx].revents == 0)
             continue;
         int activeFd = this->_poll_fds[idx].fd;
@@ -700,15 +759,12 @@ void ServerManager::run()
         std::cerr << "[ServerManager] Error: No listening sockets in poll tree. Aborting run()." << std::endl;
         return;
     }
-
     std::cout << "[ServerManager] Main loop started. Entering the matrix..." << std::endl;
-
     int poll_error_retries = 0;
-    while (true) // 提示：若有全局信号标志位（如 g_server_running），也可替换 while(true) 方便 Ctrl+C 优雅退出
+    while (true) // 提示：若有全局信号标志位（如 g_server_running），也可替换 while(true) 方便 Ctrl+C 退出
     {
         // 1. 轮询前的账本与死链清理车间（如追加 fds_to_add 到 poll_fds）
         this->prePollCleanup();
-
         // 2. 执行 1000ms 物理超时/阻塞轮询
         int ret = this->executePoll(poll_error_retries);
         if (ret < 0)
@@ -716,14 +772,13 @@ void ServerManager::run()
             std::cerr << "[ServerManager] Fatal poll failure limit reached. Breaking main loop." << std::endl;
             break;
         }
-
-        // 3. 核心分水岭：只有真的有 FD 就绪 (ret > 0) 时，才拉响雷达分发事件！
+        // 3. 只有真的有 FD 就绪 (ret > 0) 时，才分发事件
         if (ret > 0)
         {
             this->dispatchEvents();
         }
 
-        // 4. ⏱盘点车间 A：巡检 CGI 超时任务，统一渲染 504 Gateway Timeout 报错
+        // 4. 巡检 CGI 超时任务，统一渲染 504 Gateway Timeout 报错
         std::vector<CgiEventResult> timeouts = this->_cgiManager.checkTimeouts();
         for (size_t i = 0; i < timeouts.size(); ++i)
         {
