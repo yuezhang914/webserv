@@ -86,6 +86,14 @@ char **CgiHandler::_buildEnvironment() const
     envMap["SERVER_NAME"] = _host;
     envMap["SERVER_PORT"] = _port;
     envMap["DOCUMENT_ROOT"] = _root;
+
+    // 💡 关键修复：把系统的 PATH 继承给 CGI，否则 #!/usr/bin/env python3 会找不到解释器！
+    const char *sysPath = std::getenv("PATH");
+    if (sysPath != NULL)
+        envMap["PATH"] = sysPath;
+    else
+        envMap["PATH"] = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin";
+
     for (std::map<std::string, std::string>::const_iterator it = _headers.begin();
          it != _headers.end(); ++it)
     {
@@ -108,6 +116,7 @@ char **CgiHandler::_buildEnvironment() const
             envMap[envKey] = val;
         }
     }
+    
     char **env = static_cast<char **>(std::malloc(sizeof(char *) * (envMap.size() + 1)));
     if (!env)
         return NULL;
