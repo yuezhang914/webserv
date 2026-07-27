@@ -510,7 +510,7 @@ void ServerManager::handleCgiRead(int cgiReadFd)
             Response cgiResponse = buildCgiResponse(conn->request, res.rawOutput);
             conn->response = cgiResponse;
             conn->write_buffer = cgiResponse.responseToString();
-            conn->close_after_write = true;
+            //conn->close_after_write = true;
             this->setClientEvents(res.clientFd, POLLOUT);
         }
     }
@@ -525,7 +525,7 @@ void ServerManager::handleCgiRead(int cgiReadFd)
         {
             conn->response.createResponse(res.statusCode, "CGI Output Error", conn->config.error_pages);
             conn->write_buffer = conn->response.responseToString();
-            conn->close_after_write = true;
+            //conn->close_after_write = true;
             this->setClientEvents(res.clientFd, POLLOUT);
         }
     }
