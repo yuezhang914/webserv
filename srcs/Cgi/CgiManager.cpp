@@ -101,7 +101,7 @@ bool CgiManager::launchTask(int clientFd,
     }
     else
     {
-        if (fds.write_fd >= 0)
+        if (fds.write_fd > 0)
         {
             ::close(fds.write_fd);
             this->_read_fd_to_task_map[fds.read_fd].writeFd = -1;
@@ -130,15 +130,19 @@ bool CgiManager::launchTask(int clientFd,
        - 调用 forceKillAndClean 回收资源并返回结果。
     5. 缓冲区读空（bytesRead < 0）：跳出循环，返回 CGI_CONTINUE，等待下一个 poll 。
 */
+
 CgiEventResult CgiManager::handlePipeRead(int cgiReadFd)
 {
     std::map<int, CgiTask>::iterator it = this->_read_fd_to_task_map.find(cgiReadFd);
     if (it == this->_read_fd_to_task_map.end())
     {
+        // 找不到说明该管道已被清理，直接关闭防泄漏
         ::close(cgiReadFd);
         return CgiEventResult(CGI_CONTINUE);
     }
+
     CgiTask &task = it->second;
+    int clientFd = task.clientFd; // 提前提取基本类型，防止 erase 后引用失效
     char buffer[4096];
 
     while (true)
@@ -149,8 +153,7 @@ CgiEventResult CgiManager::handlePipeRead(int cgiReadFd)
             if (task.outputBuffer.size() + static_cast<size_t>(bytesRead) > CGI_MAX_OUTPUT_SIZE)
             {
                 std::cerr << "[CgiManager] Error: CGI output size exceeded max limit! 502." << std::endl;
-                int clientFd = task.clientFd;
-                this->forceKillAndClean(task);
+                this->forceKillAndClean(task); // 传入 cgiReadFd 而非 task 引用
                 return CgiEventResult(CGI_ERROR, clientFd, 502);
             }
             task.outputBuffer.append(buffer, static_cast<size_t>(bytesRead));
@@ -158,15 +161,25 @@ CgiEventResult CgiManager::handlePipeRead(int cgiReadFd)
         }
         else if (bytesRead == 0)
         {
-            int clientFd = task.clientFd;
+            // 正常读取完毕 (EOF)
             CgiEventResult result(CGI_FINISHED, clientFd, 200);
             result.rawOutput.swap(task.outputBuffer);
+            
+            // 彻底清理此 Task（包含 pid 回收、close fd、erase map）
             this->forceKillAndClean(task);
             return result;
         }
         else 
         {
-            break;
+            // 非阻塞读取正常结束（没数据了）
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+            {
+                break;
+            }
+            // 管道发生真正异常错误 (如 EBADF, EPIPE)
+            std::cerr << "[CgiManager] Error reading from CGI pipe fd: " << cgiReadFd << std::endl;
+            this->forceKillAndClean(task);
+            return CgiEventResult(CGI_ERROR, clientFd, 500);
         }
     }
     return CgiEventResult(CGI_CONTINUE);
@@ -249,13 +262,13 @@ CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
 */
 void CgiManager::forceKillAndClean(CgiTask &task)
 {
-    if (task.readFd >= 0)
+    if (task.readFd > 0)
     {
         ::close(task.readFd);
         this->_read_fd_to_task_map.erase(task.readFd);
         task.readFd = -1;
     }
-    if (task.writeFd >= 0)
+    if (task.writeFd > 0)
     {
         ::close(task.writeFd);
         this->_write_fd_to_task_map.erase(task.writeFd);
