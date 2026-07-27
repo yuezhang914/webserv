@@ -48,6 +48,8 @@ private:
     void handleCgiRead(int cgiReadFd);
     void handleCgiWrite(int cgiWriteFd);
 
+    void cleanupClientWritePipe(int clientFd);
+
 public:
     // 对外/组件间辅助接口
     void setClientEvents(int clientFd, short events);
