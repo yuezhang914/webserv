@@ -475,24 +475,24 @@ void ServerManager::handleClientWrite(int clientFd, size_t pollIndex)
 }
 
 /*
-函数用途：作为多路复用核心事件分发中枢（Radar 引擎），铁血调度倒序卡尺，将内核弹回的物理事件精准切片并安全分流至各核心车间。
-参数与变量：
-- activeFd (局部变量)：当前正在接受审查、从全局轮询名册中提取出来的活跃物理文件描述符。
-- revents (局部变量)：Linux 内核本次轮询后如实回执的物理就绪事件位掩码（如 POLLIN、POLLOUT、POLLHUP）。
-- idx (局部变量)：当前处理的 FD 在 _poll_fds 名册中的物理倒序索引。
-- _poll_fds (类内部常驻容器)：std::vector<struct pollfd>，大管家赖以生存的多路复用全局核心轮询监视名册。
-实现逻辑：
-1. 铁血倒序卡尺防线：采用自后向前的 i-- 倒序遍历机制。完美规避了在分流车间（如 closeConnection）执行动态擦除 vector 元素时，因数据整体前移导致的索引塌陷与 FD 跳过天坑；并就地挂载“物理销户拦截”防御线。
-2. 异常/挂断收网分流 (ERR/HUP/NVAL)：
-   - 若属于 CGI 管道描述符，即便挂断也必须坚决扭送 handleCgiPipeRead 车间，启动“落幕清仓阶段”，捞干内核缓冲区最后一瓢残渣。
-   - 若属于监听套接字（ListenFD）则触发 CRITICAL 警告并安全标记；普通客户端套接字则果断打入 closeConnection 执行销户。
-3. 读事件就绪分流 (POLLIN)：
-   - CGI 管道读端就绪：分流至 handleCgiPipeRead 启动异步抽水循环。
-   - 监听套接字就绪：分流至 acceptNewConnection 物理孵化新进线连接。
-   - 普通客户端就绪：分流至 handleClientRead 强攻非阻塞 Socket 捞干内核接收蓄水池。
-4. 写事件就绪分流 (POLLOUT)：
-   - 在跨过 POLLIN 动作后，原地挂载“生存卡尺防线”，重新校验 idx 与 activeFd 的一致性，严防前置步骤导致的名册动态置换带来的越界血崩。
-   - 校验通过后，将 CGI 写端管道精准分流至 handleCgiPipeWrite（卡尺切片喂食 POST Body）；普通客户端分流至 handleClientWrite 执行发件箱一枪弹射发货。
+函数：ServerManager::handleCgiRead
+用途：Reactor 事件回调函数。当 CGI 输出管道（pipe_from_child[0]）触发可读事件（POLLIN/POLLHUP）时，负责调度 CGI stdout 数据的非阻塞读取与客户端响应装配。
+参数：
+    - int cgiReadFd: 触发可读/挂断事件的 CGI 管道读端文件描述符。
+返回值：
+    - void（无返回值）。
+实现逻辑或说明：
+    1. 驱动读取：调用 _cgiManager.handlePipeRead(cgiReadFd) 非阻塞读取数据字节。
+    2. 完工分支（res.status == CGI_FINISHED）：
+       - 从 _cgi_read_fd_to_client_map 账本与 poll 监听列表中擦除 cgiReadFd；
+       - 调用 cleanupClientWritePipe 安全清理该客户端可能残存的写管道；
+       - 通过 res.clientFd 匹配对应的 Connection，解析 CGI 原始输出并调用 buildCgiResponse 装配正式响应；
+       - 将响应挂载至 conn->write_buffer，重置事件为 POLLOUT 准备向客户端回派数据。
+    3. 报错分支（res.status == CGI_ERROR）：
+       - 同步注销 cgiReadFd 与残存的 cgiWriteFd；
+       - 构建对应 res.statusCode（如 500 / 502）的错误 Response，切换事件为 POLLOUT 向客户端回复错误页。
+    4. 过程分支（res.status == CGI_CONTINUE）：
+       - 数据未吐完，不做任何注销与事件切换，保持 poll 监听等待下一个 Tick 继续读取。
 */
 void ServerManager::handleCgiRead(int cgiReadFd)
 {
@@ -502,6 +502,7 @@ void ServerManager::handleCgiRead(int cgiReadFd)
     {
         this->_cgi_read_fd_to_client_map.erase(cgiReadFd);
         this->eraseFdFromPoll(cgiReadFd);
+        this->cleanupClientWritePipe(res.clientFd);
 
         Connection *conn = this->_connections[res.clientFd];
         if (conn)
@@ -513,11 +514,11 @@ void ServerManager::handleCgiRead(int cgiReadFd)
             this->setClientEvents(res.clientFd, POLLOUT);
         }
     }
-    else if (res.status == CGI_ERROR) // 若 hasWriteTask(cgiWriteFd) 仍为 true，说明 Body 还没写完！
-                                      // 啥都不做，保留在 poll_fds 里，等待下一个 Tick 继续写入！
+    else if (res.status == CGI_ERROR)
     {
         this->_cgi_read_fd_to_client_map.erase(cgiReadFd);
         this->eraseFdFromPoll(cgiReadFd);
+        this->cleanupClientWritePipe(res.clientFd);
 
         Connection *conn = this->_connections[res.clientFd];
         if (conn)
@@ -528,6 +529,7 @@ void ServerManager::handleCgiRead(int cgiReadFd)
             this->setClientEvents(res.clientFd, POLLOUT);
         }
     }
+    // 🟢 res.status == CGI_CONTINUE 时隐式不进任何 if，保持 poll_fds 中的 POLLIN 监听！
 }
 
 /*

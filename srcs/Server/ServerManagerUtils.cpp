@@ -299,3 +299,29 @@ void ServerManager::registerFdToPoll(int fd, short events)
     std::cout << "[ServerManager] FD " << fd << " successfully registered to poll tree with events: " << events << std::endl;
 }
 
+/*
+函数：ServerManager::cleanupClientWritePipe
+用途：反查并安全清理指定客户端 Socket 绑定的 CGI 写管道 FD（从映射表与 poll 队列中移除）。
+参数：
+    - int clientFd: 目标客户端 Socket 文件描述符。
+返回值：
+    - void（无返回值）。
+*/
+void ServerManager::cleanupClientWritePipe(int clientFd)
+{
+    std::map<int, int>::iterator it = this->_cgi_write_fd_to_client_map.begin();
+    while (it != this->_cgi_write_fd_to_client_map.end())
+    {
+        if (it->second == clientFd)
+        {
+            int writeFd = it->first;
+            this->eraseFdFromPoll(writeFd);
+            this->_cgi_write_fd_to_client_map.erase(it++);
+            return; // 一个 clientFd 只关联一个写管道，找到后直接退出
+        }
+        else
+        {
+            ++it;
+        }
+    }
+}
