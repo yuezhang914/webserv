@@ -27,15 +27,17 @@ static const size_t MAX_HEADER_SIZE = 8192;
     6. 解析普通 body 或 chunked body，并准确设置 consumed。
 说明：本函数直接完成完整解析，不选择 ServerConfig，也不经过其他解析入口转发。
 */
-int RequestParser::parseBuffer(const std::string& buffer, Request& req,
-        const ServerConfig* server, size_t& consumed) {
+int RequestParser::parseBuffer(const std::string &buffer, Request &req,
+                               const ServerConfig *server, size_t &consumed)
+{
     consumed = 0;
     req.resetForParsing(server);
     if (server == NULL)
         return REQUEST_ERROR;
 
     size_t header_end = buffer.find("\r\n\r\n");
-    if (header_end == std::string::npos) {
+    if (header_end == std::string::npos)
+    {
         if (has_invalid_line_endings(buffer, 0, buffer.size(), true))
             return REQUEST_ERROR;
         if (buffer.size() > MAX_HEADER_SIZE)
@@ -53,8 +55,7 @@ int RequestParser::parseBuffer(const std::string& buffer, Request& req,
     std::string request_line;
     if (!std::getline(iss, request_line))
         return REQUEST_ERROR;
-    if (!request_line.empty()
-        && request_line[request_line.size() - 1] == '\r')
+    if (!request_line.empty() && request_line[request_line.size() - 1] == '\r')
         request_line.erase(request_line.size() - 1);
 
     int line_status = parse_request_line(request_line, req);
@@ -65,8 +66,7 @@ int RequestParser::parseBuffer(const std::string& buffer, Request& req,
 
     bool has_te = false;
     bool is_chunked = false;
-    if (is_chunked_transfer_encoding(req, has_te, is_chunked)
-        != REQUEST_OK)
+    if (is_chunked_transfer_encoding(req, has_te, is_chunked) != REQUEST_OK)
         return REQUEST_ERROR;
     if (has_te && req._headers.count("content-length"))
         return REQUEST_ERROR;
@@ -74,7 +74,8 @@ int RequestParser::parseBuffer(const std::string& buffer, Request& req,
     size_t content_length = 0;
     unsigned long body_limit = getEffectiveBodyLimit(
         req._config, req._path);
-    if (!is_chunked && req._headers.count("content-length")) {
+    if (!is_chunked && req._headers.count("content-length"))
+    {
         int len_status = parse_content_length(
             req._headers["content-length"], body_limit, content_length);
         if (len_status != REQUEST_OK)
@@ -91,3 +92,5 @@ int RequestParser::parseBuffer(const std::string& buffer, Request& req,
     consumed = body_start + content_length;
     return REQUEST_OK;
 }
+
+
