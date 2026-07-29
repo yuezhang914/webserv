@@ -263,9 +263,19 @@ void ServerManager::dispatchCgiTask(Connection *conn, int clientFd, const Respon
     res.getHeader("X-Internal-CGI-Path", script_path);
     res.getHeader("X-Internal-CGI-Interpreter", interpreter_path);
 
+    // 💡 1. 拷贝 Request 的 Headers，并把 res 里的内部 CGI 标头合并进去
+    std::map<std::string, std::string> cgiHeaders = conn->request.getHeaders();
+    
+    std::string scriptNameVal, pathInfoVal;
+    if (res.getHeader("X-Internal-CGI-Script-Name", scriptNameVal))
+        cgiHeaders["X-Internal-CGI-Script-Name"] = scriptNameVal;
+    if (res.getHeader("X-Internal-CGI-Path-Info", pathInfoVal))
+        cgiHeaders["X-Internal-CGI-Path-Info"] = pathInfoVal;
+
     int outReadFd = -1;
     int outWriteFd = -1;
 
+    // 💡 2. 传入合并后的 cgiHeaders
     bool launched = this->_cgiManager.launchTask(
         clientFd,
         script_path,
@@ -273,7 +283,7 @@ void ServerManager::dispatchCgiTask(Connection *conn, int clientFd, const Respon
         conn->request.getMethod(),
         conn->request.getQuery(),
         conn->request.getPath(),
-        conn->request.getHeaders(),
+        cgiHeaders,
         conn->request.getBody(),
         outReadFd,
         outWriteFd);
@@ -327,6 +337,7 @@ void ServerManager::processParsedRequest(Connection *conn, int clientFd)
     std::string script_path;
     if (res.getHeader("X-Internal-CGI-Path", script_path))
     {
+        std::cout << "[DEBUG CGI Path] targetPath = " << script_path << std::endl;
         this->dispatchCgiTask(conn, clientFd, res);
     }
     else

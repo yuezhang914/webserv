@@ -141,6 +141,49 @@ static bool findConfiguredCgiInterpreter(const LocationConfig *location,
     return false;
 }
 
+// 💡 辅助函数：根据 Location 配置的 cgi_extensions 剥离 PATH_INFO
+// 💡 辅助函数：根据 Location 配置的 cgi_extensions 剥离 PATH_INFO
+static void extractPathInfo(const std::string &rawPath,
+                            const LocationConfig *location,
+                            std::string &scriptPath,
+                            std::string &pathInfo)
+{
+    scriptPath = rawPath;
+    pathInfo = "";
+
+    if (location == NULL || location->cgi_extensions.empty())
+        return;
+
+    // 💡 使用 const_iterator 遍历 std::map<std::string, std::string>
+    // pair.first 是扩展名（比如 ".py"），pair.second 是解释器路径（比如 "/usr/bin/python3"）
+    typedef std::map<std::string, std::string>::const_iterator MapIterator;
+    for (MapIterator it = location->cgi_extensions.begin(); it != location->cgi_extensions.end(); ++it)
+    {
+        const std::string &ext = it->first; // 获取 map 的 key (扩展名)
+        if (ext.empty())
+            continue;
+
+        size_t extPos = rawPath.find(ext);
+        if (extPos != std::string::npos)
+        {
+            size_t extEnd = extPos + ext.length();
+            // 只有当扩展名正好在结尾，或者扩展名紧跟 '/' 时，才算命中 PATH_INFO
+            if (extEnd == rawPath.length())
+            {
+                scriptPath = rawPath;
+                pathInfo = "";
+                return;
+            }
+            else if (rawPath[extEnd] == '/')
+            {
+                scriptPath = rawPath.substr(0, extEnd); // 例如: "/cgi-bin/path_info.py"
+                pathInfo = rawPath.substr(extEnd);      // 例如: "/abc/def"
+                return;
+            }
+        }
+    }
+}
+
 /*
 函数：validateCgiScript
 用途：在 fork/execve 前确认 EffectiveRoute 生成的 CGI 目标是普通文件，并按启动方式检查读或执行权限。
@@ -205,6 +248,12 @@ Response buildResponse(const Request &request,
 
     const LocationConfig *location =
         findMatchingLocation(request.getPath(), server->locations);
+
+    // 💡 1. 提取 PATH_INFO：将 raw URI (如 /cgi-bin/path_info.py/abc/def)
+    //    拆分为 scriptPath (/cgi-bin/path_info.py) 和 pathInfo (/abc/def)
+    std::string scriptPath, pathInfo;
+    extractPathInfo(request.getPath(), location, scriptPath, pathInfo);
+
     EffectiveRoute route;
     bool routeReady = location != NULL
         ? route.createEffectiveRoute(server, location)
@@ -245,10 +294,10 @@ Response buildResponse(const Request &request,
     if (isSessionDemoPath(request.getPath()))
         return buildSessionDemoResponse(request, sessionStore);
 
-    int pathStatus = route.createEffectivePath(request.getPath(), action);
+    // 💡 2. 使用剥离后的 scriptPath 检索物理文件，防止 /abc/def 导致 stat() 触发 404！
+    int pathStatus = route.createEffectivePath(scriptPath, action);
     std::string cgiInterpreter;
-    if (findConfiguredCgiInterpreter(location, request.getPath(),
-                                     cgiInterpreter))
+    if (findConfiguredCgiInterpreter(location, scriptPath, cgiInterpreter))
     {
         int cgiPathStatus = validateCgiScript(route.targetPath,
                                               cgiInterpreter.empty());
@@ -263,6 +312,11 @@ Response buildResponse(const Request &request,
         if (!cgiInterpreter.empty())
             response.setHeader("X-Internal-CGI-Interpreter",
                                cgiInterpreter);
+
+        // 💡 3. 将 Script-Name 和 Path-Info 作为内部标头传递给后续的 CGI 处理函数
+        response.setHeader("X-Internal-CGI-Script-Name", scriptPath);
+        response.setHeader("X-Internal-CGI-Path-Info", pathInfo);
+
         return response;
     }
 

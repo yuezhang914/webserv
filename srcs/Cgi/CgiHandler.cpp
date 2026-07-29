@@ -76,32 +76,68 @@ char **CgiHandler::_buildEnvironment() const
 {
     std::map<std::string, std::string> envMap;
 
+    std::string scriptName = _path; // fallback 默认值
+    std::string pathInfo = "";
+
+    // 💡 1. 大小写无关查找：先遍历 _headers 匹配内部标头
+    for (std::map<std::string, std::string>::const_iterator it = _headers.begin();
+         it != _headers.end(); ++it)
+    {
+        std::string lowerKey = it->first;
+        for (size_t k = 0; k < lowerKey.size(); ++k)
+            lowerKey[k] = static_cast<char>(std::tolower(lowerKey[k]));
+
+        if (lowerKey == "x-internal-cgi-script-name")
+            scriptName = it->second;
+        else if (lowerKey == "x-internal-cgi-path-info")
+            pathInfo = it->second;
+    }
+
+    // 💡 2. 注入标准 CGI 环境变量
     envMap["GATEWAY_INTERFACE"] = "CGI/1.1";
     envMap["SERVER_PROTOCOL"] = "HTTP/1.1";
     envMap["REQUEST_METHOD"] = _method;
     envMap["QUERY_STRING"] = _query;
-    envMap["SCRIPT_NAME"] = _path;
+    envMap["SCRIPT_NAME"] = scriptName;               // 正确剥离后的 /cgi-bin/path_info.py
     envMap["SCRIPT_FILENAME"] = _script_path;
-    envMap["PATH_INFO"] = "";
+    envMap["PATH_INFO"] = pathInfo;                    // 正确剥离后的 /abc/def
+    
+    // 💡 3. RFC 3875 规范：PATH_TRANSLATED
+    if (!pathInfo.empty())
+        envMap["PATH_TRANSLATED"] = _root + pathInfo;  // 例如 /srv/www/abc/def
+    else
+        envMap["PATH_TRANSLATED"] = "";
+
     envMap["SERVER_NAME"] = _host;
     envMap["SERVER_PORT"] = _port;
     envMap["DOCUMENT_ROOT"] = _root;
 
-    // 💡 关键修复：把系统的 PATH 继承给 CGI，否则 #!/usr/bin/env python3 会找不到解释器！
+    // 💡 继承系统 PATH
     const char *sysPath = std::getenv("PATH");
     if (sysPath != NULL)
         envMap["PATH"] = sysPath;
     else
         envMap["PATH"] = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin";
 
+    // 💡 4. 处理普通 HTTP 请求头并忽略内部标头（同时做大小写无关匹配）
     for (std::map<std::string, std::string>::const_iterator it = _headers.begin();
          it != _headers.end(); ++it)
     {
         std::string key = it->first;
         std::string val = it->second;
-        if (key == "content-type" || key == "Content-Type")
+
+        std::string lowerKey = key;
+        for (size_t k = 0; k < lowerKey.size(); ++k)
+            lowerKey[k] = static_cast<char>(std::tolower(lowerKey[k]));
+
+        // 过滤内部 CGI 标头，不暴露给 CGI 环境变量
+        if (lowerKey == "x-internal-cgi-script-name" || lowerKey == "x-internal-cgi-path-info" ||
+            lowerKey == "x-internal-cgi-path" || lowerKey == "x-internal-cgi-interpreter")
+            continue;
+
+        if (lowerKey == "content-type")
             envMap["CONTENT_TYPE"] = val;
-        else if (key == "content-length" || key == "Content-Length")
+        else if (lowerKey == "content-length")
             envMap["CONTENT_LENGTH"] = val;
         else
         {
