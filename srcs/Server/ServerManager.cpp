@@ -1,5 +1,7 @@
 #include "Webserv.hpp"
 #include "SessionStore.hpp"
+#include "Signal.hpp"
+
 #include <iostream>
 
 // 构造函数前面绝对没有任何 void 或者是返回值类型！
@@ -737,6 +739,24 @@ void ServerManager::dispatchEvents()
     }
 }
 
+void ServerManager::stop()
+{
+    std::cout << "\n[Server] Shutting down gracefully..." << std::endl;
+
+    // 1. 回收所有运行中的 CGI 子进程
+    this->_cgiManager.stopAllTasks();
+
+    // 2. 关闭所有的监听 Socket 和客户端 Socket
+    for (size_t i = 0; i < _poll_fds.size(); ++i)
+    {
+        if (_poll_fds[i].fd >= 0)
+            close(_poll_fds[i].fd);
+    }
+    _poll_fds.clear();
+
+    std::cout << "[Server] Cleaned up all sockets and CGI processes. Bye!" << std::endl;
+}
+
 /*
 函数用途：物理启动 Webserv 核心主循环大闸（The Matrix），作为永动机总动力引擎，全天候驱动雷达轮询与业务分流。
 参数与变量：
@@ -754,6 +774,7 @@ void ServerManager::dispatchEvents()
 */
 void ServerManager::run()
 {
+    g_loop_running = true;
     if (this->_poll_fds.empty())
     {
         std::cerr << "[ServerManager] Error: No listening sockets in poll tree. Aborting run()." << std::endl;
@@ -761,7 +782,8 @@ void ServerManager::run()
     }
     std::cout << "[ServerManager] Main loop started. Entering the matrix..." << std::endl;
     int poll_error_retries = 0;
-    while (true) // 提示：若有全局信号标志位（如 g_server_running），也可替换 while(true) 方便 Ctrl+C 退出
+    setupSignalHandlers();
+    while (g_loop_running) // 提示：若有全局信号标志位（如 g_server_running），也可替换 while(true) 方便 Ctrl+C 退出
     {
         // 1. 轮询前的账本与死链清理车间（如追加 fds_to_add 到 poll_fds）
         this->prePollCleanup();
@@ -812,5 +834,7 @@ void ServerManager::run()
         }
         this->_cgiManager.reapChildren();
     }
+    // 💡 退出循环后：执行优雅清理 (Graceful Cleanup)
+    this->stop();
     std::cout << "[ServerManager] Main loop safely terminated." << std::endl;
 }

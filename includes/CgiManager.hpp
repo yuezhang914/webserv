@@ -68,6 +68,7 @@ public:
     void reapChildren();                         // 非阻塞回收 PID
     void removeTaskByClientFd(int clientFd);     // 当客户端异常断开时调用，物理销毁任务与杀掉 PID
     bool hasWriteTask(int cgiWriteFd) const;
+    void stopAllTasks();
 
 private:
     std::map<int, CgiTask> _read_fd_to_task_map;  // cgiReadFd  -> CgiTask
