@@ -262,14 +262,16 @@ CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
 */
 void CgiManager::forceKillAndClean(CgiTask &task)
 {
-    if (task.readFd > 0) // 💡 改为 >= 0
+    if (task.readFd >= 0)
     {
+        std::cout << "cleanup readFd = " << task.readFd << std::endl;
         ::close(task.readFd);
         this->_read_fd_to_task_map.erase(task.readFd);
         task.readFd = -1;
     }
-    if (task.writeFd > 0) // 💡 改为 >= 0
+    if (task.writeFd >= 0) 
     {
+        std::cout << "cleanup writeFd = " << task.writeFd << std::endl;
         ::close(task.writeFd);
         this->_write_fd_to_task_map.erase(task.writeFd);
         task.writeFd = -1;
@@ -278,7 +280,7 @@ void CgiManager::forceKillAndClean(CgiTask &task)
     {
         ::kill(task.pid, SIGKILL);
         int status;
-        ::waitpid(task.pid, &status, 0); // 💡 阻塞等待回收，彻底消除僵尸进程
+        ::waitpid(task.pid, &status, 0); 
         task.pid = -1;
     }
 }
