@@ -47,6 +47,65 @@ static std::string withEndingSlash(std::string path)
     return path;
 }
 
+// 提取 boundary 字符串
+static std::string extractBoundary(const std::string &contentType)
+{
+    size_t pos = contentType.find("boundary=");
+    if (pos == std::string::npos)
+        return "";
+    std::string b = contentType.substr(pos + 9);
+    size_t semi = b.find(';');
+    if (semi != std::string::npos)
+        b = b.substr(0, semi);
+    if (!b.empty() && b[0] == '"' && b[b.size() - 1] == '"')
+        b = b.substr(1, b.size() - 2);
+    return b;
+}
+
+// 提取真正的文件二进制 payload 和表单里的原文件名 (filename)
+static bool parseMultipartBody(const std::string &rawBody, const std::string &contentType,
+                               std::string &outPayload, std::string &outFilename)
+{
+    std::string boundaryStr = extractBoundary(contentType);
+    if (boundaryStr.empty())
+        return false;
+
+    std::string boundary = "--" + boundaryStr;
+    size_t startPos = rawBody.find(boundary);
+    if (startPos == std::string::npos)
+        return false;
+
+    size_t headerEndPos = rawBody.find("\r\n\r\n", startPos);
+    if (headerEndPos == std::string::npos)
+        return false;
+
+    std::string partHeader = rawBody.substr(startPos, headerEndPos - startPos);
+
+    // 从 Part Header 提取原本的文件名 (如 test.jpg)
+    size_t fnPos = partHeader.find("filename=\"");
+    if (fnPos != std::string::npos)
+    {
+        size_t fnStart = fnPos + 10;
+        size_t fnEnd = partHeader.find("\"", fnStart);
+        if (fnEnd != std::string::npos)
+        {
+            outFilename = partHeader.substr(fnStart, fnEnd - fnStart);
+        }
+    }
+
+    size_t fileDataStart = headerEndPos + 4;
+    size_t fileDataEnd = rawBody.find(boundary, fileDataStart);
+    if (fileDataEnd == std::string::npos)
+        return false;
+
+    if (fileDataEnd >= 2 && rawBody[fileDataEnd - 2] == '\r' && rawBody[fileDataEnd - 1] == '\n')
+    {
+        fileDataEnd -= 2;
+    }
+
+    outPayload = rawBody.substr(fileDataStart, fileDataEnd - fileDataStart);
+    return true;
+}
 
 /*
 函数：handlePost
@@ -67,33 +126,52 @@ Response handlePost(const Request &request, const EffectiveRoute &route)
         joinPaths(base, route.upload_path));
 
     struct stat directoryInfo;
-    if (baseDirectory.empty()
-        || stat(baseDirectory.c_str(), &directoryInfo) != 0
-        || !S_ISDIR(directoryInfo.st_mode))
+    if (baseDirectory.empty() || stat(baseDirectory.c_str(), &directoryInfo) != 0 || !S_ISDIR(directoryInfo.st_mode))
     {
         file.response.createResponse(409,
-            "Upload Directory: " + baseDirectory + " Does not Exist",
-            route.server->error_pages);
+                                     "Upload Directory: " + baseDirectory + " Does not Exist",
+                                     route.server->error_pages);
         return file.response;
     }
     if (access(baseDirectory.c_str(), W_OK) != 0)
     {
         file.response.createResponse(403,
-            "Upload Directory: " + baseDirectory + " is not Writable",
-            route.server->error_pages);
+                                     "Upload Directory: " + baseDirectory + " is not Writable",
+                                     route.server->error_pages);
         return file.response;
     }
-    if (file.getFileName(route) == FILE_OPERATION_ERROR
-        || file.validateUploadRequest(request, route) == FILE_OPERATION_ERROR
-        || file.createFile(request.getBody(), baseDirectory,
-            route.server->error_pages) == FILE_OPERATION_ERROR)
+    if (file.getFileName(route) == FILE_OPERATION_ERROR || file.validateUploadRequest(request, route) == FILE_OPERATION_ERROR)
         return file.response;
 
-    file.response.createResponse(200, "File Created",
-        route.server->error_pages);
+    // 💡【核心改动点】：准备要写入的数据和文件名
+    std::string bodyToWrite = request.getBody();
+    std::string contentType;
+    if (request.getHeader("content-type", contentType) &&
+        contentType.find("multipart/form-data") != std::string::npos)
+    {
+        std::string extractedPayload;
+        std::string multipartFilename;
+        if (parseMultipartBody(request.getBody(), contentType, extractedPayload, multipartFilename))
+        {
+            bodyToWrite = extractedPayload; // 替换为纯净的文件 payload
+            if (!multipartFilename.empty())
+            {
+                file.fileName = multipartFilename; // 优先采用表单里的真实文件名！
+            }
+        }
+        else
+        {
+            file.response.createResponse(400, "Bad Multipart Format", route.server->error_pages);
+            return file.response;
+        }
+    }
+
+    if (file.createFile(bodyToWrite, baseDirectory, route.server->error_pages) == FILE_OPERATION_ERROR)
+        return file.response;
+
+    file.response.createResponse(201, "File Created", route.server->error_pages); // 规范建议用 201 Created
     return file.response;
 }
-
 
 /*
 函数：FileOperation::validateUploadRequest
@@ -109,18 +187,17 @@ int FileOperation::validateUploadRequest(const Request &request,
                                          const EffectiveRoute &route)
 {
     std::string contentType;
-    if (request.getHeader("content-type", contentType)
-        && checkContentType(contentType) == FILE_OPERATION_ERROR)
+    if (request.getHeader("content-type", contentType) && checkContentType(contentType) == FILE_OPERATION_ERROR)
     {
         response.createResponse(415, "Unsupported Content-Type",
-            route.server->error_pages);
+                                route.server->error_pages);
         return FILE_OPERATION_ERROR;
     }
 
     std::string headerValue;
     bool hasContentLength = request.getHeader("content-length", headerValue);
     bool hasTransferEncoding = request.getHeader("transfer-encoding",
-        headerValue);
+                                                 headerValue);
     if (!hasContentLength && !hasTransferEncoding)
     {
         response.createResponse(411, "", route.server->error_pages);
@@ -145,21 +222,21 @@ int FileOperation::createFile(const std::string &body,
     if (!output)
     {
         response.createResponse(500, "Outfile could not be opened",
-            errorPages);
+                                errorPages);
         return FILE_OPERATION_ERROR;
     }
     output.write(body.data(), static_cast<std::streamsize>(body.size()));
     if (!output)
     {
         response.createResponse(500, "Error while writing file",
-            errorPages);
+                                errorPages);
         return FILE_OPERATION_ERROR;
     }
     output.close();
     if (!output)
     {
         response.createResponse(500, "Error while closing file",
-            errorPages);
+                                errorPages);
         return FILE_OPERATION_ERROR;
     }
     return FILE_OPERATION_OK;
@@ -223,18 +300,13 @@ int FileOperation::checkContentType(const std::string &contentType) const
     if (semicolon != std::string::npos)
         value = value.substr(0, semicolon);
     size_t begin = 0;
-    while (begin < value.size()
-        && (value[begin] == ' ' || value[begin] == '\t'))
+    while (begin < value.size() && (value[begin] == ' ' || value[begin] == '\t'))
         ++begin;
     size_t end = value.size();
-    while (end > begin
-        && (value[end - 1] == ' ' || value[end - 1] == '\t'))
+    while (end > begin && (value[end - 1] == ' ' || value[end - 1] == '\t'))
         --end;
     value = value.substr(begin, end - begin);
-    if (value == "application/octet-stream"
-        || value == "application/x-www-form-urlencoded"
-        || value == "application/json" || value == "text/plain")
+    if (value == "application/octet-stream" || value == "application/x-www-form-urlencoded" || value == "application/json" || value == "text/plain" || value == "multipart/form-data")
         return FILE_OPERATION_OK;
     return FILE_OPERATION_ERROR;
 }
-

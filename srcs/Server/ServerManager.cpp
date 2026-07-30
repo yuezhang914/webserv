@@ -395,6 +395,16 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
     {
         std::cout << "[ServerManager] Request incomplete for FD " << clientFd << ". Waiting for more data..." << std::endl;
     }
+   else if (status == REQUEST_BODY_TOO_LARGE)
+    {
+        std::cerr << "[ServerManager] Request body too large on FD " << clientFd << ". Pre-writing 413 response." << std::endl;
+        conn->close_after_write = true;
+        
+        // 💡 优先使用你们的 ResponseBuilder，或者直接写 413 标头：
+        std::string error_response = "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        conn->write_buffer += error_response;
+        this->setClientEvents(clientFd, POLLOUT);
+    }
     else
     {
         std::cerr << "[ServerManager] Request error (" << status << ") on FD " << clientFd << ". Pre-writing 400 response." << std::endl;
