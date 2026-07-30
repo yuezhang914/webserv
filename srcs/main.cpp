@@ -21,8 +21,6 @@
  */
 int main(int argc, char **argv)
 { 
-    signal(SIGPIPE, SIG_IGN);
-	signal(SIGINT, signalHandler);
     std::string config_path = "default.conf"; // 默认配置文件路径
 
     if (argc > 2)

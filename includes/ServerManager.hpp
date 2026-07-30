@@ -50,6 +50,8 @@ private:
 
     void cleanupClientWritePipe(int clientFd);
 
+    void stop();
+
 public:
     // 对外/组件间辅助接口
     void setClientEvents(int clientFd, short events);

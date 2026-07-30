@@ -262,13 +262,13 @@ CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
 */
 void CgiManager::forceKillAndClean(CgiTask &task)
 {
-    if (task.readFd > 0)
+    if (task.readFd > 0) // 💡 改为 >= 0
     {
         ::close(task.readFd);
         this->_read_fd_to_task_map.erase(task.readFd);
         task.readFd = -1;
     }
-    if (task.writeFd > 0)
+    if (task.writeFd > 0) // 💡 改为 >= 0
     {
         ::close(task.writeFd);
         this->_write_fd_to_task_map.erase(task.writeFd);
@@ -278,7 +278,7 @@ void CgiManager::forceKillAndClean(CgiTask &task)
     {
         ::kill(task.pid, SIGKILL);
         int status;
-        ::waitpid(task.pid, &status, WNOHANG);
+        ::waitpid(task.pid, &status, 0); // 💡 阻塞等待回收，彻底消除僵尸进程
         task.pid = -1;
     }
 }
@@ -405,4 +405,26 @@ void CgiManager::removeTaskByClientFd(int clientFd)
 bool CgiManager::hasWriteTask(int cgiWriteFd) const
 {
     return this->_write_fd_to_task_map.find(cgiWriteFd) != this->_write_fd_to_task_map.end();
+}
+
+void CgiManager::stopAllTasks()
+{
+    // 1. 先收集所有需要清理的任务，避免遍历 map 的同时执行 erase 导致迭代器失效
+    std::vector<CgiTask> tasksToClean;
+
+    for (std::map<int, CgiTask>::iterator it = _read_fd_to_task_map.begin();
+         it != _read_fd_to_task_map.end(); ++it)
+    {
+        tasksToClean.push_back(it->second);
+    }
+
+    // 2. 依次调用你的 forceKillAndClean 进行物理清理
+    for (size_t i = 0; i < tasksToClean.size(); ++i)
+    {
+        this->forceKillAndClean(tasksToClean[i]);
+    }
+
+    // 3. 彻底清空所有 Map 映射
+    _read_fd_to_task_map.clear();
+    _write_fd_to_task_map.clear();
 }

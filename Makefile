@@ -11,7 +11,7 @@ SRC_DIRS = \
 	srcs/Response \
 	srcs/Cgi \
 	srcs/Session \
-	srcs/Utils
+	srcs/Signals
 
 
 OBJ_DIR = obj

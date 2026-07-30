@@ -25,6 +25,7 @@
 #include <unistd.h>   // 物理引入 fork, pipe, dup2, close 等系统调用
 #include <sys/wait.h> // 物理引入 waitpid
 #include <ctime>
+#include <csignal>   // 物理引入 signal, sigaction 等信号处理相关系统调用
 
 // 3. 业务平坦化组装
 #include "Config.hpp"
@@ -44,5 +45,10 @@
 
 
 #include "Response.hpp"
+
+#include "Signal.hpp"
+
+// 全局/静态原子标志位
+extern volatile sig_atomic_t g_loop_running;
 // ...
 #endif
