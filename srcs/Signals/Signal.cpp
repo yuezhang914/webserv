@@ -29,7 +29,7 @@ void setupSignalHandlers()
     */ 
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
-    sigaction(SIGQUIT, &sa, NULL); // 👈 增加这行，处理 Ctrl+\
+    sigaction(SIGQUIT, &sa, NULL); 
 
     // 2. 忽略 SIGPIPE（防止向断开的 socket 写入时崩溃）
     struct sigaction sa_pipe;
