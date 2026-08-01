@@ -50,16 +50,20 @@ public:
     ~CgiManager();
 
     // 100% 纯粹接口：只接收 clientFd、脚本路径、环境变量数组、Body 字符串
-    bool launchTask(int clientFd,
-                    const std::string &scriptPath,
-                    const std::string &interpreterPath,
-                    const std::string &method,
-                    const std::string &query,
-                    const std::string &path,
-                    const std::map<std::string, std::string> &headers,
-                    const std::string &reqBody,
-                    int &outReadFd,
-                    int &outWriteFd);
+   bool launchTask(
+    int clientFd,
+    const std::string &scriptPath,
+    const std::string &interpreterPath,
+    const std::string &method,
+    const std::string &query,
+    const std::string &path,
+    const std::map<std::string, std::string> &headers,
+    const std::string &reqBody,
+    const std::string &host,
+    const std::string &port,
+    const std::string &root,
+    int &outReadFd,
+    int &outWriteFd);
 
     CgiEventResult handlePipeRead(int cgiReadFd);
     CgiEventResult handlePipeWrite(int cgiWriteFd);

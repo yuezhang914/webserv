@@ -8,6 +8,7 @@
 用途：使用 Response 类型以及唯一的带共享 SessionStore 的 buildResponse() 声明。
 */
 #include "Response.hpp"
+#include <iostream>
 
 /*
 包含：ConfigRouteUtils.hpp
@@ -106,7 +107,6 @@ static std::string buildAllowHeader(const std::set<std::string> &allowMethods)
     return result;
 }
 
-
 /*
 函数：findConfiguredCgiInterpreter
 用途：判断 normalized request path 是否匹配当前 location 的 CGI 后缀，并取出该后缀配置的解释器。
@@ -129,9 +129,7 @@ static bool findConfiguredCgiInterpreter(const LocationConfig *location,
     while (it != location->cgi_extensions.end())
     {
         const std::string &extension = it->first;
-        if (!extension.empty() && path.size() >= extension.size()
-            && path.compare(path.size() - extension.size(),
-                extension.size(), extension) == 0)
+        if (!extension.empty() && path.size() >= extension.size() && path.compare(path.size() - extension.size(), extension.size(), extension) == 0)
         {
             interpreter = it->second;
             return true;
@@ -148,6 +146,8 @@ static void extractPathInfo(const std::string &rawPath,
                             std::string &scriptPath,
                             std::string &pathInfo)
 {
+    std::cerr << "===== extractPathInfo DEBUG =====" << std::endl;
+    std::cerr << "rawPath=[" << rawPath << "]" << std::endl;
     scriptPath = rawPath;
     pathInfo = "";
 
@@ -256,16 +256,15 @@ Response buildResponse(const Request &request,
 
     EffectiveRoute route;
     bool routeReady = location != NULL
-        ? route.createEffectiveRoute(server, location)
-        : route.createEffectiveRoute(server);
+                          ? route.createEffectiveRoute(server, location)
+                          : route.createEffectiveRoute(server);
     if (!routeReady)
     {
         response.createResponse(500, "", server->error_pages);
         return response;
     }
 
-    if (location != NULL && route.redirect_status >= 300
-        && route.redirect_status <= 399 && !route.redirect_url.empty())
+    if (location != NULL && route.redirect_status >= 300 && route.redirect_status <= 399 && !route.redirect_url.empty())
     {
         response.setStatus(route.redirect_status);
         response.setHeader("Location", route.redirect_url);
@@ -273,7 +272,7 @@ Response buildResponse(const Request &request,
         {
             response.setHeader("Content-Type", "text/html");
             response.setBody("<!DOCTYPE html><html><head><title>Redirect"
-                "</title></head><body>Redirecting</body></html>");
+                             "</title></head><body>Redirecting</body></html>");
         }
         return response;
     }
@@ -304,7 +303,7 @@ Response buildResponse(const Request &request,
         if (cgiPathStatus != PATH_OK)
         {
             response.createResponse(cgiPathStatus, "",
-                route.server->error_pages);
+                                    route.server->error_pages);
             return response;
         }
         response.setStatus(200);
@@ -316,6 +315,10 @@ Response buildResponse(const Request &request,
         // 💡 3. 将 Script-Name 和 Path-Info 作为内部标头传递给后续的 CGI 处理函数
         response.setHeader("X-Internal-CGI-Script-Name", scriptPath);
         response.setHeader("X-Internal-CGI-Path-Info", pathInfo);
+        response.setHeader("X-Internal-CGI-Path",
+                           route.targetPath);
+        response.setHeader("X-Internal-CGI-Document-Root",
+                           route.root);
 
         return response;
     }

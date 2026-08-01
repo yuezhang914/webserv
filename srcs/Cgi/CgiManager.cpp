@@ -61,23 +61,28 @@ CgiManager::~CgiManager()
        - 若 reqBody 不为空且 fds.write_fd >= 0，注册进 _write_fd_to_task_map 并赋值 outWriteFd；
        - 若无 Body，主动关掉父进程手里的 write_fd，将 task.writeFd 设为 -1，避免无用写 FD 悬挂。
 */
-bool CgiManager::launchTask(int clientFd,
-                            const std::string &scriptPath,
-                            const std::string &interpreterPath,
-                            const std::string &method,
-                            const std::string &query,
-                            const std::string &path,
-                            const std::map<std::string, std::string> &headers,
-                            const std::string &reqBody,
-                            int &outReadFd,
-                            int &outWriteFd)
+bool CgiManager::launchTask(
+    int clientFd,
+    const std::string &scriptPath,
+    const std::string &interpreterPath,
+    const std::string &method,
+    const std::string &query,
+    const std::string &path,
+    const std::map<std::string, std::string> &headers,
+    const std::string &reqBody,
+    const std::string &host,
+    const std::string &port,
+    const std::string &root,
+    int &outReadFd,
+    int &outWriteFd)
 {
     outReadFd = -1;
     outWriteFd = -1;
 
     if (clientFd < 0 || scriptPath.empty())
         return false;
-    CgiHandler cgi(scriptPath, interpreterPath, method, query, path, headers);
+    CgiHandler cgi(scriptPath, interpreterPath, method, query, path, headers,  host,
+    port, root);
     CgiFds fds = cgi.async_launch();
     if (fds.pid < 0 || fds.read_fd < 0)
     {
