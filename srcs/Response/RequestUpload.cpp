@@ -1,7 +1,7 @@
 /*
 文件：srcs/Response/RequestUpload.cpp
 用途：验证普通 POST 上传请求、选择上传目录、生成不覆盖旧文件的唯一名称，并把二进制 body 写入文件。
-拆分说明：上传相关函数从原 RequestHandler.cpp 原样移动；multipart 仍明确不在本模块解析。
+拆分说明：上传相关函数从原 RequestHandler.cpp 移入本文件；multipart/form-data 当前明确返回 415。
 */
 /*
 包含：RequestHandlerInternal.hpp
@@ -47,76 +47,17 @@ static std::string withEndingSlash(std::string path)
     return path;
 }
 
-// 提取 boundary 字符串
-static std::string extractBoundary(const std::string &contentType)
-{
-    size_t pos = contentType.find("boundary=");
-    if (pos == std::string::npos)
-        return "";
-    std::string b = contentType.substr(pos + 9);
-    size_t semi = b.find(';');
-    if (semi != std::string::npos)
-        b = b.substr(0, semi);
-    if (!b.empty() && b[0] == '"' && b[b.size() - 1] == '"')
-        b = b.substr(1, b.size() - 2);
-    return b;
-}
-
-// 提取真正的文件二进制 payload 和表单里的原文件名 (filename)
-static bool parseMultipartBody(const std::string &rawBody, const std::string &contentType,
-                               std::string &outPayload, std::string &outFilename)
-{
-    std::string boundaryStr = extractBoundary(contentType);
-    if (boundaryStr.empty())
-        return false;
-
-    std::string boundary = "--" + boundaryStr;
-    size_t startPos = rawBody.find(boundary);
-    if (startPos == std::string::npos)
-        return false;
-
-    size_t headerEndPos = rawBody.find("\r\n\r\n", startPos);
-    if (headerEndPos == std::string::npos)
-        return false;
-
-    std::string partHeader = rawBody.substr(startPos, headerEndPos - startPos);
-
-    // 从 Part Header 提取原本的文件名 (如 test.jpg)
-    size_t fnPos = partHeader.find("filename=\"");
-    if (fnPos != std::string::npos)
-    {
-        size_t fnStart = fnPos + 10;
-        size_t fnEnd = partHeader.find("\"", fnStart);
-        if (fnEnd != std::string::npos)
-        {
-            outFilename = partHeader.substr(fnStart, fnEnd - fnStart);
-        }
-    }
-
-    size_t fileDataStart = headerEndPos + 4;
-    size_t fileDataEnd = rawBody.find(boundary, fileDataStart);
-    if (fileDataEnd == std::string::npos)
-        return false;
-
-    if (fileDataEnd >= 2 && rawBody[fileDataEnd - 2] == '\r' && rawBody[fileDataEnd - 1] == '\n')
-    {
-        fileDataEnd -= 2;
-    }
-
-    outPayload = rawBody.substr(fileDataStart, fileDataEnd - fileDataStart);
-    return true;
-}
-
 /*
 函数：handlePost
 用途：把 RequestParser 已还原的 body 写入配置 upload_path 下的唯一文件名。
 参数来源：request/route 来自 buildResponse() 普通 POST 分支。
 变量说明：file 保存临时文件状态；base 选择 root/alias；baseDirectory 是最终上传目录；directoryInfo 用 stat 验证目录。
 实现逻辑：
-    1. joinPaths(root/alias,upload_path) 并保证末尾 /。
-    2. 上传目录不存在/非目录返回 409，不可写返回 403。
-    3. 提取 URI 文件名、检查 Content-Type/framing、生成唯一名并写文件。
-    4. 任一步失败直接返回 file.response；成功返回 200 File Created。
+    1. joinPaths(root/alias, upload_path) 并保证末尾 /。
+    2. 上传目录不存在或不是目录返回 409，不可写返回 403。
+    3. 提取 URI 文件名并检查 Content-Type 与请求体 framing。
+    4. 把 RequestParser 已解码的完整 body 写入唯一文件名。
+    5. 任一步失败直接返回错误 Response；成功创建新资源返回 201。
 */
 Response handlePost(const Request &request, const EffectiveRoute &route)
 {
@@ -126,50 +67,32 @@ Response handlePost(const Request &request, const EffectiveRoute &route)
         joinPaths(base, route.upload_path));
 
     struct stat directoryInfo;
-    if (baseDirectory.empty() || stat(baseDirectory.c_str(), &directoryInfo) != 0 || !S_ISDIR(directoryInfo.st_mode))
+    if (baseDirectory.empty()
+        || stat(baseDirectory.c_str(), &directoryInfo) != 0
+        || !S_ISDIR(directoryInfo.st_mode))
     {
         file.response.createResponse(409,
-                                     "Upload Directory: " + baseDirectory + " Does not Exist",
-                                     route.server->error_pages);
+            "Upload directory does not exist: " + baseDirectory,
+            route.server->error_pages);
         return file.response;
     }
     if (access(baseDirectory.c_str(), W_OK) != 0)
     {
         file.response.createResponse(403,
-                                     "Upload Directory: " + baseDirectory + " is not Writable",
-                                     route.server->error_pages);
+            "Upload directory is not writable: " + baseDirectory,
+            route.server->error_pages);
         return file.response;
     }
-    if (file.getFileName(route) == FILE_OPERATION_ERROR || file.validateUploadRequest(request, route) == FILE_OPERATION_ERROR)
+    if (file.getFileName(route) == FILE_OPERATION_ERROR
+        || file.validateUploadRequest(request, route)
+            == FILE_OPERATION_ERROR)
+        return file.response;
+    if (file.createFile(request.getBody(), baseDirectory,
+            route.server->error_pages) == FILE_OPERATION_ERROR)
         return file.response;
 
-    // 💡【核心改动点】：准备要写入的数据和文件名
-    std::string bodyToWrite = request.getBody();
-    std::string contentType;
-    if (request.getHeader("content-type", contentType) &&
-        contentType.find("multipart/form-data") != std::string::npos)
-    {
-        std::string extractedPayload;
-        std::string multipartFilename;
-        if (parseMultipartBody(request.getBody(), contentType, extractedPayload, multipartFilename))
-        {
-            bodyToWrite = extractedPayload; // 替换为纯净的文件 payload
-            if (!multipartFilename.empty())
-            {
-                file.fileName = multipartFilename; // 优先采用表单里的真实文件名！
-            }
-        }
-        else
-        {
-            file.response.createResponse(400, "Bad Multipart Format", route.server->error_pages);
-            return file.response;
-        }
-    }
-
-    if (file.createFile(bodyToWrite, baseDirectory, route.server->error_pages) == FILE_OPERATION_ERROR)
-        return file.response;
-
-    file.response.createResponse(201, "File Created", route.server->error_pages); // 规范建议用 201 Created
+    file.response.createResponse(201, "File created",
+        route.server->error_pages);
     return file.response;
 }
 
@@ -177,7 +100,7 @@ Response handlePost(const Request &request, const EffectiveRoute &route)
 函数：FileOperation::validateUploadRequest
 用途：检查普通上传支持的 media type，并确认 RequestParser 使用了明确 body framing。
 参数来源：request/route 来自 handlePost()。
-变量说明：contentType 暂存 Content-Type；headerValue 复用读取 CL/TE；两个 bool 表示 framing 字段存在性。
+变量说明：contentType 暂存 Content-Type；headerValue 复用读取 Content-Length/Transfer-Encoding；两个 bool 表示 framing 字段存在性。
 实现逻辑：
     1. 有 Content-Type 时调用 checkContentType()，不支持返回 415。
     2. 检查 Content-Length 或 Transfer-Encoding 至少存在一个。
@@ -187,17 +110,19 @@ int FileOperation::validateUploadRequest(const Request &request,
                                          const EffectiveRoute &route)
 {
     std::string contentType;
-    if (request.getHeader("content-type", contentType) && checkContentType(contentType) == FILE_OPERATION_ERROR)
+    if (request.getHeader("content-type", contentType)
+        && checkContentType(contentType) == FILE_OPERATION_ERROR)
     {
         response.createResponse(415, "Unsupported Content-Type",
-                                route.server->error_pages);
+            route.server->error_pages);
         return FILE_OPERATION_ERROR;
     }
 
     std::string headerValue;
-    bool hasContentLength = request.getHeader("content-length", headerValue);
+    bool hasContentLength = request.getHeader("content-length",
+        headerValue);
     bool hasTransferEncoding = request.getHeader("transfer-encoding",
-                                                 headerValue);
+        headerValue);
     if (!hasContentLength && !hasTransferEncoding)
     {
         response.createResponse(411, "", route.server->error_pages);
@@ -221,22 +146,22 @@ int FileOperation::createFile(const std::string &body,
     std::ofstream output(filePath.c_str(), std::ios::binary);
     if (!output)
     {
-        response.createResponse(500, "Outfile could not be opened",
-                                errorPages);
+        response.createResponse(500, "Output file could not be opened",
+            errorPages);
         return FILE_OPERATION_ERROR;
     }
     output.write(body.data(), static_cast<std::streamsize>(body.size()));
     if (!output)
     {
         response.createResponse(500, "Error while writing file",
-                                errorPages);
+            errorPages);
         return FILE_OPERATION_ERROR;
     }
     output.close();
     if (!output)
     {
         response.createResponse(500, "Error while closing file",
-                                errorPages);
+            errorPages);
         return FILE_OPERATION_ERROR;
     }
     return FILE_OPERATION_OK;
@@ -279,7 +204,8 @@ std::string FileOperation::generateUniqueFilename(
     while (fileExists(fullPath))
     {
         std::ostringstream candidate;
-        candidate << baseDirectory << name << "_" << counter << extension;
+        candidate << baseDirectory << name << "_" << counter
+                  << extension;
         fullPath = candidate.str();
         ++counter;
     }
@@ -288,10 +214,10 @@ std::string FileOperation::generateUniqueFilename(
 
 /*
 函数：FileOperation::checkContentType
-用途：判断普通原始 body 上传当前支持的 media type；multipart 未解析所以明确拒绝。
+用途：判断原始 body 上传当前支持的 media type，并明确拒绝尚未实现的 multipart/form-data。
 参数来源：contentType 来自 Request.getHeader("content-type")。
-变量说明：value 是小写副本；semicolon 去参数；begin/end trim OWS。
-实现逻辑：去掉 ; 后参数和两端 OWS，只允许 octet-stream、urlencoded、json、text/plain。
+变量说明：value 是小写副本；semicolon 去参数；begin/end 用于清除两端 OWS。
+实现逻辑：去掉 ; 后参数和两端 OWS，只允许 octet-stream、urlencoded、json 和 text/plain。
 */
 int FileOperation::checkContentType(const std::string &contentType) const
 {
@@ -300,13 +226,18 @@ int FileOperation::checkContentType(const std::string &contentType) const
     if (semicolon != std::string::npos)
         value = value.substr(0, semicolon);
     size_t begin = 0;
-    while (begin < value.size() && (value[begin] == ' ' || value[begin] == '\t'))
+    while (begin < value.size()
+        && (value[begin] == ' ' || value[begin] == '\t'))
         ++begin;
     size_t end = value.size();
-    while (end > begin && (value[end - 1] == ' ' || value[end - 1] == '\t'))
+    while (end > begin
+        && (value[end - 1] == ' ' || value[end - 1] == '\t'))
         --end;
     value = value.substr(begin, end - begin);
-    if (value == "application/octet-stream" || value == "application/x-www-form-urlencoded" || value == "application/json" || value == "text/plain" || value == "multipart/form-data")
+    if (value == "application/octet-stream"
+        || value == "application/x-www-form-urlencoded"
+        || value == "application/json"
+        || value == "text/plain")
         return FILE_OPERATION_OK;
     return FILE_OPERATION_ERROR;
 }

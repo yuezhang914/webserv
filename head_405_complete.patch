@@ -1,0 +1,85 @@
+--- a/includes/Response.hpp
++++ b/includes/Response.hpp
+@@ -51,6 +51,7 @@
+     HeaderMap _headers;         /* 名称经过 canonicalHeaderName() 统一的响应头。 */
+     std::string _body;          /* 按明确长度保存的二进制安全响应体。 */
+     bool _closeConnection;      /* 发送本响应后是否关闭客户端连接。 */
++    bool _suppressBody;         /* HEAD 请求最终只序列化响应头，不发送 body。 */
+ 
+     /*
+     函数：statusMessageFor
+--- a/srcs/Response/Response.cpp
++++ b/srcs/Response/Response.cpp
+@@ -33,7 +33,8 @@
+ */
+ Response::Response(bool closeConnection)
+     : _version("HTTP/1.1"), _statusCode(200), _statusMessage("OK"),
+-      _headers(), _body(), _closeConnection(closeConnection)
++      _headers(), _body(), _closeConnection(closeConnection),
++      _suppressBody(false)
+ {
+     updateConnectionHeader();
+     updateContentLength();
+@@ -51,7 +52,8 @@
+ */
+ Response::Response(const Request &request)
+     : _version("HTTP/1.1"), _statusCode(200), _statusMessage("OK"),
+-      _headers(), _body(), _closeConnection(requestWantsClose(request))
++      _headers(), _body(), _closeConnection(requestWantsClose(request)),
++      _suppressBody(request.getMethod() == "HEAD")
+ {
+     updateConnectionHeader();
+     updateContentLength();
+@@ -219,7 +221,8 @@
+         ++it;
+     }
+     output << "\r\n";
+-    output.write(_body.data(), static_cast<std::streamsize>(_body.size()));
++    if (!_suppressBody)
++        output.write(_body.data(), static_cast<std::streamsize>(_body.size()));
+     return output.str();
+ }
+ 
+--- a/srcs/Response/ResponseBuilder.cpp
++++ b/srcs/Response/ResponseBuilder.cpp
+@@ -277,6 +277,13 @@
+         return response;
+     }
+ 
++    if (request.getMethod() == "HEAD")
++    {
++        response.createResponse(405, "", route.server->error_pages);
++        response.setHeader("Allow", buildAllowHeader(route.allow_methods));
++        return response;
++    }
++
+     RequestAction action = requestActionFromMethod(request.getMethod());
+     if (action == ACTION_UNSUPPORTED)
+     {
+--- a/tests/module_tests/response_module_test.cpp
++++ b/tests/module_tests/response_module_test.cpp
+@@ -585,11 +585,23 @@
+         && headerEquals(response, "Allow", "GET"),
+         "405 返回 Allow");
+ 
++    check(parseRequest("HEAD", "/ping.html", "", "", server, request),
++        "解析 HEAD 请求");
++    response = buildReadyResponse(request);
++    check(response.getStatusCode() == 405
++        && headerEquals(response, "Allow", "GET, POST, DELETE"),
++        "HEAD 暂未实现时返回 405 和 Allow");
++    std::string headRaw = response.responseToString();
++    size_t headSplit = headRaw.find("\r\n\r\n");
++    check(headSplit != std::string::npos
++        && headRaw.size() == headSplit + 4,
++        "HEAD 的 405 响应不发送 body");
++
+     check(parseRequest("PATCH", "/ping.html", "", "", server, request),
+         "解析未实现 method");
+     response = buildReadyResponse(request);
+     check(response.getStatusCode() == 501,
+-        "合法但未实现 method 返回 501");
++        "其他合法但未实现 method 返回 501");
+ 
+     check(parseRequest("GET", "/missing.txt", "", "", server, request),
+         "解析缺失资源");

@@ -51,6 +51,7 @@ private:
     HeaderMap _headers;         /* 名称经过 canonicalHeaderName() 统一的响应头。 */
     std::string _body;          /* 按明确长度保存的二进制安全响应体。 */
     bool _closeConnection;      /* 发送本响应后是否关闭客户端连接。 */
+    bool _suppressBody;         /* HEAD 请求只发送响应头，不发送响应体。 */
 
     /*
     函数：statusMessageFor

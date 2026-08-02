@@ -28,12 +28,13 @@
 变量说明：成员全部在初始化列表中设置；没有额外局部变量。
 实现逻辑：
     1. 初始化合法状态行和空 headers/body。
-    2. 保存调用方给出的连接策略。
+    2. 保存调用方给出的连接策略，并默认允许发送响应体。
     3. 生成受控 Connection 与 Content-Length headers。
 */
 Response::Response(bool closeConnection)
     : _version("HTTP/1.1"), _statusCode(200), _statusMessage("OK"),
-      _headers(), _body(), _closeConnection(closeConnection)
+      _headers(), _body(), _closeConnection(closeConnection),
+      _suppressBody(false)
 {
     updateConnectionHeader();
     updateContentLength();
@@ -47,11 +48,13 @@ Response::Response(bool closeConnection)
 实现逻辑：
     1. 初始化合法状态、空 headers 和空 body。
     2. 调用 requestWantsClose() 得到初始关闭策略。
-    3. 同步 Connection 和 Content-Length。
+    3. HEAD 请求记录为只发送响应头，其他方法允许发送响应体。
+    4. 同步 Connection 和 Content-Length。
 */
 Response::Response(const Request &request)
     : _version("HTTP/1.1"), _statusCode(200), _statusMessage("OK"),
-      _headers(), _body(), _closeConnection(requestWantsClose(request))
+      _headers(), _body(), _closeConnection(requestWantsClose(request)),
+      _suppressBody(request.getMethod() == "HEAD")
 {
     updateConnectionHeader();
     updateContentLength();
@@ -205,7 +208,7 @@ void Response::setCloseConnection(bool closeConnection)
     1. 写入状态行和 CRLF。
     2. 逐个写入规范化 header。
     3. 写入空行结束 header 区域。
-    4. 用 output.write(data,size) 写入二进制 body，避免 NUL 截断。
+    4. 非 HEAD 请求用 output.write(data,size) 写入二进制 body；HEAD 请求在空行后结束。
 */
 std::string Response::responseToString() const
 {
@@ -219,7 +222,9 @@ std::string Response::responseToString() const
         ++it;
     }
     output << "\r\n";
-    output.write(_body.data(), static_cast<std::streamsize>(_body.size()));
+    if (!_suppressBody)
+        output.write(_body.data(),
+                     static_cast<std::streamsize>(_body.size()));
     return output.str();
 }
 

@@ -384,7 +384,8 @@ void CgiHandler::_executeChildProcess(int childReadFd, int parentWriteFd)
         dprintf(STDERR_FILENO, "%s\n", env[i]);
     for (int i = 0; env[i]; i++)
     {
-        printf(env[i]);
+       std::cout << env[i] << std::endl;
+        // printf(env[i]);
     }
     if (env == NULL)
     {
