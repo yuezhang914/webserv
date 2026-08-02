@@ -60,6 +60,8 @@ bool EffectiveRoute::createEffectiveRoute(const ServerConfig *srv,
     {
         use_alias = true;
         alias = loc->alias;
+        // CGI DOCUMENT_ROOT 使用 alias 对应目录
+        root = loc->alias;
     }
     else
     {
@@ -157,4 +159,3 @@ bool EffectiveRoute::createEffectiveRoute(const ServerConfig *srv)
     redirect_url.clear();
     return true;
 }
-

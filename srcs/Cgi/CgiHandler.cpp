@@ -53,7 +53,7 @@ CgiHandler::CgiHandler(const std::string &script_path,
        - 它裂变出的双向管道 FD 和子进程 PID 已经打包成 CgiFds 结构体，交接给了 CgiManager 进行统一生命周期管理。
        - 动态申请的环境变量堆内存（_buildEnvironment）在 _executeChildProcess 失败时或子进程结束时已被独立释放。
     4. RAII 机制：类内部持有的 _script_path、_headers 等 std::string 与 std::map 成员对象，将由 C++98 的 RAII 机制在对象析构时自动回收内存，无需在此手动释放。
-*/      
+*/
 CgiHandler::~CgiHandler() {}
 
 /*
@@ -98,13 +98,14 @@ char **CgiHandler::_buildEnvironment() const
     envMap["SERVER_PROTOCOL"] = "HTTP/1.1";
     envMap["REQUEST_METHOD"] = _method;
     envMap["QUERY_STRING"] = _query;
-    envMap["SCRIPT_NAME"] = scriptName;               // 正确剥离后的 /cgi-bin/path_info.py
+    envMap["SCRIPT_NAME"] = scriptName; // 正确剥离后的 /cgi-bin/path_info.py
     envMap["SCRIPT_FILENAME"] = _script_path;
-    envMap["PATH_INFO"] = pathInfo;                    // 正确剥离后的 /abc/def
-    
+
+    envMap["PATH_INFO"] = pathInfo;
+
     // 💡 3. RFC 3875 规范：PATH_TRANSLATED
     if (!pathInfo.empty())
-        envMap["PATH_TRANSLATED"] = _root + pathInfo;  // 例如 /srv/www/abc/def
+        envMap["PATH_TRANSLATED"] = _root + pathInfo; // 例如 /srv/www/abc/def
     else
         envMap["PATH_TRANSLATED"] = "";
 
@@ -112,12 +113,15 @@ char **CgiHandler::_buildEnvironment() const
     envMap["SERVER_PORT"] = _port;
     envMap["DOCUMENT_ROOT"] = _root;
 
-    // 💡 继承系统 PATH
+    envMap["REQUEST_URI"] = _path;
+    envMap["SCRIPT_URL"] = scriptName;
+
+    // 继承系统 PATH
     const char *sysPath = std::getenv("PATH");
     if (sysPath != NULL)
         envMap["PATH"] = sysPath;
     else
-        envMap["PATH"] = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin";
+        envMap["PATH"] = "/usr/local/bin:/usr/bin:/bin";
 
     // 💡 4. 处理普通 HTTP 请求头并忽略内部标头（同时做大小写无关匹配）
     for (std::map<std::string, std::string>::const_iterator it = _headers.begin();
@@ -131,8 +135,11 @@ char **CgiHandler::_buildEnvironment() const
             lowerKey[k] = static_cast<char>(std::tolower(lowerKey[k]));
 
         // 过滤内部 CGI 标头，不暴露给 CGI 环境变量
-        if (lowerKey == "x-internal-cgi-script-name" || lowerKey == "x-internal-cgi-path-info" ||
-            lowerKey == "x-internal-cgi-path" || lowerKey == "x-internal-cgi-interpreter")
+        if (lowerKey == "x-internal-cgi-script-name" ||
+            lowerKey == "x-internal-cgi-path-info" ||
+            lowerKey == "x-internal-cgi-path" ||
+            lowerKey == "x-internal-cgi-interpreter" ||
+            lowerKey == "x-internal-cgi-document-root")
             continue;
 
         if (lowerKey == "content-type")
@@ -152,7 +159,7 @@ char **CgiHandler::_buildEnvironment() const
             envMap[envKey] = val;
         }
     }
-    
+
     char **env = static_cast<char **>(std::malloc(sizeof(char *) * (envMap.size() + 1)));
     if (!env)
         return NULL;
@@ -345,6 +352,7 @@ bool CgiHandler::_setupPipes(int pipe_to_parent[2], int pipe_to_child[2])
 */
 void CgiHandler::_executeChildProcess(int childReadFd, int parentWriteFd)
 {
+    dprintf(2, "========== MY CGI CODE ==========\n");
     if (childReadFd != STDIN_FILENO)
     {
         if (dup2(childReadFd, STDIN_FILENO) < 0)
@@ -371,6 +379,13 @@ void CgiHandler::_executeChildProcess(int childReadFd, int parentWriteFd)
         ::exit(127);
     }
     char **env = _buildEnvironment();
+
+    for (int i = 0; env[i]; ++i)
+        dprintf(STDERR_FILENO, "%s\n", env[i]);
+    for (int i = 0; env[i]; i++)
+    {
+        printf(env[i]);
+    }
     if (env == NULL)
     {
         ::exit(127);
@@ -381,6 +396,31 @@ void CgiHandler::_executeChildProcess(int childReadFd, int parentWriteFd)
         args[0] = const_cast<char *>(_interpreter_path.c_str());
         args[1] = const_cast<char *>(scriptName.c_str());
         args[2] = NULL;
+        dprintf(STDERR_FILENO,
+                "INTERPRETER=[%s]\n",
+                args[0]);
+
+        dprintf(STDERR_FILENO,
+                "SCRIPT=[%s]\n",
+                args[1]);
+        std::cerr
+            << "exists interpreter="
+            << access(_interpreter_path.c_str(), X_OK)
+            << std::endl;
+
+        std::cerr
+            << "errno="
+            << strerror(errno)
+            << std::endl;
+        std::cerr << "args[0]=" << args[0] << std::endl;
+        std::cerr << "args[1]=" << args[1] << std::endl;
+
+        for (int i = 0; env[i]; i++)
+        {
+            std::cerr << "ENV[" << i << "]="
+                      << env[i]
+                      << std::endl;
+        }
         ::execve(args[0], args, env);
     }
     else
@@ -388,8 +428,16 @@ void CgiHandler::_executeChildProcess(int childReadFd, int parentWriteFd)
         std::string executable = "./" + scriptName;
         args[0] = const_cast<char *>(executable.c_str());
         args[1] = NULL;
+        dprintf(STDERR_FILENO,
+                "INTERPRETER=[%s]\n",
+                args[0]);
+
+        dprintf(STDERR_FILENO,
+                "SCRIPT=[%s]\n",
+                args[1]);
         ::execve(args[0], args, env);
     }
+    perror("execve failed");
     _freeEnvironment(env);
     ::exit(127);
 }
@@ -438,4 +486,3 @@ CgiFds CgiHandler::async_launch()
     fds.write_fd = pipe_to_child[1];
     return fds;
 }
-

@@ -267,15 +267,50 @@ void ServerManager::dispatchCgiTask(Connection *conn, int clientFd, const Respon
 
     // 💡 1. 拷贝 Request 的 Headers，并把 res 里的内部 CGI 标头合并进去
     std::map<std::string, std::string> cgiHeaders = conn->request.getHeaders();
-    
+
     std::string scriptNameVal, pathInfoVal;
     if (res.getHeader("X-Internal-CGI-Script-Name", scriptNameVal))
         cgiHeaders["X-Internal-CGI-Script-Name"] = scriptNameVal;
     if (res.getHeader("X-Internal-CGI-Path-Info", pathInfoVal))
         cgiHeaders["X-Internal-CGI-Path-Info"] = pathInfoVal;
 
+    std::string root;
+
+    if (res.getHeader("X-Internal-CGI-Document-Root", root))
+    {
+        cgiHeaders["X-Internal-CGI-Document-Root"] = root;
+    }
+    else
+    {
+        std::cerr << "[CGI] Missing document root\n";
+        return;
+    }
+
     int outReadFd = -1;
     int outWriteFd = -1;
+
+    std::string host = "localhost";
+    std::string port = "8080";
+
+    std::map<std::string, std::string>::const_iterator it =
+        conn->request.getHeaders().find("Host");
+
+    if (it != conn->request.getHeaders().end())
+    {
+        std::string hostHeader = it->second;
+
+        size_t pos = hostHeader.find(':');
+
+        if (pos != std::string::npos)
+        {
+            host = hostHeader.substr(0, pos);
+            port = hostHeader.substr(pos + 1);
+        }
+        else
+        {
+            host = hostHeader;
+        }
+    }
 
     // 💡 2. 传入合并后的 cgiHeaders
     bool launched = this->_cgiManager.launchTask(
@@ -287,6 +322,9 @@ void ServerManager::dispatchCgiTask(Connection *conn, int clientFd, const Respon
         conn->request.getPath(),
         cgiHeaders,
         conn->request.getBody(),
+        host,
+        port,
+        root,
         outReadFd,
         outWriteFd);
 
@@ -395,11 +433,11 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
     {
         std::cout << "[ServerManager] Request incomplete for FD " << clientFd << ". Waiting for more data..." << std::endl;
     }
-   else if (status == REQUEST_BODY_TOO_LARGE)
+    else if (status == REQUEST_BODY_TOO_LARGE)
     {
         std::cerr << "[ServerManager] Request body too large on FD " << clientFd << ". Pre-writing 413 response." << std::endl;
         conn->close_after_write = true;
-        
+
         // 💡 优先使用你们的 ResponseBuilder，或者直接写 413 标头：
         std::string error_response = "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         conn->write_buffer += error_response;
@@ -523,6 +561,13 @@ void ServerManager::handleCgiRead(int cgiReadFd)
 
     if (res.status == CGI_FINISHED)
     {
+        std::cout
+            << "========== RAW CGI OUTPUT =========="
+            << std::endl
+            << res.rawOutput
+            << std::endl
+            << "===================================="
+            << std::endl;
         this->_cgi_read_fd_to_client_map.erase(cgiReadFd);
         this->eraseFdFromPoll(cgiReadFd);
         this->cleanupClientWritePipe(res.clientFd);
@@ -533,7 +578,7 @@ void ServerManager::handleCgiRead(int cgiReadFd)
             Response cgiResponse = buildCgiResponse(conn->request, res.rawOutput);
             conn->response = cgiResponse;
             conn->write_buffer = cgiResponse.responseToString();
-            //conn->close_after_write = true;
+            // conn->close_after_write = true;
             this->setClientEvents(res.clientFd, POLLOUT);
         }
     }
@@ -548,7 +593,7 @@ void ServerManager::handleCgiRead(int cgiReadFd)
         {
             conn->response.createResponse(res.statusCode, "CGI Output Error", conn->config.error_pages);
             conn->write_buffer = conn->response.responseToString();
-            //conn->close_after_write = true;
+            // conn->close_after_write = true;
             this->setClientEvents(res.clientFd, POLLOUT);
         }
     }
