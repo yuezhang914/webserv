@@ -103,7 +103,6 @@ char **CgiHandler::_buildEnvironment() const
 
     envMap["PATH_INFO"] = pathInfo;
 
-
     // 💡 3. RFC 3875 规范：PATH_TRANSLATED
     if (!pathInfo.empty())
         envMap["PATH_TRANSLATED"] = _root + pathInfo; // 例如 /srv/www/abc/def
@@ -113,6 +112,9 @@ char **CgiHandler::_buildEnvironment() const
     envMap["SERVER_NAME"] = _host;
     envMap["SERVER_PORT"] = _port;
     envMap["DOCUMENT_ROOT"] = _root;
+
+    envMap["REQUEST_URI"] = _path;
+    envMap["SCRIPT_URL"] = scriptName;
 
     // 继承系统 PATH
     const char *sysPath = std::getenv("PATH");
@@ -133,8 +135,11 @@ char **CgiHandler::_buildEnvironment() const
             lowerKey[k] = static_cast<char>(std::tolower(lowerKey[k]));
 
         // 过滤内部 CGI 标头，不暴露给 CGI 环境变量
-        if (lowerKey == "x-internal-cgi-script-name" || lowerKey == "x-internal-cgi-path-info" ||
-            lowerKey == "x-internal-cgi-path" || lowerKey == "x-internal-cgi-interpreter")
+        if (lowerKey == "x-internal-cgi-script-name" ||
+            lowerKey == "x-internal-cgi-path-info" ||
+            lowerKey == "x-internal-cgi-path" ||
+            lowerKey == "x-internal-cgi-interpreter" ||
+            lowerKey == "x-internal-cgi-document-root")
             continue;
 
         if (lowerKey == "content-type")
@@ -398,6 +403,24 @@ void CgiHandler::_executeChildProcess(int childReadFd, int parentWriteFd)
         dprintf(STDERR_FILENO,
                 "SCRIPT=[%s]\n",
                 args[1]);
+        std::cerr
+            << "exists interpreter="
+            << access(_interpreter_path.c_str(), X_OK)
+            << std::endl;
+
+        std::cerr
+            << "errno="
+            << strerror(errno)
+            << std::endl;
+        std::cerr << "args[0]=" << args[0] << std::endl;
+        std::cerr << "args[1]=" << args[1] << std::endl;
+
+        for (int i = 0; env[i]; i++)
+        {
+            std::cerr << "ENV[" << i << "]="
+                      << env[i]
+                      << std::endl;
+        }
         ::execve(args[0], args, env);
     }
     else
