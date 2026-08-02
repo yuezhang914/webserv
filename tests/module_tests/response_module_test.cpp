@@ -589,7 +589,7 @@ static void testGetAndRouting(const ServerConfig &server)
         "解析未实现 method");
     response = buildReadyResponse(request);
     check(response.getStatusCode() == 501,
-        "合法但未实现 method 返回 501");
+        "其他合法但未实现 method 返回 501");
 
     check(parseRequest("GET", "/missing.txt", "", "", server, request),
         "解析缺失资源");
@@ -604,6 +604,69 @@ static void testGetAndRouting(const ServerConfig &server)
     response = buildReadyResponse(request);
     check(response.shouldCloseConnection(),
         "Connection 列表包含 close 时关闭");
+}
+
+/*
+函数：testHead
+用途：验证当前策略下 HEAD 被识别为合法方法，但统一返回 405，并且任何 HEAD 响应都不序列化 body。
+参数来源：server 来自真实 Config；请求由 parseRequest() 构造。
+变量说明：request/response 复用；raw/split 检查 header 与 body 的序列化边界。
+实现逻辑：
+    1. 普通资源 HEAD 返回 405，并按当前路由生成 Allow。
+    2. 只读 location 的 HEAD 返回 405 Allow: GET。
+    3. 重定向仍优先返回 301，但因为请求方法是 HEAD，不发送重定向 HTML body。
+    4. PATCH 继续返回 501，证明 HEAD 特判没有误伤其他未实现方法。
+*/
+static void testHead(const ServerConfig &server)
+{
+    beginGroup("HEAD 方法");
+    Request request;
+    Response response;
+    std::ostringstream expectedLength;
+
+    check(parseRequest("HEAD", "/ping.html", "", "", server, request),
+        "解析普通 HEAD 请求");
+    response = buildReadyResponse(request);
+    check(response.getStatusCode() == 405
+        && headerEquals(response, "Allow", "GET, POST, DELETE"),
+        "普通 HEAD 返回 405 和 server Allow");
+    expectedLength << response.getBody().size();
+    check(!response.getBody().empty()
+        && headerEquals(response, "Content-Length",
+            expectedLength.str()),
+        "HEAD 保留对应错误表示的 Content-Length");
+    std::string raw = response.responseToString();
+    size_t split = raw.find("\r\n\r\n");
+    check(split != std::string::npos && raw.size() == split + 4,
+        "普通 HEAD 的 405 响应不序列化 body");
+
+    check(parseRequest("HEAD", "/readonly/file.txt", "", "",
+        server, request), "解析只读 location HEAD");
+    response = buildReadyResponse(request);
+    check(response.getStatusCode() == 405
+        && headerEquals(response, "Allow", "GET"),
+        "HEAD 使用匹配 location 的 Allow");
+    raw = response.responseToString();
+    split = raw.find("\r\n\r\n");
+    check(split != std::string::npos && raw.size() == split + 4,
+        "只读 location HEAD 不序列化 body");
+
+    check(parseRequest("HEAD", "/old/item", "", "", server, request),
+        "解析重定向 HEAD");
+    response = buildReadyResponse(request);
+    check(response.getStatusCode() == 301
+        && headerEquals(response, "Location", "/new/"),
+        "重定向规则在 HEAD 方法检查前生效");
+    raw = response.responseToString();
+    split = raw.find("\r\n\r\n");
+    check(split != std::string::npos && raw.size() == split + 4,
+        "重定向 HEAD 不序列化 body");
+
+    check(parseRequest("PATCH", "/ping.html", "", "", server, request),
+        "解析 HEAD 之外的未实现 method");
+    response = buildReadyResponse(request);
+    check(response.getStatusCode() == 501,
+        "HEAD 特判不改变其他未实现 method 的 501");
 }
 
 /*
@@ -623,42 +686,43 @@ static void testPost(const ServerConfig &server)
         "Content-Length: 3\r\nContent-Type: text/plain\r\n",
         "abc", server, request), "解析普通 POST");
     response = buildReadyResponse(request);
-    check(response.getStatusCode() == 200
+    check(response.getStatusCode() == 201
+        && response.getStatusMessage() == "Created"
         && readFile(ROOT + "/upload/new.txt") == "abc",
-        "普通 POST 写入配置 upload_path");
+        "普通 POST 创建上传资源返回 201");
 
     check(parseRequest("POST", "/upload/chunk.txt",
         "Transfer-Encoding: chunked\r\nContent-Type: text/plain\r\n",
         "2\r\nhe\r\n3\r\nllo\r\n0\r\n\r\n", server, request),
         "解析 chunked POST");
     response = buildReadyResponse(request);
-    check(response.getStatusCode() == 200
+    check(response.getStatusCode() == 201
         && readFile(ROOT + "/upload/chunk.txt") == "hello",
-        "chunked 解码 body 写盘");
+        "chunked 解码 body 写盘并返回 201");
 
     check(parseRequest("POST", "/missing-parent/name.txt",
         "Content-Length: 1\r\nContent-Type: text/plain\r\n",
         "x", server, request), "解析 URI 父目录不存在 POST");
     response = buildReadyResponse(request);
-    check(response.getStatusCode() == 200
+    check(response.getStatusCode() == 201
         && readFile(ROOT + "/upload/name.txt") == "x",
-        "POST 不错误依赖 URI 父目录");
+        "POST 不依赖 URI 父目录并返回 201");
 
     check(parseRequest("POST", "/joined/child/joined.txt",
         "Content-Length: 4\r\nContent-Type: text/plain\r\n",
         "join", server, request), "解析相对 upload_path POST");
     response = buildReadyResponse(request);
-    check(response.getStatusCode() == 200
+    check(response.getStatusCode() == 201
         && readFile(ROOT + "/joined_upload/joined.txt") == "join",
-        "joinPaths 正确拼 upload_path");
+        "joinPaths 正确拼 upload_path 并返回 201");
 
     check(parseRequest("POST", "/upload/a..b.txt",
         "Content-Length: 2\r\nContent-Type: text/plain\r\n",
         "ok", server, request), "解析连续点文件名");
     response = buildReadyResponse(request);
-    check(response.getStatusCode() == 200
+    check(response.getStatusCode() == 201
         && readFile(ROOT + "/upload/a..b.txt") == "ok",
-        "文件名内部连续点允许");
+        "文件名内部连续点允许并返回 201");
 
     check(parseRequest("POST", "/upload/multipart.bin",
         "Content-Length: 3\r\n"
@@ -686,9 +750,10 @@ static void testPost(const ServerConfig &server)
         "Content-Length: 3\r\n", "new", server, request),
         "解析同名上传");
     response = buildReadyResponse(request);
-    check(readFile(ROOT + "/upload/same.txt") == "old"
+    check(response.getStatusCode() == 201
+        && readFile(ROOT + "/upload/same.txt") == "old"
         && readFile(ROOT + "/upload/same_1.txt") == "new",
-        "同名上传生成 _1 且不覆盖");
+        "同名上传创建 _1 新资源并返回 201");
 }
 
 /*
@@ -1219,6 +1284,7 @@ int main()
         const ServerConfig &server = servers[0];
         testResponseClass(server);
         testGetAndRouting(server);
+        testHead(server);
         testPost(server);
         testDelete(server);
         testCgiResponseCompatibility(server);

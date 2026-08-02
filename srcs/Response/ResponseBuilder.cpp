@@ -228,7 +228,7 @@ static int validateCgiScript(const std::string &scriptPath,
     - action/pathStatus/cgiPathStatus：方法枚举、普通路径检查和 CGI 脚本检查结果。
 实现逻辑：
     1. 检查 Request 是否绑定 ServerConfig，并合并 server/location 路由。
-    2. 优先执行配置重定向，再检查方法是否实现以及是否被当前路由允许。
+    2. 优先执行配置重定向；HEAD 暂时返回 405，其他方法再检查是否实现以及是否被当前路由允许。
     3. 精确匹配三个 Session 示例路径时，把共享 store 交给 SessionResponse 层。
     4. 其他请求生成真实路径；CGI 后缀先验证可执行脚本并交付内部路径 header。
     5. 普通 GET、POST、DELETE 分别交给 RequestHandler 对应函数。
@@ -274,6 +274,13 @@ Response buildResponse(const Request &request,
             response.setBody("<!DOCTYPE html><html><head><title>Redirect"
                              "</title></head><body>Redirecting</body></html>");
         }
+        return response;
+    }
+
+    if (request.getMethod() == "HEAD")
+    {
+        response.createResponse(405, "", route.server->error_pages);
+        response.setHeader("Allow", buildAllowHeader(route.allow_methods));
         return response;
     }
 
