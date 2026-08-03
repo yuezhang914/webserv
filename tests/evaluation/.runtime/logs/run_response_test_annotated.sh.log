@@ -1,4 +1,4 @@
-[PASS] 已定位项目根目录：/Users/Knight/Desktop/42/ghweb
+[PASS] 已定位项目根目录：/home/yzhang2/42cursus/ghgh
 [PASS] buildResponse 继续返回 Response
 [PASS] buildResponse 只保留共享 SessionStore 唯一入口
 [PASS] counter/login/logout 已接入 Response 虚拟路由
@@ -14,6 +14,7 @@
 [PASS] 写入真实 Config 测试文件
 [PASS] 创建 index.html
 [PASS] 创建静态文件
+[PASS] 创建只读 location 文件
 [PASS] 创建 percent-decoding 目标文件
 [PASS] 创建 CSS 文件
 [PASS] 创建二进制 PNG 文件
@@ -61,150 +62,95 @@
 
 ========== GET 与路由 ==========
 [PASS] 解析静态 GET
-===== extractPathInfo DEBUG =====
-rawPath=[/ping.html]
 [PASS] 静态文件返回成功
 [PASS] HTML MIME 正确
 [PASS] 解析 encoded path 和 query
-===== extractPathInfo DEBUG =====
-rawPath=[/hello world.txt]
 [PASS] 文件映射使用 getPath 而不是 raw URI
 [PASS] 解析二进制 GET
-===== extractPathInfo DEBUG =====
-rawPath=[/image.png]
 [PASS] 二进制文件和 MIME 正确
 [PASS] 解析目录 GET
-===== extractPathInfo DEBUG =====
-rawPath=[/]
 [PASS] 多 index fallback 命中 index.html
 [PASS] 解析 text index
-===== extractPathInfo DEBUG =====
-rawPath=[/text-index/]
 [PASS] index 使用真实文件 MIME
 [PASS] 解析 autoindex
-===== extractPathInfo DEBUG =====
-rawPath=[/list/]
 [PASS] autoindex 返回 200
 [PASS] autoindex 显示 URL path
 [PASS] autoindex 不泄露磁盘路径
 [PASS] autoindex 显示名 HTML 转义
 [PASS] autoindex href URL 编码
 [PASS] 解析 FIFO GET
-===== extractPathInfo DEBUG =====
-rawPath=[/blocked.fifo]
 [PASS] GET 特殊文件不会阻塞读取
 [PASS] 解析 alias GET
-===== extractPathInfo DEBUG =====
-rawPath=[/alias/hello.txt]
 [PASS] alias 路径正确
 [PASS] 解析 301
-===== extractPathInfo DEBUG =====
-rawPath=[/old/item]
 [PASS] 301 状态和 Location 正确
 [PASS] 解析 304
-===== extractPathInfo DEBUG =====
-rawPath=[/not-modified/item]
 [PASS] 304 配置不生成非法 body
 [PASS] 解析只读 location POST
-===== extractPathInfo DEBUG =====
-rawPath=[/readonly/file.txt]
-[PASS] 405 返回 Allow
+[PASS] 405 返回包含隐式 HEAD 的 Allow
 [PASS] 解析未实现 method
-===== extractPathInfo DEBUG =====
-rawPath=[/ping.html]
 [PASS] 其他合法但未实现 method 返回 501
 [PASS] 解析缺失资源
-===== extractPathInfo DEBUG =====
-rawPath=[/missing.txt]
 [PASS] 404 使用自定义错误页
 [PASS] 解析 Connection token 列表
-===== extractPathInfo DEBUG =====
-rawPath=[/ping.html]
 [PASS] Connection 列表包含 close 时关闭
 
 ========== HEAD 方法 ==========
 [PASS] 解析普通 HEAD 请求
-===== extractPathInfo DEBUG =====
-rawPath=[/ping.html]
-[PASS] 未实现的普通 HEAD 返回 501 且不发送 Allow
-[PASS] HEAD 保留对应错误表示的 Content-Length
-[PASS] 普通 HEAD 的 501 响应不序列化 body
-[PASS] 解析只读 location HEAD
-===== extractPathInfo DEBUG =====
-rawPath=[/readonly/file.txt]
-[PASS] 未实现的 HEAD 不因 location 方法限制变成 405
-[PASS] 只读 location HEAD 不序列化 body
+[FAIL] 普通 HEAD 返回对应 GET 的状态和 headers
+[PASS] 普通 HEAD 最终不保留实际 body
+[PASS] 普通 HEAD 不序列化 body
+[PASS] 解析 GET-only location HEAD
+[FAIL] HEAD 自动继承 GET-only location 权限
+[PASS] GET-only location HEAD 不序列化 body
+[PASS] 解析目录 index HEAD
+[FAIL] 目录 index HEAD 保留 GET 的长度和类型
+[PASS] 目录 index HEAD 清空并不序列化 body
+[PASS] 解析缺失资源 HEAD
+[FAIL] 缺失资源 HEAD 返回对应 GET 的 404 和错误页长度
+[PASS] 404 HEAD 不序列化错误页 body
+[PASS] 解析 POST-only location HEAD
+[PASS] 没有 GET 权限时 HEAD 返回 405 和精确 Allow
+[PASS] 405 HEAD 不序列化错误页 body
 [PASS] 解析重定向 HEAD
-===== extractPathInfo DEBUG =====
-rawPath=[/old/item]
-[PASS] 重定向规则在 HEAD 方法检查前生效
+[PASS] 重定向规则在 HEAD 方法处理前生效
 [PASS] 重定向 HEAD 不序列化 body
 [PASS] 解析 HEAD 之外的未实现 method
-===== extractPathInfo DEBUG =====
-rawPath=[/ping.html]
-[PASS] HEAD 与其他未实现 method 统一返回 501
+[PASS] 其他未实现 method 继续返回 501
 
 ========== POST 上传 ==========
 [PASS] 解析普通 POST
-===== extractPathInfo DEBUG =====
-rawPath=[/upload/new.txt]
 [PASS] 普通 POST 创建上传资源返回 201
 [PASS] 解析 chunked POST
-===== extractPathInfo DEBUG =====
-rawPath=[/upload/chunk.txt]
 [PASS] chunked 解码 body 写盘并返回 201
 [PASS] 解析 URI 父目录不存在 POST
-===== extractPathInfo DEBUG =====
-rawPath=[/missing-parent/name.txt]
 [PASS] POST 不依赖 URI 父目录并返回 201
 [PASS] 解析相对 upload_path POST
-===== extractPathInfo DEBUG =====
-rawPath=[/joined/child/joined.txt]
 [PASS] joinPaths 正确拼 upload_path 并返回 201
 [PASS] 解析连续点文件名
-===== extractPathInfo DEBUG =====
-rawPath=[/upload/a..b.txt]
 [PASS] 文件名内部连续点允许并返回 201
 [PASS] 解析 multipart POST
-===== extractPathInfo DEBUG =====
-rawPath=[/upload/multipart.bin]
 [PASS] 未实现 multipart 时返回 415 且不写原始 framing
 [PASS] 解析缺失 upload_path
-===== extractPathInfo DEBUG =====
-rawPath=[/missing-upload/file.txt]
 [PASS] 真实上传目录不存在返回 409
 [PASS] 解析无 framing POST
-===== extractPathInfo DEBUG =====
-rawPath=[/upload/no-length.txt]
 [PASS] 无 Content-Length/TE 返回 411
 [PASS] 解析同名上传
-===== extractPathInfo DEBUG =====
-rawPath=[/upload/same.txt]
 [PASS] 同名上传创建 _1 新资源并返回 201
 
 ========== DELETE ==========
 [PASS] 解析 DELETE
-===== extractPathInfo DEBUG =====
-rawPath=[/delete_me.txt]
 [PASS] DELETE 成功并返回 204
 [PASS] DELETE 204 无 body/Content-Length
 [PASS] 解析带 query DELETE
-===== extractPathInfo DEBUG =====
-rawPath=[/query_delete.txt]
 [PASS] DELETE 使用 normalized path
 [PASS] 解析缺失 DELETE
-===== extractPathInfo DEBUG =====
-rawPath=[/missing-delete.txt]
 [PASS] DELETE 缺失文件返回 404
 [PASS] 解析目录 DELETE
-===== extractPathInfo DEBUG =====
-rawPath=[/delete_dir]
 [PASS] DELETE 目录返回 403
 
 ========== Response 的 CGI 旧接口兼容与 stdout 适配 ==========
 [PASS] 解析 CGI GET 路由请求
-===== extractPathInfo DEBUG =====
-rawPath=[/cgi/env.sh]
 [PASS] CGI 请求通过既有内部 header 交付真实脚本路径
 [PASS] 合法 CGI stdout 默认生成 200
 [PASS] CGI Content-Type 导入 Response
@@ -215,18 +161,12 @@ rawPath=[/cgi/env.sh]
 [PASS] Response 丢弃 CGI Transfer-Encoding
 [PASS] CGI Connection 不能覆盖原 Response 连接策略
 [PASS] 解析要求关闭连接的 CGI 请求
-===== extractPathInfo DEBUG =====
-rawPath=[/cgi/env.sh]
 [PASS] parseCgiOutput 继承 CGI 占位 Response 的 close 策略
 [PASS] 解析 CGI POST 路由请求
-===== extractPathInfo DEBUG =====
-rawPath=[/cgi/env.sh]
 [PASS] POST CGI 继续使用现有 ServerManager 识别的路径 header
 [PASS] CGI stdout body 支持二进制 NUL
 [PASS] 二进制 CGI body 的 Content-Length 正确
 [PASS] 解析纯 body CGI 适配请求
-===== extractPathInfo DEBUG =====
-rawPath=[/cgi/env.sh]
 [PASS] 无 CGI header 输出作为 200 body
 [PASS] 纯 body CGI 使用默认 text/html
 [PASS] CGI parser 接受 LF header/body 分隔
@@ -235,126 +175,76 @@ rawPath=[/cgi/env.sh]
 [PASS] CGI 204 丢弃脚本附带的非法 body
 [PASS] CGI 204 保持无 body header 规则
 [PASS] 空 CGI stdout 生成 502 并关闭连接
-[PASS] 缺少冒号的 CGI header 生成 502 close
-[PASS] 重复 Status header 生成 502
-[PASS] 超出 100 到 599 的 CGI Status 生成 502
-[PASS] 非法 CGI header name 生成 502
+[FAIL] 缺少冒号的 CGI header 生成 502 close
+[FAIL] 重复 Status header 生成 502
+[FAIL] 超出 100 到 599 的 CGI Status 生成 502
+[FAIL] 非法 CGI header name 生成 502
 [PASS] 解析不存在 CGI 脚本请求
-===== extractPathInfo DEBUG =====
-rawPath=[/cgi/missing.sh]
 [PASS] 不存在 CGI 脚本在启动前返回 404
 [PASS] 解析由解释器执行的不可执行 CGI 脚本请求
-===== extractPathInfo DEBUG =====
-rawPath=[/cgi/noexec.sh]
-[PASS] 配置解释器时脚本只需可读，并向 ServerManager 交付解释器路径
+[FAIL] 配置解释器时脚本只需可读，并向 ServerManager 交付解释器路径
 [PASS] 解析无解释器的不可执行 CGI 脚本请求
-===== extractPathInfo DEBUG =====
-rawPath=[/cgi/noexec.sh]
 [PASS] 没有配置解释器时脚本仍必须拥有执行权限
 [PASS] 解析 CGI location 内普通静态文件
-===== extractPathInfo DEBUG =====
-rawPath=[/cgi/static.txt]
 [PASS] 未匹配 cgi_extension 时仍走静态 GET
 [PASS] 解析 CGI location DELETE
-===== extractPathInfo DEBUG =====
-rawPath=[/cgi/env.sh]
-[PASS] CGI 分发前仍先遵守 location allow_methods
+[PASS] CGI 分发前仍先遵守含隐式 HEAD 的 allow_methods
 
 ========== Response 与 Session Bonus 集成 ==========
 [PASS] 解析首次 Session counter 请求
-===== extractPathInfo DEBUG =====
-rawPath=[/session/counter]
 [PASS] 首次 counter 返回 Visits: 1
 [PASS] counter Response 包含浏览器可用的 login/logout 表单
 [PASS] 首次 counter 返回合法 Session Cookie
 [PASS] 首次 counter 创建一条服务端记录和 HTML 类型
 [PASS] 成功 Session Response 明确禁止缓存
 [PASS] 解析带 query 的 Session counter
-===== extractPathInfo DEBUG =====
-rawPath=[/session/counter]
 [PASS] Session 虚拟路由使用 normalized path 并忽略 query
 [PASS] 解析携带多个 Cookie 的第二次 counter
-===== extractPathInfo DEBUG =====
-rawPath=[/session/counter]
 [PASS] 同一 Cookie 恢复 Session 并递增到 Visits: 2
 [PASS] counter 刷新同一 ID 而不重复创建 Session
 [PASS] 解析唯一入口下的普通静态 GET
-===== extractPathInfo DEBUG =====
-rawPath=[/ping.html]
 [PASS] 唯一 SessionStore 入口不改变普通静态文件行为
 [PASS] 解析 text/plain Session login
-===== extractPathInfo DEBUG =====
-rawPath=[/session/login]
 [PASS] login 返回用户名页面
 [PASS] login 轮换 Session ID
 [PASS] 旧 ID 失效且新 Session 保存 user
 [PASS] Session ID 轮换不增加记录总数
 [PASS] 解析登录后 counter 请求
-===== extractPathInfo DEBUG =====
-rawPath=[/session/counter]
 [PASS] 登录轮换保留匿名 Session 的 visits 数据
 [PASS] 解析 urlencoded Session login
-===== extractPathInfo DEBUG =====
-rawPath=[/session/login]
 [PASS] urlencoded user 被解码并在 HTML 中转义
 [PASS] 解析带额外字段和加号的 urlencoded login
-===== extractPathInfo DEBUG =====
-rawPath=[/session/login]
 [PASS] urlencoded login 忽略额外字段并把加号解码为空格
 [PASS] 解析重复 user 字段的 urlencoded login
-===== extractPathInfo DEBUG =====
-rawPath=[/session/login]
 [PASS] 重复 user 字段返回 400 且不创建 Session
 [PASS] 解析不支持媒体类型的 login
-===== extractPathInfo DEBUG =====
-rawPath=[/session/login]
 [PASS] 不支持媒体类型返回 415 且不创建 Session
 [PASS] 解析 malformed form login
-===== extractPathInfo DEBUG =====
-rawPath=[/session/login]
 [PASS] malformed form 返回 400 且不创建 Session
 [PASS] 解析空用户名 login
-===== extractPathInfo DEBUG =====
-rawPath=[/session/login]
 [PASS] 空用户名返回 400 且不创建 Session
 [PASS] 解析错误方法 counter
-===== extractPathInfo DEBUG =====
-rawPath=[/session/counter]
-[PASS] counter 错误方法返回 405 Allow GET
+[PASS] counter 错误方法返回 405 Allow GET, HEAD
 [PASS] Session 错误响应同样禁止缓存
 [PASS] 解析错误方法 login
-===== extractPathInfo DEBUG =====
-rawPath=[/session/login]
 [PASS] login 错误方法返回 405 Allow POST
 [PASS] 解析要求关闭连接的 Session 请求
-===== extractPathInfo DEBUG =====
-rawPath=[/session/counter]
 [PASS] Session Response 继承 Request 的 Connection 策略
 [PASS] 解析 Session logout
-===== extractPathInfo DEBUG =====
-rawPath=[/session/logout]
 [PASS] logout 返回浏览器删除 Cookie
 [PASS] logout 删除服务端 Session
 [PASS] 解析退出后继续使用旧 Cookie
-===== extractPathInfo DEBUG =====
-rawPath=[/session/counter]
 [PASS] 退出后的旧 Cookie 创建新 Session
 [PASS] 解析非精确 Session 路径
-===== extractPathInfo DEBUG =====
-rawPath=[/session/counter/extra]
 [PASS] 非精确路径继续走普通文件系统路由
 [PASS] 解析错误方法的 logout 请求
-===== extractPathInfo DEBUG =====
-rawPath=[/session/logout]
 [PASS] logout 错误方法返回 405 且不会修改浏览器 Cookie
 
 ========== 配置防御 ==========
 [PASS] 解析无 root 配置请求
-===== extractPathInfo DEBUG =====
-rawPath=[/ping.html]
 [PASS] 无有效 root 返回 500
 
 ========== Response/Session 测试汇总 ==========
-总断言：204
-通过：204
-失败：0
+总断言：214
+通过：205
+失败：9

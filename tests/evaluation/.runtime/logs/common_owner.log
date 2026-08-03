@@ -1,0 +1,65 @@
+
+====================================================================
+        🏆 WEBSERV CONFIGURATION TOPOLOGY DUMP (资产自检大阅兵)      
+====================================================================
+[📊 全局域名防伪锁状态]
+  ├─ 🔹 监听端口: [18086]
+  │  └─ 🔒 已绑定防伪域名集: { "owner.test" }
+--------------------------------------------------------------------
+[🏛️ 内存虚拟主机别墅群 (共 1 个 server 块)]
+  🏠 [Server Block #1]
+    ├─ 📡 Listen Port : 18086
+    ├─ 🏷️ Server Names: [ "owner.test" ]
+    ├─ 📂 Root Path   : /home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/host_alpha
+    ├─ ⚖️ Max Body Size: 1048576 Bytes
+    └─ 🚪 Locations 小房间 (共 0 个):
+        
+====================================================================
+
+[ServerManager] WebServ engine pre-loaded with 1 virtual servers.
+[ServerManager] Initializing network sockets...
+[ServerManager] Successfully listening on 127.0.0.1:18086 (FD: 3)
+[ServerManager] Main loop started. Entering the matrix...
+[Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
+[ServerManager] FD 4 successfully registered to poll tree with events: 1
+[ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
+[Radar] --- TICK END for FD 3 ---
+
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
+[ClientSocket] RAII Closing FD: 4
+[ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
+[Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
+[ServerManager] FD 4 successfully registered to poll tree with events: 1
+[ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
+[Radar] --- TICK END for FD 3 ---
+
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Request parsed successfully for FD 4
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: GET | URI: / | Body Size in Request: 0 bytes
+[RES] Status: 200 | Header Content-Length: 23
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
+[Radar] --- TICK END for FD 4 ---
+
+[Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
+[ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
+[Radar] --- TICK END for FD 4 ---
+
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
+[ClientSocket] RAII Closing FD: 4
+[ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
+
+[Server] Shutting down gracefully...
+[Server] Cleaned up all sockets and CGI processes. Bye!
+[ServerManager] Main loop safely terminated.
+[ServerSocket] Closing listen FD: 3 for 127.0.0.1:18086
+[ServerManager] Engine completely shutdown and memory released.
