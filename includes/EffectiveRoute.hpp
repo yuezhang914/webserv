@@ -46,7 +46,8 @@ enum RequestAction
     ACTION_UNSUPPORTED = 0,
     ACTION_GET,
     ACTION_POST,
-    ACTION_DELETE
+    ACTION_DELETE,
+    ACTION_HEAD // 👈 1. 添加 ACTION_HEAD
 };
 
 /*

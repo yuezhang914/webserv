@@ -91,10 +91,11 @@
 */
 static std::string buildAllowHeader(const std::set<std::string> &allowMethods)
 {
-    const char *orderedMethods[] = {"GET", "POST", "DELETE"};
+    // 💡 加上 "HEAD"，顺序建议按照常规 HTTP 方法排列
+    const char *orderedMethods[] = {"GET", "HEAD", "POST", "DELETE"};
     std::string result;
     size_t i = 0;
-    while (i < 3)
+    while (i < 4) // 💡 注意这里的循环条件改为 4
     {
         if (allowMethods.find(orderedMethods[i]) != allowMethods.end())
         {
@@ -234,6 +235,11 @@ static int validateCgiScript(const std::string &scriptPath,
     5. 普通 GET、POST、DELETE 分别交给 RequestHandler 对应函数。
 接口约束：本项目不再提供不带 SessionStore 的旧重载，避免调用方误绕过 Session 功能。
 */
+void Response::clearBodyOnly()
+{
+    _body.clear(); // 仅擦除 Body 字符串，保留已经通过 updateContentLength() 或原有逻辑设置好的 Content-Length Header
+}
+
 Response buildResponse(const Request &request,
                        SessionStore &sessionStore)
 {
@@ -335,8 +341,16 @@ Response buildResponse(const Request &request,
         response.createResponse(pathStatus, "", route.server->error_pages);
         return response;
     }
-    if (action == ACTION_GET)
-        return handleGet(request, route);
+    // ACTION_GET 和 ACTION_HEAD 统一调用 handleGet 生成完整的 Response
+    if (action == ACTION_GET || action == ACTION_HEAD)
+    {
+        Response res = handleGet(request, route);
+
+        // 💡 2. 如果是 HEAD 请求，只把 Body 清空，保留算好的 Content-Length/Content-Type 等 Header
+        if (action == ACTION_HEAD)
+            res.clearBodyOnly();
+        return res;
+    }
     if (action == ACTION_POST)
         return handlePost(request, route);
     return handleDelete(request, route);
