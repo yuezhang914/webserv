@@ -755,11 +755,13 @@ static void testInvalidLocationDirectives(TestRunner &runner)
 变量解释：
     - config：包含多个相交 location 的测试配置。
     - server：解析得到的唯一 ServerConfig。
-    - use_location：findMatchingLocation() 的输出标志。
-    - loc：当前 URI 匹配到的 LocationConfig 指针。
+    - loc：findMatchingLocation() 返回的只读 LocationConfig 指针。
 主要检查：
-    普通匹配、最长匹配、忽略 query string、无匹配返回 NULL，
+    普通匹配、最长匹配、路径边界、无匹配返回 NULL，
     以及 location body size 覆盖或继承 server 限制。
+说明：
+    当前 findMatchingLocation() 接收已经规范化且已经与 query 分离的 path，
+    因此测试不再传入 query string，也不再使用旧版 use_location 输出参数。
 */
 static void testRouteUtils(TestRunner &runner)
 {
@@ -779,25 +781,24 @@ static void testRouteUtils(TestRunner &runner)
         return;
 
     const ServerConfig &server = result.servers[0];
-    bool use_location = false;
-    LocationConfig *loc = findMatchingLocation("/upload/file.txt", server.locations, use_location);
-    runner.expect(use_location && loc != NULL && loc->path == "/upload/",
+    const LocationConfig *loc =
+        findMatchingLocation("/upload/file.txt", server.locations);
+    runner.expect(loc != NULL && loc->path == "/upload/",
                   "findMatchingLocation 找到普通前缀");
 
-    use_location = false;
-    loc = findMatchingLocation("/upload/images/a.png", server.locations, use_location);
-    runner.expect(use_location && loc != NULL && loc->path == "/upload/images/",
+    loc = findMatchingLocation(
+        "/upload/images/a.png", server.locations);
+    runner.expect(loc != NULL && loc->path == "/upload/images/",
                   "findMatchingLocation 选择最长前缀");
 
-    use_location = false;
-    loc = findMatchingLocation("/upload/images/a.png?size=small", server.locations, use_location);
-    runner.expect(use_location && loc != NULL && loc->path == "/upload/images/",
-                  "location 匹配忽略 query string");
+    loc = findMatchingLocation(
+        "/upload-other/a", server.locations);
+    runner.expect(loc == NULL,
+                  "location 前缀必须位于真实路径边界");
 
-    use_location = true;
-    loc = findMatchingLocation("/other/a", server.locations, use_location);
-    runner.expect(!use_location && loc == NULL,
-                  "没有匹配 location 时返回 NULL 并清除标志");
+    loc = findMatchingLocation("/other/a", server.locations);
+    runner.expect(loc == NULL,
+                  "没有匹配 location 时返回 NULL");
 
     runner.expect(getEffectiveBodyLimit(&server, "/upload/a") == 20UL * 1024UL,
                   "location 明确覆盖 server body limit");

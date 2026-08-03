@@ -382,11 +382,11 @@ void CgiHandler::_executeChildProcess(int childReadFd, int parentWriteFd)
 
     for (int i = 0; env[i]; ++i)
         dprintf(STDERR_FILENO, "%s\n", env[i]);
-    for (int i = 0; env[i]; i++)
-    {
-       std::cout << env[i] << std::endl;
-        // printf(env[i]);
-    }
+    // for (int i = 0; env[i]; i++)
+    // {
+    //    std::cout << env[i] << std::endl;
+    //     // printf(env[i]);
+    // }
     if (env == NULL)
     {
         ::exit(127);

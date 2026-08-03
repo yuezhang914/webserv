@@ -1,0 +1,7 @@
+/Users/Knight/Desktop/42/ghweb/srcs/Server/ServerManager.cpp:469: *        - 若为 EAGAIN 或 EWOULDBLOCK，说明内核写缓冲区已经塞满了，属于正常的非阻塞暂缓信号，直接优雅退出，等待下一次 poll() 再次可写；
+/Users/Knight/Desktop/42/ghweb/srcs/Server/ServerManagerUtils.cpp:6: * 用乎：在 poll() 监听到事件响了之后，用来判定当前被唤醒的文件描述符（fd）究竟是大厅的主监听端口，还是已经建立的普通客户端连接。
+/Users/Knight/Desktop/42/ghweb/srcs/Server/ServerManagerUtils.cpp:114:            // 💡 软标记为 -1！poll() 会自动跳过，绝不引发 Vector 迭代器/索引物理抖动！
+/Users/Knight/Desktop/42/ghweb/srcs/Server/ServerManagerUtils.cpp:232:    int ret = ::poll(&this->_poll_fds[0], this->_poll_fds.size(), 1000);
+/Users/Knight/Desktop/42/ghweb/srcs/Server/ServerManagerUtils.cpp:245:            std::cerr << "[executePoll] Warning: poll() system call failed with errno "
+/Users/Knight/Desktop/42/ghweb/srcs/Server/ServerManagerUtils.cpp:251:        std::cerr << "[executePoll] Fatal: poll() failed consecutively over limit! Terminating main loop." << std::endl;
+/Users/Knight/Desktop/42/ghweb/srcs/main.cpp:19: *     6. 引擎点火：调用 srvmng.run() 挺进永不复返的高并发多路复用 poll() 大循环。
