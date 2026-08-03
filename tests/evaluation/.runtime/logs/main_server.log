@@ -10,7 +10,7 @@
   🏠 [Server Block #1]
     ├─ 📡 Listen Port : 18080
     ├─ 🏷️ Server Names: [ "eval.local" ]
-    ├─ 📂 Root Path   : /Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site
+    ├─ 📂 Root Path   : /home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site
     ├─ ⚖️ Max Body Size: 100 Bytes
     └─ 🚪 Locations 小房间 (共 9 个):
         ├─ 📍 房间路由 [/readonly/]
@@ -38,7 +38,7 @@
         │  ├─ 📂 房间私有 Root: (继承 Server 根)
         │  └─ ⚖️ 房间 Body Size: 1048576 Bytes
         ├─ 📍 房间路由 [/cgi/]
-        │  ├─ 📂 房间私有 Root: /Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site
+        │  ├─ 📂 房间私有 Root: /home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site
         │  └─ ⚖️ 房间 Body Size: 1048576 Bytes
         
 ====================================================================
@@ -52,9 +52,12 @@
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
 [Radar] --- TICK END for FD 3 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -62,17 +65,25 @@
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: GET | URI: / | Body Size in Request: 0 bytes
+[RES] Status: 200 | Header Content-Length: 65
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -80,17 +91,25 @@ rawPath=[/]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/hello.txt]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: GET | URI: /hello.txt | Body Size in Request: 0 bytes
+[RES] Status: 200 | Header Content-Length: 14
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -98,17 +117,25 @@ rawPath=[/hello.txt]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/empty.html]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: GET | URI: /empty.html | Body Size in Request: 0 bytes
+[RES] Status: 200 | Header Content-Length: 0
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -116,17 +143,25 @@ rawPath=[/empty.html]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/missing-resource]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: GET | URI: /missing-resource | Body Size in Request: 0 bytes
+[RES] Status: 404 | Header Content-Length: 17
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -134,17 +169,25 @@ rawPath=[/missing-resource]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/default/]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: GET | URI: /default/ | Body Size in Request: 0 bytes
+[RES] Status: 200 | Header Content-Length: 16
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -152,17 +195,25 @@ rawPath=[/default/]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/list/]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: GET | URI: /list/ | Body Size in Request: 0 bytes
+[RES] Status: 200 | Header Content-Length: 227
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -170,17 +221,25 @@ rawPath=[/list/]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/no-list/]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: GET | URI: /no-list/ | Body Size in Request: 0 bytes
+[RES] Status: 403 | Header Content-Length: 17
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -188,17 +247,25 @@ rawPath=[/no-list/]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/mapped/route.txt]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: GET | URI: /mapped/route.txt | Body Size in Request: 0 bytes
+[RES] Status: 200 | Header Content-Length: 14
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -206,17 +273,25 @@ rawPath=[/mapped/route.txt]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/old/anything]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: GET | URI: /old/anything | Body Size in Request: 0 bytes
+[RES] Status: 301 | Header Content-Length: 88
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -224,8 +299,13 @@ rawPath=[/old/anything]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/old/anything]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: GET | URI: /old/anything | Body Size in Request: 0 bytes
+[RES] Status: 301 | Header Content-Length: 88
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
@@ -234,17 +314,25 @@ rawPath=[/old/anything]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/new/]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: GET | URI: /new/ | Body Size in Request: 0 bytes
+[RES] Status: 200 | Header Content-Length: 19
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -252,17 +340,25 @@ rawPath=[/new/]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/readonly/forbidden.txt]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: POST | URI: /readonly/forbidden.txt | Body Size in Request: 1 bytes
+[RES] Status: 405 | Header Content-Length: 17
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -270,17 +366,25 @@ rawPath=[/readonly/forbidden.txt]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/readonly/keep.txt]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: DELETE | URI: /readonly/keep.txt | Body Size in Request: 0 bytes
+[RES] Status: 405 | Header Content-Length: 17
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -288,17 +392,25 @@ rawPath=[/readonly/keep.txt]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/upload/body99.txt]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: POST | URI: /upload/body99.txt | Body Size in Request: 99 bytes
+[RES] Status: 201 | Header Content-Length: 12
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -306,17 +418,25 @@ rawPath=[/upload/body99.txt]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/upload/body100.txt]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: POST | URI: /upload/body100.txt | Body Size in Request: 100 bytes
+[RES] Status: 201 | Header Content-Length: 12
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -339,17 +459,25 @@ rawPath=[/upload/body100.txt]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/upload/eval.bin]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: POST | URI: /upload/eval.bin | Body Size in Request: 80 bytes
+[RES] Status: 201 | Header Content-Length: 12
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -357,17 +485,25 @@ rawPath=[/upload/eval.bin]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/upload/eval.bin]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: GET | URI: /upload/eval.bin | Body Size in Request: 0 bytes
+[RES] Status: 200 | Header Content-Length: 80
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -375,17 +511,25 @@ rawPath=[/upload/eval.bin]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/upload/eval.bin]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: POST | URI: /multipart/form.bin | Body Size in Request: 294 bytes
+[RES] Status: 415 | Header Content-Length: 17
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -393,17 +537,25 @@ rawPath=[/upload/eval.bin]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/multipart/form.bin]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: DELETE | URI: /upload/eval.bin | Body Size in Request: 0 bytes
+[RES] Status: 204 | Header Content-Length: 
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -411,17 +563,25 @@ rawPath=[/multipart/form.bin]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/upload/eval.bin]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: GET | URI: /upload/eval.bin | Body Size in Request: 0 bytes
+[RES] Status: 404 | Header Content-Length: 17
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -429,17 +589,25 @@ rawPath=[/upload/eval.bin]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/upload/eval.bin]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: DELETE | URI: /upload/no-such-file.txt | Body Size in Request: 0 bytes
+[RES] Status: 404 | Header Content-Length: 17
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -447,17 +615,25 @@ rawPath=[/upload/eval.bin]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/upload/no-such-file.txt]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: DELETE | URI: /upload/ | Body Size in Request: 0 bytes
+[RES] Status: 403 | Header Content-Length: 17
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -465,53 +641,25 @@ rawPath=[/upload/no-such-file.txt]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/upload/]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: BREW | URI: /hello.txt | Body Size in Request: 0 bytes
+[RES] Status: 501 | Header Content-Length: 17
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
-
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
-[ClientSocket] RAII Closing FD: 4
-[ServerManager] Client FD 4 successfully closed and cleaned up.
-[Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
-[ServerManager] FD 4 successfully registered to poll tree with events: 1
-[ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
-[Radar] --- TICK END for FD 3 ---
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
-[ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/hello.txt]
-[Radar] --- TICK END for FD 4 ---
-
-[Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
-[ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
-[Radar] --- TICK END for FD 4 ---
-
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
-[Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
-[ServerManager] FD 4 successfully registered to poll tree with events: 1
-[ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
-[Radar] --- TICK END for FD 3 ---
-
-[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
-[ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/hello.txt]
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
-[ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
-[Radar] --- TICK END for FD 4 ---
-
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
-[ClientSocket] RAII Closing FD: 4
-[ServerManager] Client FD 4 successfully closed and cleaned up.
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -564,17 +712,25 @@ rawPath=[/hello.txt]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/upload/chunk.txt]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: POST | URI: /upload/chunk.txt | Body Size in Request: 9 bytes
+[RES] Status: 201 | Header Content-Length: 12
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -590,17 +746,25 @@ rawPath=[/upload/chunk.txt]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/hello.txt]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: GET | URI: /hello.txt | Body Size in Request: 0 bytes
+[RES] Status: 200 | Header Content-Length: 14
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -608,49 +772,53 @@ rawPath=[/hello.txt]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/cgi/echo.py]
-[DEBUG CGI Path] targetPath = /Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/echo.py
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: GET | URI: /cgi/echo.py | Body Size in Request: 0 bytes
+[RES] Status: 200 | Header Content-Length: 0
+[DEBUG CGI Task] Dispatching CGI -> scriptPath = /home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/echo.py
+=================================================
+
 [ServerManager] FD 5 successfully registered to poll tree with events: 1
 [⚡ WebServ Core] Client 4 successfully split into CGI pipeline, client read paused.
 [Radar] --- TICK END for FD 4 ---
 
 ========== MY CGI CODE ==========
-DOCUMENT_ROOT=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site
+DOCUMENT_ROOT=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site
 GATEWAY_INTERFACE=CGI/1.1
 HTTP_ACCEPT=*/*
 HTTP_HOST=127.0.0.1:18080
-HTTP_USER_AGENT=curl/8.7.1
-PATH=/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/X11/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/sbin
-PATH_INFO=
-PATH_TRANSLATED=
+HTTP_USER_AGENT=curl/8.18.0
+PATH=/usr/lib64/ccache:/usr/local/bin:/usr/bin
+PATH_INFO=/cgi/echo.py
+PATH_TRANSLATED=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/echo.py
 QUERY_STRING=name=Alice&value=42
 REQUEST_METHOD=GET
 REQUEST_URI=/cgi/echo.py
-SCRIPT_FILENAME=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/echo.py
+SCRIPT_FILENAME=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/echo.py
 SCRIPT_NAME=/cgi/echo.py
 SCRIPT_URL=/cgi/echo.py
 SERVER_NAME=localhost
 SERVER_PORT=8080
 SERVER_PROTOCOL=HTTP/1.1
-INTERPRETER=[/usr/bin/python3]
+INTERPRETER=[/usr/bin/python3.14]
 SCRIPT=[echo.py]
 exists interpreter=0
 errno=Invalid argument
-args[0]=/usr/bin/python3
+args[0]=/usr/bin/python3.14
 args[1]=echo.py
-ENV[0]=DOCUMENT_ROOT=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site
+ENV[0]=DOCUMENT_ROOT=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site
 ENV[1]=GATEWAY_INTERFACE=CGI/1.1
 ENV[2]=HTTP_ACCEPT=*/*
 ENV[3]=HTTP_HOST=127.0.0.1:18080
-ENV[4]=HTTP_USER_AGENT=curl/8.7.1
-ENV[5]=PATH=/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/X11/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/sbin
-ENV[6]=PATH_INFO=
-ENV[7]=PATH_TRANSLATED=
+ENV[4]=HTTP_USER_AGENT=curl/8.18.0
+ENV[5]=PATH=/usr/lib64/ccache:/usr/local/bin:/usr/bin
+ENV[6]=PATH_INFO=/cgi/echo.py
+ENV[7]=PATH_TRANSLATED=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/echo.py
 ENV[8]=QUERY_STRING=name=Alice&value=42
 ENV[9]=REQUEST_METHOD=GET
 ENV[10]=REQUEST_URI=/cgi/echo.py
-ENV[11]=SCRIPT_FILENAME=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/echo.py
+ENV[11]=SCRIPT_FILENAME=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/echo.py
 ENV[12]=SCRIPT_NAME=/cgi/echo.py
 ENV[13]=SCRIPT_URL=/cgi/echo.py
 ENV[14]=SERVER_NAME=localhost
@@ -675,9 +843,12 @@ RELATIVE=RELATIVE_OK
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -685,9 +856,13 @@ RELATIVE=RELATIVE_OK
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/cgi/echo.py]
-[DEBUG CGI Path] targetPath = /Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/echo.py
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: POST | URI: /cgi/echo.py | Body Size in Request: 13 bytes
+[RES] Status: 200 | Header Content-Length: 0
+[DEBUG CGI Task] Dispatching CGI -> scriptPath = /home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/echo.py
+=================================================
+
 [ServerManager] FD 5 successfully registered to poll tree with events: 1
 [ServerManager] FD 8 successfully registered to poll tree with events: 4
 [⚡ WebServ Core] Client 4 successfully split into CGI pipeline, client read paused.
@@ -697,43 +872,43 @@ rawPath=[/cgi/echo.py]
 ========== MY CGI CODE ==========
 CONTENT_LENGTH=13
 CONTENT_TYPE=text/plain
-DOCUMENT_ROOT=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site
+DOCUMENT_ROOT=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site
 GATEWAY_INTERFACE=CGI/1.1
 HTTP_ACCEPT=*/*
 HTTP_HOST=127.0.0.1:18080
-HTTP_USER_AGENT=curl/8.7.1
-PATH=/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/X11/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/sbin
-PATH_INFO=
-PATH_TRANSLATED=
+HTTP_USER_AGENT=curl/8.18.0
+PATH=/usr/lib64/ccache:/usr/local/bin:/usr/bin
+PATH_INFO=/cgi/echo.py
+PATH_TRANSLATED=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/echo.py
 QUERY_STRING=source=post
 REQUEST_METHOD=POST
 REQUEST_URI=/cgi/echo.py
-SCRIPT_FILENAME=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/echo.py
+SCRIPT_FILENAME=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/echo.py
 SCRIPT_NAME=/cgi/echo.py
 SCRIPT_URL=/cgi/echo.py
 SERVER_NAME=localhost
 SERVER_PORT=8080
 SERVER_PROTOCOL=HTTP/1.1
-INTERPRETER=[/usr/bin/python3]
+INTERPRETER=[/usr/bin/python3.14]
 SCRIPT=[echo.py]
 exists interpreter=0
 errno=Invalid argument
-args[0]=/usr/bin/python3
+args[0]=/usr/bin/python3.14
 args[1]=echo.py
 ENV[0]=CONTENT_LENGTH=13
 ENV[1]=CONTENT_TYPE=text/plain
-ENV[2]=DOCUMENT_ROOT=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site
+ENV[2]=DOCUMENT_ROOT=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site
 ENV[3]=GATEWAY_INTERFACE=CGI/1.1
 ENV[4]=HTTP_ACCEPT=*/*
 ENV[5]=HTTP_HOST=127.0.0.1:18080
-ENV[6]=HTTP_USER_AGENT=curl/8.7.1
-ENV[7]=PATH=/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/X11/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/sbin
-ENV[8]=PATH_INFO=
-ENV[9]=PATH_TRANSLATED=
+ENV[6]=HTTP_USER_AGENT=curl/8.18.0
+ENV[7]=PATH=/usr/lib64/ccache:/usr/local/bin:/usr/bin
+ENV[8]=PATH_INFO=/cgi/echo.py
+ENV[9]=PATH_TRANSLATED=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/echo.py
 ENV[10]=QUERY_STRING=source=post
 ENV[11]=REQUEST_METHOD=POST
 ENV[12]=REQUEST_URI=/cgi/echo.py
-ENV[13]=SCRIPT_FILENAME=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/echo.py
+ENV[13]=SCRIPT_FILENAME=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/echo.py
 ENV[14]=SCRIPT_NAME=/cgi/echo.py
 ENV[15]=SCRIPT_URL=/cgi/echo.py
 ENV[16]=SERVER_NAME=localhost
@@ -759,9 +934,12 @@ RELATIVE=RELATIVE_OK
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -769,49 +947,53 @@ RELATIVE=RELATIVE_OK
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/cgi/no_length.py]
-[DEBUG CGI Path] targetPath = /Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/no_length.py
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: GET | URI: /cgi/no_length.py | Body Size in Request: 0 bytes
+[RES] Status: 200 | Header Content-Length: 0
+[DEBUG CGI Task] Dispatching CGI -> scriptPath = /home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/no_length.py
+=================================================
+
 [ServerManager] FD 5 successfully registered to poll tree with events: 1
 [⚡ WebServ Core] Client 4 successfully split into CGI pipeline, client read paused.
 [Radar] --- TICK END for FD 4 ---
 
 ========== MY CGI CODE ==========
-DOCUMENT_ROOT=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site
+DOCUMENT_ROOT=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site
 GATEWAY_INTERFACE=CGI/1.1
 HTTP_ACCEPT=*/*
 HTTP_HOST=127.0.0.1:18080
-HTTP_USER_AGENT=curl/8.7.1
-PATH=/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/X11/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/sbin
-PATH_INFO=
-PATH_TRANSLATED=
+HTTP_USER_AGENT=curl/8.18.0
+PATH=/usr/lib64/ccache:/usr/local/bin:/usr/bin
+PATH_INFO=/cgi/no_length.py
+PATH_TRANSLATED=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/no_length.py
 QUERY_STRING=
 REQUEST_METHOD=GET
 REQUEST_URI=/cgi/no_length.py
-SCRIPT_FILENAME=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/no_length.py
+SCRIPT_FILENAME=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/no_length.py
 SCRIPT_NAME=/cgi/no_length.py
 SCRIPT_URL=/cgi/no_length.py
 SERVER_NAME=localhost
 SERVER_PORT=8080
 SERVER_PROTOCOL=HTTP/1.1
-INTERPRETER=[/usr/bin/python3]
+INTERPRETER=[/usr/bin/python3.14]
 SCRIPT=[no_length.py]
 exists interpreter=0
 errno=Invalid argument
-args[0]=/usr/bin/python3
+args[0]=/usr/bin/python3.14
 args[1]=no_length.py
-ENV[0]=DOCUMENT_ROOT=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site
+ENV[0]=DOCUMENT_ROOT=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site
 ENV[1]=GATEWAY_INTERFACE=CGI/1.1
 ENV[2]=HTTP_ACCEPT=*/*
 ENV[3]=HTTP_HOST=127.0.0.1:18080
-ENV[4]=HTTP_USER_AGENT=curl/8.7.1
-ENV[5]=PATH=/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/X11/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/sbin
-ENV[6]=PATH_INFO=
-ENV[7]=PATH_TRANSLATED=
+ENV[4]=HTTP_USER_AGENT=curl/8.18.0
+ENV[5]=PATH=/usr/lib64/ccache:/usr/local/bin:/usr/bin
+ENV[6]=PATH_INFO=/cgi/no_length.py
+ENV[7]=PATH_TRANSLATED=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/no_length.py
 ENV[8]=QUERY_STRING=
 ENV[9]=REQUEST_METHOD=GET
 ENV[10]=REQUEST_URI=/cgi/no_length.py
-ENV[11]=SCRIPT_FILENAME=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/no_length.py
+ENV[11]=SCRIPT_FILENAME=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/no_length.py
 ENV[12]=SCRIPT_NAME=/cgi/no_length.py
 ENV[13]=SCRIPT_URL=/cgi/no_length.py
 ENV[14]=SERVER_NAME=localhost
@@ -830,9 +1012,12 @@ CGI_NO_LENGTH_OK
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -840,9 +1025,13 @@ CGI_NO_LENGTH_OK
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/cgi/echo.py]
-[DEBUG CGI Path] targetPath = /Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/echo.py
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: POST | URI: /cgi/echo.py | Body Size in Request: 9 bytes
+[RES] Status: 200 | Header Content-Length: 0
+[DEBUG CGI Task] Dispatching CGI -> scriptPath = /home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/echo.py
+=================================================
+
 [ServerManager] FD 5 successfully registered to poll tree with events: 1
 [ServerManager] FD 8 successfully registered to poll tree with events: 4
 [⚡ WebServ Core] Client 4 successfully split into CGI pipeline, client read paused.
@@ -851,42 +1040,42 @@ rawPath=[/cgi/echo.py]
 [Radar] -> Routing CGI Write FD 8 to handleCgiWrite (POLLOUT)
 ========== MY CGI CODE ==========
 CONTENT_TYPE=text/plain
-DOCUMENT_ROOT=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site
+DOCUMENT_ROOT=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site
 GATEWAY_INTERFACE=CGI/1.1
 HTTP_CONNECTION=close
 HTTP_HOST=localhost
 HTTP_TRANSFER_ENCODING=chunked
-PATH=/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/X11/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/sbin
-PATH_INFO=
-PATH_TRANSLATED=
+PATH=/usr/lib64/ccache:/usr/local/bin:/usr/bin
+PATH_INFO=/cgi/echo.py
+PATH_TRANSLATED=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/echo.py
 QUERY_STRING=
 REQUEST_METHOD=POST
 REQUEST_URI=/cgi/echo.py
-SCRIPT_FILENAME=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/echo.py
+SCRIPT_FILENAME=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/echo.py
 SCRIPT_NAME=/cgi/echo.py
 SCRIPT_URL=/cgi/echo.py
 SERVER_NAME=localhost
 SERVER_PORT=8080
 SERVER_PROTOCOL=HTTP/1.1
-INTERPRETER=[/usr/bin/python3]
+INTERPRETER=[/usr/bin/python3.14]
 SCRIPT=[echo.py]
 exists interpreter=0
 errno=Invalid argument
-args[0]=/usr/bin/python3
+args[0]=/usr/bin/python3.14
 args[1]=echo.py
 ENV[0]=CONTENT_TYPE=text/plain
-ENV[1]=DOCUMENT_ROOT=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site
+ENV[1]=DOCUMENT_ROOT=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site
 ENV[2]=GATEWAY_INTERFACE=CGI/1.1
 ENV[3]=HTTP_CONNECTION=close
 ENV[4]=HTTP_HOST=localhost
 ENV[5]=HTTP_TRANSFER_ENCODING=chunked
-ENV[6]=PATH=/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/X11/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/sbin
-ENV[7]=PATH_INFO=
-ENV[8]=PATH_TRANSLATED=
+ENV[6]=PATH=/usr/lib64/ccache:/usr/local/bin:/usr/bin
+ENV[7]=PATH_INFO=/cgi/echo.py
+ENV[8]=PATH_TRANSLATED=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/echo.py
 ENV[9]=QUERY_STRING=
 ENV[10]=REQUEST_METHOD=POST
 ENV[11]=REQUEST_URI=/cgi/echo.py
-ENV[12]=SCRIPT_FILENAME=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/echo.py
+ENV[12]=SCRIPT_FILENAME=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/echo.py
 ENV[13]=SCRIPT_NAME=/cgi/echo.py
 ENV[14]=SCRIPT_URL=/cgi/echo.py
 ENV[15]=SERVER_NAME=localhost
@@ -912,9 +1101,12 @@ RELATIVE=RELATIVE_OK
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -922,17 +1114,25 @@ RELATIVE=RELATIVE_OK
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/cgi/missing.py]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: GET | URI: /cgi/missing.py | Body Size in Request: 0 bytes
+[RES] Status: 404 | Header Content-Length: 17
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 4 ---
 
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -940,56 +1140,60 @@ rawPath=[/cgi/missing.py]
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/cgi/bad.py]
-[DEBUG CGI Path] targetPath = /Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/bad.py
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: GET | URI: /cgi/bad.py | Body Size in Request: 0 bytes
+[RES] Status: 200 | Header Content-Length: 0
+[DEBUG CGI Task] Dispatching CGI -> scriptPath = /home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/bad.py
+=================================================
+
+[ServerManager] FD 5 successfully registered to poll tree with events: 1
+[⚡ WebServ Core] Client 4 successfully split into CGI pipeline, client read paused.
+[Radar] --- TICK END for FD 4 ---
+
 ========== MY CGI CODE ==========
-DOCUMENT_ROOT=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site
+DOCUMENT_ROOT=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site
 GATEWAY_INTERFACE=CGI/1.1
 HTTP_ACCEPT=*/*
 HTTP_HOST=127.0.0.1:18080
-HTTP_USER_AGENT=curl/8.7.1
-PATH=/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/X11/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/sbin
-PATH_INFO=
-PATH_TRANSLATED=
+HTTP_USER_AGENT=curl/8.18.0
+PATH=/usr/lib64/ccache:/usr/local/bin:/usr/bin
+PATH_INFO=/cgi/bad.py
+PATH_TRANSLATED=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/bad.py
 QUERY_STRING=
 REQUEST_METHOD=GET
 REQUEST_URI=/cgi/bad.py
-SCRIPT_FILENAME=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/bad.py
+SCRIPT_FILENAME=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/bad.py
 SCRIPT_NAME=/cgi/bad.py
 SCRIPT_URL=/cgi/bad.py
 SERVER_NAME=localhost
 SERVER_PORT=8080
 SERVER_PROTOCOL=HTTP/1.1
-INTERPRETER=[/usr/bin/python3]
+INTERPRETER=[/usr/bin/python3.14]
 SCRIPT=[bad.py]
 exists interpreter=0
 errno=Invalid argument
-args[0]=/usr/bin/python3
+args[0]=/usr/bin/python3.14
 args[1]=bad.py
-ENV[0]=DOCUMENT_ROOT=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site
+ENV[0]=DOCUMENT_ROOT=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site
 ENV[1]=GATEWAY_INTERFACE=CGI/1.1
 ENV[2]=HTTP_ACCEPT=*/*
 ENV[3]=HTTP_HOST=127.0.0.1:18080
-ENV[4]=HTTP_USER_AGENT=curl/8.7.1
-ENV[5]=PATH=/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/X11/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/sbin
-ENV[6]=PATH_INFO=
-ENV[7]=PATH_TRANSLATED=
+ENV[4]=HTTP_USER_AGENT=curl/8.18.0
+ENV[5]=PATH=/usr/lib64/ccache:/usr/local/bin:/usr/bin
+ENV[6]=PATH_INFO=/cgi/bad.py
+ENV[7]=PATH_TRANSLATED=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/bad.py
 ENV[8]=QUERY_STRING=
 ENV[9]=REQUEST_METHOD=GET
 ENV[10]=REQUEST_URI=/cgi/bad.py
-ENV[11]=SCRIPT_FILENAME=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/bad.py
+ENV[11]=SCRIPT_FILENAME=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/bad.py
 ENV[12]=SCRIPT_NAME=/cgi/bad.py
 ENV[13]=SCRIPT_URL=/cgi/bad.py
 ENV[14]=SERVER_NAME=localhost
 ENV[15]=SERVER_PORT=8080
 ENV[16]=SERVER_PROTOCOL=HTTP/1.1
-[ServerManager] FD 5 successfully registered to poll tree with events: 1
-[⚡ WebServ Core] Client 4 successfully split into CGI pipeline, client read paused.
-[Radar] --- TICK END for FD 4 ---
-
 Traceback (most recent call last):
-  File "/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/bad.py", line 2, in <module>
+  File "/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/bad.py", line 2, in <module>
     raise RuntimeError("intentional CGI failure")
 RuntimeError: intentional CGI failure
 [Radar] -> Routing CGI Read FD 5 to handleCgiRead (POLLIN/POLLHUP)
@@ -1001,9 +1205,12 @@ cleanup readFd = 5
 [ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Client FD 4 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
@@ -1011,130 +1218,53 @@ cleanup readFd = 5
 
 [Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/cgi/echo.sh]
-[DEBUG CGI Path] targetPath = /Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/echo.sh
-[ServerManager] FD 5 successfully registered to poll tree with events: 1
-[ServerManager] FD 8 successfully registered to poll tree with events: 4
-[⚡ WebServ Core] Client 4 successfully split into CGI pipeline, client read paused.
-[Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing CGI Write FD 8 to handleCgiWrite (POLLOUT)
-========== MY CGI CODE ==========
-CONTENT_LENGTH=10
-CONTENT_TYPE=text/plain
-DOCUMENT_ROOT=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site
-GATEWAY_INTERFACE=CGI/1.1
-HTTP_ACCEPT=*/*
-HTTP_HOST=127.0.0.1:18080
-HTTP_USER_AGENT=curl/8.7.1
-PATH=/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/X11/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/sbin
-PATH_INFO=
-PATH_TRANSLATED=
-QUERY_STRING=kind=shell
-REQUEST_METHOD=POST
-REQUEST_URI=/cgi/echo.sh
-SCRIPT_FILENAME=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/echo.sh
-SCRIPT_NAME=/cgi/echo.sh
-SCRIPT_URL=/cgi/echo.sh
-SERVER_NAME=localhost
-SERVER_PORT=8080
-SERVER_PROTOCOL=HTTP/1.1
-INTERPRETER=[/bin/sh]
-SCRIPT=[echo.sh]
-exists interpreter=0
-errno=Invalid argument
-args[0]=/bin/sh
-args[1]=echo.sh
-ENV[0]=CONTENT_LENGTH=10
-ENV[1]=CONTENT_TYPE=text/plain
-ENV[2]=DOCUMENT_ROOT=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site
-ENV[3]=GATEWAY_INTERFACE=CGI/1.1
-ENV[4]=HTTP_ACCEPT=*/*
-ENV[5]=HTTP_HOST=127.0.0.1:18080
-ENV[6]=HTTP_USER_AGENT=curl/8.7.1
-ENV[7]=PATH=/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/X11/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/sbin
-ENV[8]=PATH_INFO=
-ENV[9]=PATH_TRANSLATED=
-ENV[10]=QUERY_STRING=kind=shell
-ENV[11]=REQUEST_METHOD=POST
-ENV[12]=REQUEST_URI=/cgi/echo.sh
-ENV[13]=SCRIPT_FILENAME=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/echo.sh
-ENV[14]=SCRIPT_NAME=/cgi/echo.sh
-ENV[15]=SCRIPT_URL=/cgi/echo.sh
-ENV[16]=SERVER_NAME=localhost
-ENV[17]=SERVER_PORT=8080
-ENV[18]=SERVER_PROTOCOL=HTTP/1.1
-[Radar] -> Routing CGI Read FD 5 to handleCgiRead (POLLIN/POLLHUP)
-[Radar] -> Routing CGI Read FD 5 to handleCgiRead (POLLIN/POLLHUP)
-cleanup readFd = 5
-cleanup writeFd = 8
-========== RAW CGI OUTPUT ==========
-Content-Type: text/plain
+================ [DEBUG REQUEST] ================
+[REQ] Method: GET | URI: /cgi/slow.py | Body Size in Request: 0 bytes
+[RES] Status: 200 | Header Content-Length: 0
+[DEBUG CGI Task] Dispatching CGI -> scriptPath = /home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/slow.py
+=================================================
 
-CGI=SHELL
-METHOD=POST
-QUERY=kind=shell
-BODY=SHELL_BODY
-
-====================================
-[Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
-[ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
-[Radar] --- TICK END for FD 4 ---
-
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
-[ClientSocket] RAII Closing FD: 4
-[ServerManager] Client FD 4 successfully closed and cleaned up.
-[Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
-[ServerManager] FD 4 successfully registered to poll tree with events: 1
-[ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
-[Radar] --- TICK END for FD 3 ---
-
-[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
-[ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/cgi/slow.py]
-[DEBUG CGI Path] targetPath = /Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/slow.py
 [ServerManager] FD 5 successfully registered to poll tree with events: 1
 [⚡ WebServ Core] Client 4 successfully split into CGI pipeline, client read paused.
 [Radar] --- TICK END for FD 4 ---
 
 ========== MY CGI CODE ==========
-DOCUMENT_ROOT=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site
+DOCUMENT_ROOT=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site
 GATEWAY_INTERFACE=CGI/1.1
 HTTP_ACCEPT=*/*
 HTTP_HOST=127.0.0.1:18080
-HTTP_USER_AGENT=curl/8.7.1
-PATH=/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/X11/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/sbin
-PATH_INFO=
-PATH_TRANSLATED=
+HTTP_USER_AGENT=curl/8.18.0
+PATH=/usr/lib64/ccache:/usr/local/bin:/usr/bin
+PATH_INFO=/cgi/slow.py
+PATH_TRANSLATED=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/slow.py
 QUERY_STRING=
 REQUEST_METHOD=GET
 REQUEST_URI=/cgi/slow.py
-SCRIPT_FILENAME=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/slow.py
+SCRIPT_FILENAME=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/slow.py
 SCRIPT_NAME=/cgi/slow.py
 SCRIPT_URL=/cgi/slow.py
 SERVER_NAME=localhost
 SERVER_PORT=8080
 SERVER_PROTOCOL=HTTP/1.1
-INTERPRETER=[/usr/bin/python3]
+INTERPRETER=[/usr/bin/python3.14]
 SCRIPT=[slow.py]
 exists interpreter=0
 errno=Invalid argument
-args[0]=/usr/bin/python3
+args[0]=/usr/bin/python3.14
 args[1]=slow.py
-ENV[0]=DOCUMENT_ROOT=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site
+ENV[0]=DOCUMENT_ROOT=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site
 ENV[1]=GATEWAY_INTERFACE=CGI/1.1
 ENV[2]=HTTP_ACCEPT=*/*
 ENV[3]=HTTP_HOST=127.0.0.1:18080
-ENV[4]=HTTP_USER_AGENT=curl/8.7.1
-ENV[5]=PATH=/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/X11/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/sbin
-ENV[6]=PATH_INFO=
-ENV[7]=PATH_TRANSLATED=
+ENV[4]=HTTP_USER_AGENT=curl/8.18.0
+ENV[5]=PATH=/usr/lib64/ccache:/usr/local/bin:/usr/bin
+ENV[6]=PATH_INFO=/cgi/slow.py
+ENV[7]=PATH_TRANSLATED=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/slow.py
 ENV[8]=QUERY_STRING=
 ENV[9]=REQUEST_METHOD=GET
 ENV[10]=REQUEST_URI=/cgi/slow.py
-ENV[11]=SCRIPT_FILENAME=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/slow.py
+ENV[11]=SCRIPT_FILENAME=/home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site/cgi/slow.py
 ENV[12]=SCRIPT_NAME=/cgi/slow.py
 ENV[13]=SCRIPT_URL=/cgi/slow.py
 ENV[14]=SERVER_NAME=localhost
@@ -1147,18 +1277,26 @@ ENV[16]=SERVER_PROTOCOL=HTTP/1.1
 
 [Radar] -> Routing Client FD 6 to handleClientRead (POLLIN)
 [ServerManager] Request parsed successfully for FD 6
-===== extractPathInfo DEBUG =====
-rawPath=[/hello.txt]
+
+================ [DEBUG REQUEST] ================
+[REQ] Method: GET | URI: /hello.txt | Body Size in Request: 0 bytes
+[RES] Status: 200 | Header Content-Length: 14
+[DEBUG Normal Task] No CGI header, sending direct response.
+=================================================
+
 [Radar] --- TICK END for FD 6 ---
 
 [Radar] -> Routing Client FD 6 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 6. Resetting event to POLLIN.
 [Radar] --- TICK END for FD 6 ---
 
-[Radar] -> Routing Client Socket FD 6 to closeConnection (ERR/HUP)
+[Radar] -> Routing Client FD 6 to handleClientRead (POLLIN)
+[ServerManager] Client FD 6 closed connection (EOF).
 [ClientSocket] RAII Closing FD: 6
 [ServerManager] Client FD 6 successfully closed and cleaned up.
-[CgiManager] Timeout Warning: CGI PID 16815 exceeded 10s timeout! Killing...
+[Radar] --- TICK END for FD 6 ---
+
+[CgiManager] Timeout Warning: CGI PID 1568658 exceeded 10s timeout! Killing...
 cleanup readFd = 5
 [Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
 [ServerManager] Sent response completely to FD 4. Closing connection per policy.
@@ -1166,93 +1304,9 @@ cleanup readFd = 5
 [ServerManager] Client FD 4 successfully closed and cleaned up.
 [Radar] --- TICK END for FD 4 ---
 
-[Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
-[ServerManager] FD 4 successfully registered to poll tree with events: 1
-[ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
-[Radar] --- TICK END for FD 3 ---
 
-[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
-[ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/session/counter]
-[Radar] --- TICK END for FD 4 ---
-
-[Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
-[ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
-[Radar] --- TICK END for FD 4 ---
-
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
-[ClientSocket] RAII Closing FD: 4
-[ServerManager] Client FD 4 successfully closed and cleaned up.
-[Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
-[ServerManager] FD 4 successfully registered to poll tree with events: 1
-[ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
-[Radar] --- TICK END for FD 3 ---
-
-[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
-[ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/session/counter]
-[Radar] --- TICK END for FD 4 ---
-
-[Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
-[ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
-[Radar] --- TICK END for FD 4 ---
-
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
-[ClientSocket] RAII Closing FD: 4
-[ServerManager] Client FD 4 successfully closed and cleaned up.
-[Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
-[ServerManager] FD 4 successfully registered to poll tree with events: 1
-[ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
-[Radar] --- TICK END for FD 3 ---
-
-[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
-[ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/session/login]
-[Radar] --- TICK END for FD 4 ---
-
-[Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
-[ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
-[Radar] --- TICK END for FD 4 ---
-
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
-[ClientSocket] RAII Closing FD: 4
-[ServerManager] Client FD 4 successfully closed and cleaned up.
-[Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
-[ServerManager] FD 4 successfully registered to poll tree with events: 1
-[ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
-[Radar] --- TICK END for FD 3 ---
-
-[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
-[ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/session/logout]
-[Radar] --- TICK END for FD 4 ---
-
-[Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
-[ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
-[Radar] --- TICK END for FD 4 ---
-
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
-[ClientSocket] RAII Closing FD: 4
-[ServerManager] Client FD 4 successfully closed and cleaned up.
-[Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
-[ServerManager] FD 4 successfully registered to poll tree with events: 1
-[ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
-[Radar] --- TICK END for FD 3 ---
-
-[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
-[ServerManager] Request parsed successfully for FD 4
-===== extractPathInfo DEBUG =====
-rawPath=[/session/login]
-[Radar] --- TICK END for FD 4 ---
-
-[Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
-[ServerManager] Sent response completely to FD 4. Resetting event to POLLIN.
-[Radar] --- TICK END for FD 4 ---
-
-[Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
-[ClientSocket] RAII Closing FD: 4
-[ServerManager] Client FD 4 successfully closed and cleaned up.
+[Server] Shutting down gracefully...
+[Server] Cleaned up all sockets and CGI processes. Bye!
+[ServerManager] Main loop safely terminated.
+[ServerSocket] Closing listen FD: 3 for 127.0.0.1:18080
+[ServerManager] Engine completely shutdown and memory released.

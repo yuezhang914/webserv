@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 
 # 文件：tests/evaluation/run_eval.sh
-# 用途：自动准备独立测试站点、启动 Webserv，并覆盖可自动化的 42 Webserv 评测点。
-# 说明：终端输出使用英语；脚本注释使用中文。浏览器 Network、源码讲解和完整泄漏判断仍需手动完成。
+# 用途：按新版 42 EvalHub Webserv 评测表准备独立测试环境并执行可自动化检查。
+# 说明：终端输出使用英语；脚本注释使用中文。源码讲解、浏览器 Network 和完整泄漏判断仍需人工完成。
+# Siege：保留传统文本与新版 JSON 两种输出格式的兼容解析。
 
 set -u
 
@@ -20,15 +21,18 @@ fi
 MODE="full"
 RUN_BUILD=1
 RUN_MODULES=1
-RUN_STRESS=0
+RUN_STRESS=1
+RUN_BONUS=0
 KEEP_RUNTIME=0
-HEAD_EXPECTED_STATUS="${HEAD_EXPECTED_STATUS:-200}"
-CGI_ERROR_EXPECTED_STATUS="${CGI_ERROR_EXPECTED_STATUS:-502}"
 HOST="${EVAL_HOST:-127.0.0.1}"
 PORT="${EVAL_PORT:-18080}"
 PORT_B=$((PORT + 1))
 PORT_C=$((PORT + 2))
-PORT_SHARED=$((PORT + 3))
+PORT_HOST_A=$((PORT + 3))
+PORT_HOST_B=$((PORT + 4))
+PORT_DUPLICATE=$((PORT + 5))
+PORT_COMMON=$((PORT + 6))
+PORT_UNIQUE=$((PORT + 7))
 
 usage()
 {
@@ -36,21 +40,19 @@ usage()
 Usage: bash tests/evaluation/run_eval.sh [options]
 
 Options:
-  --quick                 Skip slow CGI timeout, multi-port and stress tests.
-  --full                  Run all automatic tests except Siege (default).
-  --stress                Run full tests and Siege / fallback stress test.
+  --quick                 Skip slow CGI timeout, port-conflict and Siege tests.
+  --full                  Run all automatic mandatory tests, including Siege (default).
+  --stress                Alias for --full; kept for compatibility with the old script.
+  --bonus                 Run bonus cookie/session and second-CGI checks, but
+                          only when automatic mandatory checks have no failure.
   --no-build              Do not run make fclean && make.
   --skip-modules          Do not run tests/module_tests scripts.
-  --head-status CODE      Expected HEAD status. Use 200 for implemented HEAD,
-                          501 when unimplemented, or 405 for a deliberate policy.
   --keep                  Keep generated runtime files and logs.
   --help                  Show this help.
 
 Environment overrides:
   EVAL_HOST=127.0.0.1
   EVAL_PORT=18080
-  HEAD_EXPECTED_STATUS=200
-  CGI_ERROR_EXPECTED_STATUS=502
 EOF
 }
 
@@ -58,27 +60,24 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --quick)
             MODE="quick"
+            RUN_STRESS=0
             ;;
         --full)
             MODE="full"
+            RUN_STRESS=1
             ;;
         --stress)
             MODE="full"
             RUN_STRESS=1
+            ;;
+        --bonus)
+            RUN_BONUS=1
             ;;
         --no-build)
             RUN_BUILD=0
             ;;
         --skip-modules)
             RUN_MODULES=0
-            ;;
-        --head-status)
-            shift
-            if [ "$#" -eq 0 ]; then
-                echo "[FATAL] --head-status requires a value."
-                exit 2
-            fi
-            HEAD_EXPECTED_STATUS="$1"
             ;;
         --keep)
             KEEP_RUNTIME=1
@@ -96,14 +95,6 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 
-case "$HEAD_EXPECTED_STATUS" in
-    200|405|501) ;;
-    *)
-        echo "[FATAL] HEAD status must be 200, 405 or 501."
-        exit 2
-        ;;
-esac
-
 RUNTIME="$SCRIPT_DIR/.runtime"
 SITE_ROOT="$RUNTIME/site"
 MAPPED_ROOT="$RUNTIME/mapped"
@@ -112,10 +103,12 @@ LOG_ROOT="$RUNTIME/logs"
 TMP_ROOT="$RUNTIME/tmp"
 CONFIG_MAIN="$RUNTIME/evaluation.conf"
 CONFIG_MULTI="$RUNTIME/multi_ports.conf"
-CONFIG_SHARED="$RUNTIME/shared_port.conf"
+CONFIG_VHOST="$RUNTIME/virtual_hosts.conf"
+CONFIG_DUPLICATE="$RUNTIME/duplicate_port.conf"
+CONFIG_COMMON_OWNER="$RUNTIME/common_port_owner.conf"
+CONFIG_COMMON_CONFLICT="$RUNTIME/common_port_conflict.conf"
 BIN="$PROJECT_ROOT/webserv"
 RAW_HTTP="$SCRIPT_DIR/raw_http.py"
-SHARED_PORT_CHECK="$SCRIPT_DIR/shared_port_check.py"
 BASE="http://$HOST:$PORT"
 
 PASS_COUNT=0
@@ -123,6 +116,12 @@ FAIL_COUNT=0
 WARN_COUNT=0
 SKIP_COUNT=0
 MANUAL_COUNT=0
+MANDATORY_FAIL_COUNT=0
+BONUS_PASS_COUNT=0
+BONUS_FAIL_COUNT=0
+SUPPLEMENTAL_PASS_COUNT=0
+SUPPLEMENTAL_FAIL_COUNT=0
+CURRENT_SCOPE="mandatory"
 SERVER_PID=""
 
 if [ -t 1 ]; then
@@ -147,12 +146,24 @@ section()
 pass()
 {
     PASS_COUNT=$((PASS_COUNT + 1))
+    if [ "$CURRENT_SCOPE" = "bonus" ]; then
+        BONUS_PASS_COUNT=$((BONUS_PASS_COUNT + 1))
+    elif [ "$CURRENT_SCOPE" = "supplemental" ]; then
+        SUPPLEMENTAL_PASS_COUNT=$((SUPPLEMENTAL_PASS_COUNT + 1))
+    fi
     printf '%s[PASS]%s %s\n' "$GREEN" "$RESET" "$1"
 }
 
 fail()
 {
     FAIL_COUNT=$((FAIL_COUNT + 1))
+    if [ "$CURRENT_SCOPE" = "bonus" ]; then
+        BONUS_FAIL_COUNT=$((BONUS_FAIL_COUNT + 1))
+    elif [ "$CURRENT_SCOPE" = "supplemental" ]; then
+        SUPPLEMENTAL_FAIL_COUNT=$((SUPPLEMENTAL_FAIL_COUNT + 1))
+    else
+        MANDATORY_FAIL_COUNT=$((MANDATORY_FAIL_COUNT + 1))
+    fi
     printf '%s[FAIL]%s %s\n' "$RED" "$RESET" "$1"
 }
 
@@ -658,9 +669,11 @@ EOF
     printf '<h1>HOST_ALPHA_OK</h1>\n' > "$RUNTIME/host_alpha/index.html"
     printf '<h1>HOST_BETA_OK</h1>\n' > "$RUNTIME/host_beta/index.html"
 
-    cat > "$CONFIG_SHARED" <<EOF
+    # 两个不同 hostname 分别监听不同端口，用 curl --resolve 验证 Host 配置。
+    # 新评测表随后会单独要求“同一端口配置多次”必须失败。
+    cat > "$CONFIG_VHOST" <<EOF
 server {
-    listen $HOST:$PORT_SHARED;
+    listen $HOST:$PORT_HOST_A;
     server_name alpha.test;
     root $RUNTIME/host_alpha;
     index index.html;
@@ -668,8 +681,58 @@ server {
 }
 
 server {
-    listen $HOST:$PORT_SHARED;
+    listen $HOST:$PORT_HOST_B;
     server_name beta.test;
+    root $RUNTIME/host_beta;
+    index index.html;
+    allow_methods GET;
+}
+EOF
+
+    # 新评测表明确要求：同一个配置中，同一端口出现多次必须失败。
+    cat > "$CONFIG_DUPLICATE" <<EOF
+server {
+    listen $HOST:$PORT_DUPLICATE;
+    server_name duplicate-a.test;
+    root $RUNTIME/host_alpha;
+    index index.html;
+    allow_methods GET;
+}
+
+server {
+    listen $HOST:$PORT_DUPLICATE;
+    server_name duplicate-b.test;
+    root $RUNTIME/host_beta;
+    index index.html;
+    allow_methods GET;
+}
+EOF
+
+    # 第一个进程独占公共端口。
+    cat > "$CONFIG_COMMON_OWNER" <<EOF
+server {
+    listen $HOST:$PORT_COMMON;
+    server_name owner.test;
+    root $RUNTIME/host_alpha;
+    index index.html;
+    allow_methods GET;
+}
+EOF
+
+    # 第二个进程同时请求已占用端口和一个空闲端口。
+    # 新评测表要求确认：不能因为还有一个端口可用就忽略失效配置继续运行。
+    cat > "$CONFIG_COMMON_CONFLICT" <<EOF
+server {
+    listen $HOST:$PORT_COMMON;
+    server_name conflict.test;
+    root $RUNTIME/host_beta;
+    index index.html;
+    allow_methods GET;
+}
+
+server {
+    listen $HOST:$PORT_UNIQUE;
+    server_name unique.test;
     root $RUNTIME/host_beta;
     index index.html;
     allow_methods GET;
@@ -705,6 +768,163 @@ with open(log_path, "wb") as log:
         raise SystemExit(124)
 raise SystemExit(result.returncode)
 PYMODULE
+}
+
+run_source_review_checks()
+{
+    section "Mandatory source review precheck"
+
+    scan_result="$TMP_ROOT/source_scan_result.txt"
+    python3 - "$PROJECT_ROOT/srcs" "$LOG_ROOT" > "$scan_result" <<'PYSCAN'
+import pathlib
+import re
+import sys
+
+source_root = pathlib.Path(sys.argv[1])
+log_root = pathlib.Path(sys.argv[2])
+
+# 删除注释和字符串内容，但保留换行与大致字符位置，减少 grep 把注释当代码的误报。
+def mask_non_code(text):
+    out = []
+    i = 0
+    state = "code"
+    while i < len(text):
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < len(text) else ""
+        if state == "code":
+            if ch == "/" and nxt == "/":
+                out.extend("  ")
+                i += 2
+                state = "line_comment"
+                continue
+            if ch == "/" and nxt == "*":
+                out.extend("  ")
+                i += 2
+                state = "block_comment"
+                continue
+            if ch == '"':
+                out.append(" ")
+                i += 1
+                state = "string"
+                continue
+            if ch == "'":
+                out.append(" ")
+                i += 1
+                state = "char"
+                continue
+            out.append(ch)
+            i += 1
+            continue
+        if state == "line_comment":
+            if ch == "\n":
+                out.append("\n")
+                state = "code"
+            else:
+                out.append(" ")
+            i += 1
+            continue
+        if state == "block_comment":
+            if ch == "*" and nxt == "/":
+                out.extend("  ")
+                i += 2
+                state = "code"
+            else:
+                out.append("\n" if ch == "\n" else " ")
+                i += 1
+            continue
+        if state in ("string", "char"):
+            if ch == "\\":
+                out.append(" ")
+                if i + 1 < len(text):
+                    out.append("\n" if text[i + 1] == "\n" else " ")
+                i += 2
+                continue
+            end_char = '"' if state == "string" else "'"
+            if ch == end_char:
+                out.append(" ")
+                i += 1
+                state = "code"
+            else:
+                out.append("\n" if ch == "\n" else " ")
+                i += 1
+    return "".join(out)
+
+multiplex_pattern = re.compile(r"\b(?:poll|select|epoll_wait|kevent)\s*\(")
+io_pattern = re.compile(r"\b(?:read|recv|write|send)\s*\(")
+errno_pattern = re.compile(r"\berrno\b")
+
+multiplex_sites = []
+io_sites = []
+errno_near_io = []
+
+for path in sorted(source_root.rglob("*")):
+    if path.suffix not in {".cpp", ".cc", ".cxx", ".hpp", ".h"}:
+        continue
+    try:
+        raw = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        continue
+    code = mask_non_code(raw)
+    lines = code.splitlines()
+    relative = path.relative_to(source_root.parent)
+    for line_no, line in enumerate(lines, 1):
+        for match in multiplex_pattern.finditer(line):
+            multiplex_sites.append(f"{relative}:{line_no}:{match.group(0).strip()}")
+        for match in io_pattern.finditer(line):
+            io_sites.append(f"{relative}:{line_no}:{match.group(0).strip()}")
+            end = min(len(lines), line_no + 8)
+            nearby = "\n".join(lines[line_no - 1:end])
+            if errno_pattern.search(nearby):
+                errno_near_io.append(f"{relative}:{line_no}")
+
+(log_root / "multiplex_calls.txt").write_text(
+    "\n".join(multiplex_sites) + ("\n" if multiplex_sites else ""),
+    encoding="utf-8",
+)
+(log_root / "fd_io_calls.txt").write_text(
+    "\n".join(io_sites) + ("\n" if io_sites else ""),
+    encoding="utf-8",
+)
+(log_root / "errno_near_fd_io.txt").write_text(
+    "\n".join(errno_near_io) + ("\n" if errno_near_io else ""),
+    encoding="utf-8",
+)
+
+print(f"MULTIPLEX_COUNT={len(multiplex_sites)}")
+print(f"IO_COUNT={len(io_sites)}")
+print(f"ERRNO_NEAR_IO_COUNT={len(errno_near_io)}")
+PYSCAN
+
+    multiplex_count="$(awk -F= '$1 == "MULTIPLEX_COUNT" {print $2}' "$scan_result")"
+    io_count="$(awk -F= '$1 == "IO_COUNT" {print $2}' "$scan_result")"
+    errno_near_count="$(awk -F= '$1 == "ERRNO_NEAR_IO_COUNT" {print $2}' "$scan_result")"
+
+    if [ "$multiplex_count" = "1" ]; then
+        pass "Exactly one multiplexing call was found under srcs/"
+    elif [ "$multiplex_count" = "0" ]; then
+        fail "No poll/select-equivalent call was found under srcs/"
+    else
+        fail "Found $multiplex_count poll/select-equivalent calls; the new EvalHub sheet requires one central call"
+    fi
+
+    if [ -n "$io_count" ] && [ "$io_count" -gt 0 ]; then
+        pass "Found and logged $io_count read/recv/write/send call sites for evaluator review"
+    else
+        fail "No read/recv/write/send call site was found under srcs/"
+    fi
+
+    if [ -n "$errno_near_count" ] && [ "$errno_near_count" -gt 0 ]; then
+        warn "Found $errno_near_count possible errno checks near fd I/O; inspect $LOG_ROOT/errno_near_fd_io.txt"
+    else
+        pass "No nearby errno token was found by the source-scan heuristic"
+    fi
+
+    manual "Explain the HTTP server basics and how the single poll/select-equivalent works in the main loop."
+    manual "Show that read readiness and write readiness are checked in the same multiplexing loop."
+    manual "Trace poll/select to accept, one client read/recv, one client write/send, and CGI-pipe I/O; verify at most one I/O action per fd per readiness event."
+    manual "Review every read/recv/write/send return value: both zero and negative results must be handled, and socket/pipe errors must remove or clean the client/task."
+    manual "Confirm no code checks errno after read/recv/write/send; any such check is a mandatory-stop condition in the new sheet."
+    manual "Confirm every fd read/write is readiness-driven by the single multiplexing mechanism; the heuristic scan cannot prove control flow."
 }
 
 run_build_checks()
@@ -745,8 +965,9 @@ run_build_checks()
     fi
 
     if [ "$RUN_MODULES" -eq 0 ]; then
-        skip "Module tests were disabled by --skip-modules."
+        skip "Supplemental module tests were disabled by --skip-modules."
     else
+        CURRENT_SCOPE="supplemental"
         found_module=0
         for script in "$PROJECT_ROOT"/tests/module_tests/run_*_test_annotated.sh; do
             if [ ! -f "$script" ]; then
@@ -770,6 +991,7 @@ run_build_checks()
         if [ "$found_module" -eq 0 ]; then
             skip "No annotated module test scripts were found."
         fi
+        CURRENT_SCOPE="mandatory"
     fi
 
     if command -v nm >/dev/null 2>&1; then
@@ -785,18 +1007,7 @@ run_build_checks()
         skip "nm is unavailable; forbidden symbol scan was skipped."
     fi
 
-    poll_locations="$(grep -RInE --include='*.cpp' '\bpoll[[:space:]]*\(' \
-        "$PROJECT_ROOT/srcs" 2>/dev/null || true)"
-    if [ -n "$poll_locations" ]; then
-        pass "At least one poll() call exists"
-        printf '%s\n' "$poll_locations" > "$LOG_ROOT/poll_locations.txt"
-    else
-        fail "No poll() call was found under srcs/"
-    fi
-
-    manual "Review poll() control flow, POLLIN/POLLOUT, one socket/pipe I/O action per readiness event, and partial send handling."
-    manual "Review every read/recv/write/send result and confirm socket/pipe errors remove or clean the client/task."
-    manual "Review errno usage after read/recv/write/send; the script cannot prove control-flow compliance."
+    run_source_review_checks
 }
 
 run_core_http_tests()
@@ -868,10 +1079,12 @@ run_core_http_tests()
         -H 'Content-Type: text/plain' --data-binary 'x')"
     assert_status "$status" 405 "POST rejected by GET-only route"
     allow="$(header_value "$headers" "Allow")"
-    if [ "$allow" = "GET, HEAD" ]; then
-        pass "405 Allow header includes GET and implicit HEAD"
+    normalized_allow="$(printf '%s' "$allow" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+    if printf ',%s,' "$normalized_allow" | grep -F ',GET,' >/dev/null 2>&1 \
+        && ! printf ',%s,' "$normalized_allow" | grep -E ',(POST|DELETE),' >/dev/null 2>&1; then
+        pass "405 Allow header advertises GET and excludes forbidden methods"
     else
-        fail "405 Allow header: expected GET, HEAD, got [$allow]"
+        fail "405 Allow header should advertise GET only (HEAD may also appear); got [$allow]"
     fi
     if [ ! -e "$SITE_ROOT/readonly/forbidden.txt" ]; then
         pass "Rejected POST did not create a file"
@@ -908,7 +1121,7 @@ PY
     rm -f "$SITE_ROOT/upload/body99.txt" "$SITE_ROOT/upload/body99_"*.txt 2>/dev/null || true
     status="$(http_request POST "$BASE/upload/body99.txt" "$headers" "$body" \
         -H 'Content-Type: text/plain' --data-binary "@$TMP_ROOT/body99")"
-    assert_status "$status" 201 "POST 99-byte body"
+    assert_status_one_of "$status" "200 201" "POST 99-byte body"
     if [ -f "$SITE_ROOT/upload/body99.txt" ]; then
         assert_files_equal "$TMP_ROOT/body99" "$SITE_ROOT/upload/body99.txt" "99-byte upload content"
     else
@@ -918,7 +1131,7 @@ PY
     rm -f "$SITE_ROOT/upload/body100.txt" "$SITE_ROOT/upload/body100_"*.txt 2>/dev/null || true
     status="$(http_request POST "$BASE/upload/body100.txt" "$headers" "$body" \
         -H 'Content-Type: text/plain' --data-binary "@$TMP_ROOT/body100")"
-    assert_status "$status" 201 "POST exact body limit"
+    assert_status_one_of "$status" "200 201" "POST exact body limit"
     if [ -f "$SITE_ROOT/upload/body100.txt" ]; then
         assert_files_equal "$TMP_ROOT/body100" "$SITE_ROOT/upload/body100.txt" "100-byte upload content"
     else
@@ -938,38 +1151,31 @@ PY
     rm -f "$SITE_ROOT/upload/eval.bin" "$SITE_ROOT/upload/eval_"*.bin 2>/dev/null || true
     status="$(http_request POST "$BASE/upload/eval.bin" "$headers" "$body" \
         -H 'Content-Type: application/octet-stream' --data-binary "@$TMP_ROOT/binary.bin")"
-    assert_status "$status" 201 "Binary upload creates a resource"
+    assert_status_one_of "$status" "200 201" "Binary upload creates a resource"
 
     status="$(http_request GET "$BASE/upload/eval.bin" "$headers" "$body")"
     assert_status "$status" 200 "Retrieve uploaded binary"
     assert_files_equal "$TMP_ROOT/binary.bin" "$body" "Uploaded binary round trip"
 
-    status="$(http_request POST "$BASE/upload/eval.bin" "$headers" "$body" \
-        -H 'Content-Type: application/octet-stream' --data-binary "@$TMP_ROOT/binary.bin")"
-    assert_status "$status" 201 "Second same-name upload creates another resource"
-    if [ -f "$SITE_ROOT/upload/eval_1.bin" ]; then
-        pass "Same-name upload generated eval_1.bin"
-    else
-        fail "Same-name upload did not generate eval_1.bin"
-    fi
-
     multipart_status="$(curl -sS --max-time 3 -D "$headers" -o "$body" \
         -w '%{http_code}' -F "file=@$TMP_ROOT/binary.bin" "$BASE/multipart/form.bin" 2>/dev/null)"
-    if [ "$multipart_status" = "201" ]; then
+    if [ "$multipart_status" = "200" ] || [ "$multipart_status" = "201" ]; then
         pass "multipart/form-data upload is implemented"
     elif [ "$multipart_status" = "415" ]; then
         pass "multipart/form-data is deliberately rejected with 415 (not mandatory)"
     else
-        fail "multipart/form-data should succeed with 201 or be rejected with 415; got $multipart_status"
+        fail "multipart/form-data should succeed with 200/201 or be rejected with 415; got $multipart_status"
     fi
 
     status="$(http_request DELETE "$BASE/upload/eval.bin" "$headers" "$body")"
-    assert_status "$status" 204 "DELETE uploaded resource"
-    body_size="$(wc -c < "$body" | tr -d ' ')"
-    if [ "$body_size" = "0" ]; then
-        pass "204 response has no body"
-    else
-        fail "204 response body should be empty, got $body_size bytes"
+    assert_status_one_of "$status" "200 204" "DELETE uploaded resource"
+    if [ "$status" = "204" ]; then
+        body_size="$(wc -c < "$body" | tr -d ' ')"
+        if [ "$body_size" = "0" ]; then
+            pass "204 response has no body"
+        else
+            fail "204 response body should be empty, got $body_size bytes"
+        fi
     fi
     if [ ! -e "$SITE_ROOT/upload/eval.bin" ]; then
         pass "DELETE removed the target file"
@@ -1002,20 +1208,6 @@ run_raw_request_tests()
         fail "Unknown method request could not be sent"
     fi
 
-    printf 'HEAD /hello.txt HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' > "$request"
-    if send_raw_request "$request" "$response"; then
-        status="$(raw_status "$response")"
-        assert_status "$status" "$HEAD_EXPECTED_STATUS" "HEAD project policy"
-        body_size="$(raw_body_size "$response")"
-        if [ "$body_size" = "0" ]; then
-            pass "HEAD response has no body"
-        else
-            fail "HEAD response must have no body, got $body_size bytes"
-        fi
-    else
-        fail "HEAD request could not be sent"
-    fi
-
     printf 'GET\r\nHost: localhost\r\nConnection: close\r\n\r\n' > "$request"
     if send_raw_request "$request" "$response"; then
         status="$(raw_status "$response")"
@@ -1044,7 +1236,7 @@ run_raw_request_tests()
     printf 'POST /upload/chunk.txt HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n' > "$request"
     if send_raw_request "$request" "$response"; then
         status="$(raw_status "$response")"
-        assert_status "$status" 201 "Chunked upload"
+        assert_status_one_of "$status" "200 201" "Chunked upload"
         if [ -f "$SITE_ROOT/upload/chunk.txt" ]; then
             if [ "$(cat "$SITE_ROOT/upload/chunk.txt")" = "Wikipedia" ]; then
                 pass "Chunked upload was decoded before writing"
@@ -1134,13 +1326,6 @@ run_cgi_tests()
         fail "Server terminated after the failing CGI"
     fi
 
-    section "Bonus CGI type"
-    status="$(http_request POST "$BASE/cgi/echo.sh?kind=shell" "$headers" "$body" \
-        -H 'Content-Type: text/plain' --data-binary 'SHELL_BODY')"
-    assert_status "$status" 200 "Shell CGI POST"
-    assert_file_contains "$body" "CGI=SHELL" "Shell CGI executed"
-    assert_file_contains "$body" "BODY=SHELL_BODY" "Shell CGI body"
-
     if [ "$MODE" = "quick" ]; then
         skip "Slow CGI timeout and concurrency test in quick mode."
         return
@@ -1201,6 +1386,20 @@ PY
     else
         fail "Zombie CGI processes detected: $zombie_count"
     fi
+}
+
+run_bonus_cgi_tests()
+{
+    section "Bonus: second CGI system"
+
+    headers="$TMP_ROOT/headers"
+    body="$TMP_ROOT/body"
+
+    status="$(http_request POST "$BASE/cgi/echo.sh?kind=shell" "$headers" "$body" \
+        -H 'Content-Type: text/plain' --data-binary 'SHELL_BODY')"
+    assert_status "$status" 200 "Shell CGI POST"
+    assert_file_contains "$body" "CGI=SHELL" "Second CGI system executed"
+    assert_file_contains "$body" "BODY=SHELL_BODY" "Second CGI system received POST body"
 }
 
 run_session_tests()
@@ -1266,11 +1465,11 @@ run_session_tests()
 run_multi_port_tests()
 {
     if [ "$MODE" = "quick" ]; then
-        skip "Multi-port and shared-port configuration tests in quick mode."
+        skip "Multi-port, hostname and occupied-port tests in quick mode."
         return
     fi
 
-    section "Multiple ports"
+    section "Configuration: multiple ports"
     cleanup_server
 
     if ! start_server "$CONFIG_MULTI" "$LOG_ROOT/multi_server.log" "$PORT_B"; then
@@ -1296,36 +1495,102 @@ run_multi_port_tests()
         fail "Second port did not serve site B"
     fi
 
-    section "Same interface:port policy"
+    section "Configuration: hostnames with curl --resolve"
     cleanup_server
 
-    shared_output="$TMP_ROOT/shared_port_result.txt"
-    if python3 "$SHARED_PORT_CHECK" \
-        --binary "$BIN" \
-        --cwd "$PROJECT_ROOT" \
-        --config "$CONFIG_SHARED" \
-        --host "$HOST" \
-        --port "$PORT_SHARED" \
-        --log "$LOG_ROOT/shared_server.log" \
-        > "$shared_output" 2>&1
-    then
-        if grep -F 'RESULT=REJECTED' "$shared_output" >/dev/null 2>&1; then
-            pass "Same interface:port configuration was rejected"
-        elif grep -F 'RESULT=VHOST' "$shared_output" >/dev/null 2>&1; then
-            pass "Virtual host routing works on the same interface:port"
+    if start_server "$CONFIG_VHOST" "$LOG_ROOT/vhost_server.log" "$PORT_HOST_A"; then
+        if wait_for_port "$PORT_HOST_B"; then
+            pass "Second hostname server is listening: $PORT_HOST_B"
         else
-            fail "Shared-port check returned an unknown successful result"
-            cat "$shared_output"
+            fail "Second hostname server did not start: $PORT_HOST_B"
         fi
-    else
-        fail "Same interface:port was accepted without working virtual host routing"
-        cat "$shared_output"
+
+        alpha_body="$(curl -sS --noproxy '*' --max-time 5 \
+            --resolve "alpha.test:$PORT_HOST_A:$HOST" \
+            "http://alpha.test:$PORT_HOST_A/" 2>/dev/null || true)"
+        beta_body="$(curl -sS --noproxy '*' --max-time 5 \
+            --resolve "beta.test:$PORT_HOST_B:$HOST" \
+            "http://beta.test:$PORT_HOST_B/" 2>/dev/null || true)"
+
+        if printf '%s' "$alpha_body" | grep -F 'HOST_ALPHA_OK' >/dev/null 2>&1; then
+            pass "alpha.test resolves to and serves the alpha host configuration"
+        else
+            fail "alpha.test did not serve the alpha host configuration"
+        fi
+        if printf '%s' "$beta_body" | grep -F 'HOST_BETA_OK' >/dev/null 2>&1; then
+            pass "beta.test resolves to and serves the beta host configuration"
+        else
+            fail "beta.test did not serve the beta host configuration"
+        fi
     fi
 
-    if [ "$RUN_STRESS" -eq 1 ]; then
-        if start_server "$CONFIG_MAIN" "$LOG_ROOT/main_server_restart.log" "$PORT"; then
-            pass "Main evaluation server restarted for stress tests"
+    section "Port issues: duplicate configuration"
+    cleanup_server
+
+    if ! port_is_free "$PORT_DUPLICATE"; then
+        fail "Duplicate-test port $PORT_DUPLICATE was already in use"
+    else
+        (cd "$PROJECT_ROOT" && "$BIN" "$CONFIG_DUPLICATE") \
+            >"$LOG_ROOT/duplicate_port_server.log" 2>&1 &
+        duplicate_pid=$!
+        sleep 1
+
+        if kill -0 "$duplicate_pid" 2>/dev/null; then
+            fail "A configuration that declares the same port twice was accepted"
+            kill -INT "$duplicate_pid" 2>/dev/null || true
+            sleep 1
+            kill -KILL "$duplicate_pid" 2>/dev/null || true
+            wait "$duplicate_pid" 2>/dev/null || true
+        else
+            wait "$duplicate_pid" 2>/dev/null || true
+            pass "A configuration that declares the same port twice was rejected"
         fi
+    fi
+
+    section "Port issues: two processes with a common port"
+    cleanup_server
+
+    if start_server "$CONFIG_COMMON_OWNER" "$LOG_ROOT/common_owner.log" "$PORT_COMMON"; then
+        owner_pid="$SERVER_PID"
+        (cd "$PROJECT_ROOT" && "$BIN" "$CONFIG_COMMON_CONFLICT") \
+            >"$LOG_ROOT/common_conflict.log" 2>&1 &
+        conflict_pid=$!
+        sleep 1
+
+        if kill -0 "$conflict_pid" 2>/dev/null; then
+            fail "Second Webserv kept running although one configured port was already occupied"
+            kill -INT "$conflict_pid" 2>/dev/null || true
+            sleep 1
+            kill -KILL "$conflict_pid" 2>/dev/null || true
+            wait "$conflict_pid" 2>/dev/null || true
+        else
+            wait "$conflict_pid" 2>/dev/null || true
+            pass "Second Webserv rejected the configuration containing an occupied port"
+        fi
+
+        if port_is_free "$PORT_UNIQUE"; then
+            pass "The rejected second configuration did not partially keep its free port open"
+        else
+            fail "The second Webserv partially started on $PORT_UNIQUE despite the occupied common port"
+        fi
+
+        if kill -0 "$owner_pid" 2>/dev/null; then
+            owner_body="$(curl -sS --noproxy '*' --max-time 5 \
+                --resolve "owner.test:$PORT_COMMON:$HOST" \
+                "http://owner.test:$PORT_COMMON/" 2>/dev/null || true)"
+            if printf '%s' "$owner_body" | grep -F 'HOST_ALPHA_OK' >/dev/null 2>&1; then
+                pass "The first Webserv remained functional after the bind conflict"
+            else
+                fail "The first Webserv stayed alive but stopped serving the expected site"
+            fi
+        else
+            fail "The first Webserv terminated when the second process hit a common-port conflict"
+        fi
+    fi
+
+    # 后续 Siege 与 bonus 仍使用主评测站点，因此无条件恢复主服务器。
+    if start_server "$CONFIG_MAIN" "$LOG_ROOT/main_server_restart.log" "$PORT"; then
+        pass "Main evaluation server restarted after port tests"
     fi
 }
 
@@ -1348,6 +1613,102 @@ rss_kb()
     ps -o rss= -p "$1" 2>/dev/null | tr -d ' '
 }
 
+# 同时兼容 Siege 传统文本输出和新版 JSON 输出。
+# 参数 1：Siege 日志路径。
+# 参数 2：字段名，例如 availability、failed_transactions。
+# 找不到或字段值不是数字时输出空字符串。
+parse_siege_metric()
+{
+    log_file="$1"
+    metric_name="$2"
+
+    python3 - "$log_file" "$metric_name" <<'PY'
+import json
+import re
+import sys
+
+log_path = sys.argv[1]
+metric = sys.argv[2]
+
+try:
+    with open(log_path, "r", encoding="utf-8", errors="replace") as handle:
+        content = handle.read()
+except OSError:
+    raise SystemExit(0)
+
+# 新版 Siege 通常输出一个 JSON 对象。
+try:
+    parsed = json.loads(content)
+except (TypeError, ValueError):
+    parsed = None
+
+if isinstance(parsed, dict) and metric in parsed:
+    value = parsed[metric]
+    if isinstance(value, (int, float)):
+        print(value)
+        raise SystemExit(0)
+
+# 某些版本可能在 JSON 前后附加额外提示，因此再做一次字段匹配。
+json_pattern = r'["\']' + re.escape(metric) + r'["\']\s*:\s*([0-9]+(?:\.[0-9]+)?)'
+match = re.search(json_pattern, content, re.IGNORECASE)
+if match:
+    print(match.group(1))
+    raise SystemExit(0)
+
+# 兼容传统 Siege 文本，例如：Availability: 100.00 %
+legacy_names = {
+    "availability": "Availability",
+    "failed_transactions": "Failed transactions",
+    "successful_transactions": "Successful transactions",
+    "transactions": "Transactions",
+}
+legacy_name = legacy_names.get(metric)
+if legacy_name:
+    legacy_pattern = re.escape(legacy_name) + r'\s*:\s*([0-9]+(?:\.[0-9]+)?)'
+    match = re.search(legacy_pattern, content, re.IGNORECASE)
+    if match:
+        print(match.group(1))
+PY
+}
+
+connection_state_count()
+{
+    pid="$1"
+    state="$2"
+    port="$3"
+
+    if command -v ss >/dev/null 2>&1; then
+        ss -tanH 2>/dev/null \
+            | awk -v wanted="$state" -v suffix=":$port" '
+                {
+                    current = $1
+                    gsub(/-/, "_", current)
+                    if (current == wanted && ($4 ~ suffix "$" || $5 ~ suffix "$"))
+                        count++
+                }
+                END {print count + 0}
+            '
+        return
+    fi
+
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -nP -a -p "$pid" -iTCP 2>/dev/null \
+            | awk -v wanted="$state" '
+                NR > 1 {
+                    current = $NF
+                    gsub(/[()]/, "", current)
+                    gsub(/-/, "_", current)
+                    if (current == wanted)
+                        count++
+                }
+                END {print count + 0}
+            '
+        return
+    fi
+
+    echo "-1"
+}
+
 run_stress_tests()
 {
     if [ "$RUN_STRESS" -eq 0 ]; then
@@ -1362,29 +1723,58 @@ run_stress_tests()
         return
     fi
 
+    stress_headers="$TMP_ROOT/stress_headers"
+    stress_body="$TMP_ROOT/stress_body"
+    stress_status="$(http_request GET "$BASE/empty.html" "$stress_headers" "$stress_body")"
+    assert_status "$stress_status" 200 "Empty-page precheck before Siege"
+    stress_body_size="$(wc -c < "$stress_body" | tr -d ' ')"
+    if [ "$stress_body_size" = "0" ]; then
+        pass "Siege target is an empty response body"
+    else
+        fail "Siege target must be empty, got $stress_body_size bytes"
+    fi
+
     baseline_fd="$(fd_count "$SERVER_PID")"
     baseline_rss="$(rss_kb "$SERVER_PID")"
 
     if command -v siege >/dev/null 2>&1; then
         if siege -b -c 20 -r 50 "$BASE/empty.html" \
             >"$LOG_ROOT/siege.log" 2>&1; then
-            availability="$(grep -i 'Availability:' "$LOG_ROOT/siege.log" \
-                | tail -n 1 \
-                | sed -E 's/.*Availability:[[:space:]]*([0-9.]+).*/\1/' || true)"
-            if [ -n "$availability" ] && python3 - "$availability" <<'PY'
+            availability="$(parse_siege_metric "$LOG_ROOT/siege.log" "availability")"
+            failed_transactions="$(parse_siege_metric "$LOG_ROOT/siege.log" "failed_transactions")"
+            successful_transactions="$(parse_siege_metric "$LOG_ROOT/siege.log" "successful_transactions")"
+
+            if [ -z "$availability" ]; then
+                fail "Could not parse Siege availability. See $LOG_ROOT/siege.log"
+            elif python3 - "$availability" <<'PY'
 import sys
-raise SystemExit(0 if float(sys.argv[1]) >= 99.5 else 1)
+try:
+    value = float(sys.argv[1])
+except ValueError:
+    raise SystemExit(1)
+raise SystemExit(0 if value >= 99.5 else 1)
 PY
             then
-                pass "Siege availability is ${availability}% (>= 99.5%)"
+                details="availability ${availability}%"
+                if [ -n "$successful_transactions" ]; then
+                    details="$details, successful $successful_transactions"
+                fi
+                if [ -n "$failed_transactions" ]; then
+                    details="$details, failed $failed_transactions"
+                fi
+                pass "Siege $details (required availability >= 99.5%)"
+                if [ -n "$failed_transactions" ] && [ "$failed_transactions" != "0" ]; then
+                    warn "Siege reported $failed_transactions failed transactions despite acceptable availability"
+                fi
             else
-                fail "Siege availability is below 99.5% or could not be parsed"
+                fail "Siege availability is ${availability}%, below 99.5%"
             fi
         else
             fail "Siege command failed. See $LOG_ROOT/siege.log"
         fi
     else
-        warn "Siege is not installed; running a Python fallback that does not replace the official Siege check."
+        fail "Siege is not installed; the new EvalHub mandatory stress check cannot be completed."
+        warn "Running a Python fallback for diagnostics only; it does not replace Siege."
         python3 - "$HOST" "$PORT" >"$LOG_ROOT/python_stress.log" <<'PY'
 import concurrent.futures
 import http.client
@@ -1442,6 +1832,24 @@ PY
         skip "RSS measurement is unavailable."
     fi
 
+    close_wait_count="$(connection_state_count "$SERVER_PID" "CLOSE_WAIT" "$PORT")"
+    established_count="$(connection_state_count "$SERVER_PID" "ESTAB" "$PORT")"
+    if [ "$close_wait_count" = "-1" ]; then
+        skip "TCP connection-state inspection is unavailable on this system."
+    elif [ "$close_wait_count" = "0" ]; then
+        pass "No CLOSE-WAIT connection remained after Siege"
+    else
+        fail "$close_wait_count CLOSE-WAIT connections remained after Siege"
+    fi
+
+    if [ "$established_count" != "-1" ]; then
+        if [ "$established_count" -le 5 ]; then
+            pass "Established connections returned near baseline after Siege ($established_count)"
+        else
+            warn "$established_count established connections remained after Siege; inspect keep-alive cleanup manually"
+        fi
+    fi
+
     if server_alive; then
         status="$(curl -sS --max-time 5 -o "$TMP_ROOT/after_stress" -w '%{http_code}' "$BASE/hello.txt" 2>/dev/null)"
         assert_status "$status" 200 "Server remains available after stress"
@@ -1452,25 +1860,79 @@ PY
     manual "Run a longer evaluator-chosen Siege test such as siege -b -c 50 -t 5M and watch RSS, FD count and CLOSE-WAIT connections."
 }
 
+run_bonus_tests()
+{
+    if [ "$RUN_BONUS" -eq 0 ]; then
+        skip "Bonus tests were not requested. Re-run with --bonus after mandatory checks pass."
+        return
+    fi
+
+    if [ "$MODE" != "full" ] || [ "$RUN_STRESS" -ne 1 ]; then
+        skip "Bonus tests require the complete mandatory automatic suite; use --full --bonus."
+        return
+    fi
+
+    if [ "$MANDATORY_FAIL_COUNT" -ne 0 ]; then
+        skip "Bonus tests were ignored because mandatory automatic checks have failures."
+        return
+    fi
+
+    CURRENT_SCOPE="bonus"
+    if ! server_alive; then
+        if ! start_server "$CONFIG_MAIN" "$LOG_ROOT/main_server_bonus_restart.log" "$PORT"; then
+            fail "Bonus tests could not start because the main evaluation server is unavailable."
+            CURRENT_SCOPE="mandatory"
+            return
+        fi
+    fi
+
+    section "Bonus prerequisites"
+    manual "Count bonus points only after every mandatory automatic and manual item has been confirmed as entirely correct."
+    run_session_tests
+    run_bonus_cgi_tests
+    CURRENT_SCOPE="mandatory"
+}
+
 print_summary()
 {
     section "Summary"
-    echo "PASS   : $PASS_COUNT"
-    echo "FAIL   : $FAIL_COUNT"
-    echo "WARN   : $WARN_COUNT"
-    echo "SKIP   : $SKIP_COUNT"
-    echo "MANUAL : $MANUAL_COUNT"
+    echo "PASS             : $PASS_COUNT"
+    echo "FAIL             : $FAIL_COUNT"
+    echo "WARN             : $WARN_COUNT"
+    echo "SKIP             : $SKIP_COUNT"
+    echo "MANUAL           : $MANUAL_COUNT"
+    echo "MANDATORY FAIL   : $MANDATORY_FAIL_COUNT"
+    echo "SUPPLEMENTAL PASS: $SUPPLEMENTAL_PASS_COUNT"
+    echo "SUPPLEMENTAL FAIL: $SUPPLEMENTAL_FAIL_COUNT"
+    if [ "$RUN_BONUS" -eq 1 ]; then
+        echo "BONUS PASS       : $BONUS_PASS_COUNT"
+        echo "BONUS FAIL       : $BONUS_FAIL_COUNT"
+    fi
     echo
     echo "Logs: $LOG_ROOT"
 
-    if [ "$FAIL_COUNT" -eq 0 ]; then
-        printf '%sAUTOMATIC RESULT: PASS%s\n' "$GREEN" "$RESET"
-        echo "This does not replace the manual source review, browser Network test or Valgrind/leaks check."
+    if [ "$MODE" != "full" ] || [ "$RUN_STRESS" -ne 1 ]; then
+        printf '%sAUTOMATIC MANDATORY RESULT: INCOMPLETE%s\n' "$YELLOW" "$RESET"
+        echo "Quick mode intentionally skipped mandatory EvalHub sections; run --full for a grade-oriented result."
+        return 1
+    fi
+
+    if [ "$MANDATORY_FAIL_COUNT" -eq 0 ]; then
+        printf '%sAUTOMATIC MANDATORY RESULT: PASS%s\n' "$GREEN" "$RESET"
+        echo "Manual source review, browser checks, official tester and leak verification are still required."
+        if [ "$RUN_BONUS" -eq 1 ]; then
+            if [ "$BONUS_FAIL_COUNT" -eq 0 ]; then
+                printf '%sAUTOMATIC BONUS CHECKS: PASS%s\n' "$GREEN" "$RESET"
+            else
+                printf '%sAUTOMATIC BONUS CHECKS: FAIL%s\n' "$RED" "$RESET"
+                echo "Bonus failures do not change the mandatory automatic result."
+            fi
+        fi
         return 0
     fi
 
-    printf '%sAUTOMATIC RESULT: FAIL%s\n' "$RED" "$RESET"
-    echo "Fix every [FAIL], rerun the same command, then complete MANUAL_CHECKLIST.md."
+    printf '%sAUTOMATIC MANDATORY RESULT: FAIL%s\n' "$RED" "$RESET"
+    echo "Fix every mandatory [FAIL], rerun the same command, then complete MANUAL_CHECKLIST.md."
     return 1
 }
 
@@ -1480,7 +1942,8 @@ main()
     echo "Project root : $PROJECT_ROOT"
     echo "Mode         : $MODE"
     echo "Main URL     : $BASE"
-    echo "HEAD policy  : $HEAD_EXPECTED_STATUS"
+    echo "Stress       : $RUN_STRESS"
+    echo "Bonus        : $RUN_BONUS"
 
     dependencies_ok=1
     require_command bash || dependencies_ok=0
@@ -1511,15 +1974,19 @@ main()
     run_upload_tests
     run_raw_request_tests
     run_cgi_tests
-    run_session_tests
     run_multi_port_tests
     run_stress_tests
 
-    manual "Open the site in the reference browser and inspect Request/Response headers in the Network tab."
-    manual "Demonstrate the event loop and explain how accept, client read/write and CGI pipes are registered in the single poll() system."
-    manual "Run Valgrind or leaks and verify definite/indirect leaks are zero after a representative request set."
-    manual "Run the official school tester separately with its dedicated configuration."
-    manual "Compare uncertain response behavior with NGINX when the subject/evaluation does not prescribe an exact result."
+    manual "Before grading, verify the repository ownership, clone into an empty folder, inspect git status and check for malicious aliases or wrappers."
+    manual "Review together every helper/testing script used during grading before relying on its result."
+    manual "Launch/install Siege as requested by the evaluation environment; the Python fallback is diagnostic only."
+    manual "Repeat representative GET and UNKNOWN requests with telnet as requested by the sheet, not only curl/raw_http.py."
+    manual "Look up the HTTP response status-code list and recheck every status observed during the defence."
+    manual "Use the team's reference browser: inspect request/response headers, serve a complete static site, try a wrong URL, directory listing and redirect."
+    manual "Run Valgrind, leaks or another accepted tool and verify all heap allocations are freed; definite and indirect leaks must be zero."
+    manual "Run the official school tester and the supplied CGI testers separately with their dedicated configurations."
+
+    run_bonus_tests
 
     if print_summary; then
         exit 0

@@ -1,0 +1,2 @@
+Error: Conflicting listen endpoints: 127.0.0.1:18085 and 127.0.0.1:18085
+Critical Error: Configuration initialization failed. Exiting.

@@ -3,23 +3,23 @@
         🏆 WEBSERV CONFIGURATION TOPOLOGY DUMP (资产自检大阅兵)      
 ====================================================================
 [📊 全局域名防伪锁状态]
-  ├─ 🔹 监听端口: [18081]
-  │  └─ 🔒 已绑定防伪域名集: { "site-a.local" }
-  ├─ 🔹 监听端口: [18082]
-  │  └─ 🔒 已绑定防伪域名集: { "site-b.local" }
+  ├─ 🔹 监听端口: [18083]
+  │  └─ 🔒 已绑定防伪域名集: { "alpha.test" }
+  ├─ 🔹 监听端口: [18084]
+  │  └─ 🔒 已绑定防伪域名集: { "beta.test" }
 --------------------------------------------------------------------
 [🏛️ 内存虚拟主机别墅群 (共 2 个 server 块)]
   🏠 [Server Block #1]
-    ├─ 📡 Listen Port : 18081
-    ├─ 🏷️ Server Names: [ "site-a.local" ]
-    ├─ 📂 Root Path   : /home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site
+    ├─ 📡 Listen Port : 18083
+    ├─ 🏷️ Server Names: [ "alpha.test" ]
+    ├─ 📂 Root Path   : /home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/host_alpha
     ├─ ⚖️ Max Body Size: 1048576 Bytes
     └─ 🚪 Locations 小房间 (共 0 个):
         
   🏠 [Server Block #2]
-    ├─ 📡 Listen Port : 18082
-    ├─ 🏷️ Server Names: [ "site-b.local" ]
-    ├─ 📂 Root Path   : /home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/site_b
+    ├─ 📡 Listen Port : 18084
+    ├─ 🏷️ Server Names: [ "beta.test" ]
+    ├─ 📂 Root Path   : /home/yzhang2/42cursus/ghgh/tests/evaluation/.runtime/host_beta
     ├─ ⚖️ Max Body Size: 1048576 Bytes
     └─ 🚪 Locations 小房间 (共 0 个):
         
@@ -27,8 +27,8 @@
 
 [ServerManager] WebServ engine pre-loaded with 2 virtual servers.
 [ServerManager] Initializing network sockets...
-[ServerManager] Successfully listening on 127.0.0.1:18081 (FD: 3)
-[ServerManager] Successfully listening on 127.0.0.1:18082 (FD: 4)
+[ServerManager] Successfully listening on 127.0.0.1:18083 (FD: 3)
+[ServerManager] Successfully listening on 127.0.0.1:18084 (FD: 4)
 [ServerManager] Main loop started. Entering the matrix...
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 5 successfully registered to poll tree with events: 1
@@ -62,7 +62,7 @@
 
 ================ [DEBUG REQUEST] ================
 [REQ] Method: GET | URI: / | Body Size in Request: 0 bytes
-[RES] Status: 200 | Header Content-Length: 65
+[RES] Status: 200 | Header Content-Length: 23
 [DEBUG Normal Task] No CGI header, sending direct response.
 =================================================
 
@@ -88,7 +88,7 @@
 
 ================ [DEBUG REQUEST] ================
 [REQ] Method: GET | URI: / | Body Size in Request: 0 bytes
-[RES] Status: 200 | Header Content-Length: 24
+[RES] Status: 200 | Header Content-Length: 22
 [DEBUG Normal Task] No CGI header, sending direct response.
 =================================================
 
@@ -108,6 +108,6 @@
 [Server] Shutting down gracefully...
 [Server] Cleaned up all sockets and CGI processes. Bye!
 [ServerManager] Main loop safely terminated.
-[ServerSocket] Closing listen FD: 3 for 127.0.0.1:18081
-[ServerSocket] Closing listen FD: 4 for 127.0.0.1:18082
+[ServerSocket] Closing listen FD: 3 for 127.0.0.1:18083
+[ServerSocket] Closing listen FD: 4 for 127.0.0.1:18084
 [ServerManager] Engine completely shutdown and memory released.

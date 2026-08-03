@@ -169,13 +169,14 @@ Response handleIndex(const EffectiveRoute &route,
     }
 
     // 💡 修复：循环结束意味着没有找到可用的 index 文件
-    // 只有在显式开启了 autoindex 时才去生成目录列表；否则统一返回 404 Not Found！
+    // NGINX 的典型行为是：目录存在、没有 index、autoindex off 时返回 403 Forbidden。
+    // 只有在显式开启了 autoindex 时才去生成目录列表；
     if (route.autoindex)
     {
         return handleAutoIndex(route, requestPath, closeConnection);
     }
 
-    response.createResponse(404, "", route.server->error_pages);
+    response.createResponse(403, "", route.server->error_pages);
     return response;
 }
 
