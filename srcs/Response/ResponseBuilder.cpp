@@ -8,7 +8,6 @@
 用途：使用 Response 类型以及唯一的带共享 SessionStore 的 buildResponse() 声明。
 */
 #include "Response.hpp"
-#include <iostream>
 
 /*
 包含：ConfigRouteUtils.hpp
@@ -80,30 +79,28 @@
 函数：buildAllowHeader
 用途：为 405 Method Not Allowed 生成稳定顺序的 Allow header。
 参数来源：allowMethods 来自 EffectiveRoute 合并后的 server/location allow_methods。
-变量说明：
-    - orderedMethods：本项目真正实现的三个方法及输出顺序。
-    - result：逐步拼出的 header value，例如 "GET, POST"。
-    - i：遍历 orderedMethods 的下标。
+变量说明：result 逐步拼出 header value，例如 "GET, HEAD, POST"。
 实现逻辑：
-    1. 按 GET、POST、DELETE 的固定顺序检查集合。
-    2. 找到允许的方法时，在非首项前加入逗号和空格。
+    1. 配置允许 GET 时同时列出 GET 和 HEAD，因为 HEAD 继承 GET 权限。
+    2. 再按 POST、DELETE 的固定顺序追加其余已允许方法。
     3. 返回可以直接交给 Response::setHeader("Allow", ...) 的字符串。
 */
 static std::string buildAllowHeader(const std::set<std::string> &allowMethods)
 {
-    // 💡 加上 "HEAD"，顺序建议按照常规 HTTP 方法排列
-    const char *orderedMethods[] = {"GET", "HEAD", "POST", "DELETE"};
     std::string result;
-    size_t i = 0;
-    while (i < 4) // 💡 注意这里的循环条件改为 4
+    if (allowMethods.find("GET") != allowMethods.end())
+        result = "GET, HEAD";
+    if (allowMethods.find("POST") != allowMethods.end())
     {
-        if (allowMethods.find(orderedMethods[i]) != allowMethods.end())
-        {
-            if (!result.empty())
-                result += ", ";
-            result += orderedMethods[i];
-        }
-        ++i;
+        if (!result.empty())
+            result += ", ";
+        result += "POST";
+    }
+    if (allowMethods.find("DELETE") != allowMethods.end())
+    {
+        if (!result.empty())
+            result += ", ";
+        result += "DELETE";
     }
     return result;
 }
@@ -140,27 +137,28 @@ static bool findConfiguredCgiInterpreter(const LocationConfig *location,
     return false;
 }
 
-// 💡 辅助函数：根据 Location 配置的 cgi_extensions 剥离 PATH_INFO
-// 💡 辅助函数：根据 Location 配置的 cgi_extensions 剥离 PATH_INFO
+/*
+函数：extractPathInfo
+用途：按 location 配置的 CGI 扩展名，把 normalized path 拆成脚本路径和 PATH_INFO。
+参数来源：rawPath 来自 Request::getPath()；location 是最长匹配 location；scriptPath/pathInfo 是输出引用。
+变量说明：it 遍历扩展名配置；extPos/extEnd 定位脚本扩展名结束位置。
+实现逻辑：默认整条路径都是脚本路径；若扩展名后紧跟 /，则把后半段保存为 PATH_INFO。
+*/
 static void extractPathInfo(const std::string &rawPath,
                             const LocationConfig *location,
                             std::string &scriptPath,
                             std::string &pathInfo)
 {
-    std::cerr << "===== extractPathInfo DEBUG =====" << std::endl;
-    std::cerr << "rawPath=[" << rawPath << "]" << std::endl;
     scriptPath = rawPath;
     pathInfo = "";
 
     if (location == NULL || location->cgi_extensions.empty())
         return;
 
-    // 💡 使用 const_iterator 遍历 std::map<std::string, std::string>
-    // pair.first 是扩展名（比如 ".py"），pair.second 是解释器路径（比如 "/usr/bin/python3"）
     typedef std::map<std::string, std::string>::const_iterator MapIterator;
     for (MapIterator it = location->cgi_extensions.begin(); it != location->cgi_extensions.end(); ++it)
     {
-        const std::string &ext = it->first; // 获取 map 的 key (扩展名)
+        const std::string &ext = it->first;
         if (ext.empty())
             continue;
 
@@ -168,7 +166,6 @@ static void extractPathInfo(const std::string &rawPath,
         if (extPos != std::string::npos)
         {
             size_t extEnd = extPos + ext.length();
-            // 只有当扩展名正好在结尾，或者扩展名紧跟 '/' 时，才算命中 PATH_INFO
             if (extEnd == rawPath.length())
             {
                 scriptPath = rawPath;
@@ -177,8 +174,8 @@ static void extractPathInfo(const std::string &rawPath,
             }
             else if (rawPath[extEnd] == '/')
             {
-                scriptPath = rawPath.substr(0, extEnd); // 例如: "/cgi-bin/path_info.py"
-                pathInfo = rawPath.substr(extEnd);      // 例如: "/abc/def"
+                scriptPath = rawPath.substr(0, extEnd);
+                pathInfo = rawPath.substr(extEnd);
                 return;
             }
         }
@@ -229,16 +226,12 @@ static int validateCgiScript(const std::string &scriptPath,
     - action/pathStatus/cgiPathStatus：方法枚举、普通路径检查和 CGI 脚本检查结果。
 实现逻辑：
     1. 检查 Request 是否绑定 ServerConfig，并合并 server/location 路由。
-    2. 优先执行配置重定向；HEAD 暂时返回 405，其他方法再检查是否实现以及是否被当前路由允许。
+    2. 优先执行配置重定向；随后检查方法是否实现，并让 HEAD 继承 GET 的 route 权限。
     3. 精确匹配三个 Session 示例路径时，把共享 store 交给 SessionResponse 层。
     4. 其他请求生成真实路径；CGI 后缀先验证可执行脚本并交付内部路径 header。
-    5. 普通 GET、POST、DELETE 分别交给 RequestHandler 对应函数。
+    5. 普通 GET/HEAD、POST、DELETE 分别交给 RequestHandler 对应函数；HEAD 复用 GET 结果并移除实际 body。
 接口约束：本项目不再提供不带 SessionStore 的旧重载，避免调用方误绕过 Session 功能。
 */
-void Response::clearBodyOnly()
-{
-    _body.clear(); // 仅擦除 Body 字符串，保留已经通过 updateContentLength() 或原有逻辑设置好的 Content-Length Header
-}
 
 Response buildResponse(const Request &request,
                        SessionStore &sessionStore)
@@ -255,8 +248,7 @@ Response buildResponse(const Request &request,
     const LocationConfig *location =
         findMatchingLocation(request.getPath(), server->locations);
 
-    // 💡 1. 提取 PATH_INFO：将 raw URI (如 /cgi-bin/path_info.py/abc/def)
-    //    拆分为 scriptPath (/cgi-bin/path_info.py) 和 pathInfo (/abc/def)
+    /* CGI 请求可能在脚本扩展名后携带 PATH_INFO。 */
     std::string scriptPath, pathInfo;
     extractPathInfo(request.getPath(), location, scriptPath, pathInfo);
 
@@ -283,13 +275,6 @@ Response buildResponse(const Request &request,
         return response;
     }
 
-    // if (request.getMethod() == "HEAD")
-    // {
-    //     response.createResponse(405, "", route.server->error_pages);
-    //     response.setHeader("Allow", buildAllowHeader(route.allow_methods));
-    //     return response;
-    // }
-
     RequestAction action = requestActionFromMethod(request.getMethod());
     if (action == ACTION_UNSUPPORTED)
     {
@@ -306,7 +291,7 @@ Response buildResponse(const Request &request,
     if (isSessionDemoPath(request.getPath()))
         return buildSessionDemoResponse(request, sessionStore);
 
-    // 💡 2. 使用剥离后的 scriptPath 检索物理文件，防止 /abc/def 导致 stat() 触发 404！
+    /* 使用剥离后的脚本路径建立真实文件路径，PATH_INFO 不参与 stat()。 */
     int pathStatus = route.createEffectivePath(scriptPath, action);
     std::string cgiInterpreter;
     if (findConfiguredCgiInterpreter(location, scriptPath, cgiInterpreter))
@@ -325,7 +310,7 @@ Response buildResponse(const Request &request,
             response.setHeader("X-Internal-CGI-Interpreter",
                                cgiInterpreter);
 
-        // 💡 3. 将 Script-Name 和 Path-Info 作为内部标头传递给后续的 CGI 处理函数
+        /* 通过内部 headers 把 CGI 路径信息交给异步执行层。 */
         response.setHeader("X-Internal-CGI-Script-Name", scriptPath);
         response.setHeader("X-Internal-CGI-Path-Info", pathInfo);
         response.setHeader("X-Internal-CGI-Path",
@@ -341,12 +326,12 @@ Response buildResponse(const Request &request,
         response.createResponse(pathStatus, "", route.server->error_pages);
         return response;
     }
-    // ACTION_GET 和 ACTION_HEAD 统一调用 handleGet 生成完整的 Response
+    /* HEAD 使用 GET 的状态和 headers，但最终不保留实际消息体。 */
     if (action == ACTION_GET || action == ACTION_HEAD)
     {
         Response res = handleGet(request, route);
 
-        // 💡 2. 如果是 HEAD 请求，只把 Body 清空，保留算好的 Content-Length/Content-Type 等 Header
+        /* clearBodyOnly() 保留 GET 已计算的 Content-Length。 */
         if (action == ACTION_HEAD)
             res.clearBodyOnly();
         return res;

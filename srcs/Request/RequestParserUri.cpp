@@ -24,6 +24,21 @@ bool RequestParser::has_bad_uri_char(const std::string& uri) {
 }
 
 /*
+函数：hex_value
+用途：把一个已经确认是十六进制数字的字符转换为 0 到 15。
+返回值：非法字符返回 -1；调用方据此拒绝畸形 percent-encoding。
+*/
+int RequestParser::hex_value(char c) {
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
+
+/*
 函数：has_invalid_percent_encoding
 用途：检查 URI 中每一个 % 是否都严格跟着两个十六进制字符。
 参数来源：split_and_normalize_uri() 传入完整 request-target。
@@ -43,21 +58,6 @@ bool RequestParser::has_invalid_percent_encoding(const std::string& uri) {
 		i += 3;
 	}
 	return false;
-}
-
-/*
-函数：hex_value
-用途：把一个已经确认是十六进制数字的字符转换为 0 到 15。
-返回值：非法字符返回 -1；调用方据此拒绝畸形 percent-encoding。
-*/
-int RequestParser::hex_value(char c) {
-    if (c >= '0' && c <= '9')
-        return c - '0';
-    if (c >= 'a' && c <= 'f')
-        return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F')
-        return c - 'A' + 10;
-    return -1;
 }
 
 /*

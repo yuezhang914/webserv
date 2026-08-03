@@ -26,7 +26,7 @@
 用途：把 normalized request path 映射到 root 或 alias 下的真实 targetPath，并执行当前动作需要的基础路径验证。
 参数来源：
     - requestPath：RequestParser 已解码、规范化、去 query 的 request.getPath()。
-    - action：buildResponse() 通过 requestActionFromMethod() 得到的 GET/POST/DELETE 动作。
+    - action：buildResponse() 通过 requestActionFromMethod() 得到的 GET/HEAD/POST/DELETE 动作。
 变量说明：
     - base：最终使用的 root 或 alias 目录。
     - suffix：需要追加到 base 的 URL path 部分；alias 模式会先移除 location_prefix。
@@ -109,7 +109,7 @@ std::string joinPaths(const std::string &base,
 int EffectiveRoute::isValidPath(RequestAction action)
 {
     isDir = false;
-    // 💡 只要不是 GET 且不是 HEAD，才跳过检查
+    /* GET 和 HEAD 都需要验证读取目标；写入和删除由各自 handler 检查。 */
     if (action != ACTION_GET && action != ACTION_HEAD)
         return PATH_OK;
 

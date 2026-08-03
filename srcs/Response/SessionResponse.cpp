@@ -92,16 +92,19 @@ static Response createSessionFailureResponse(const Request &request,
 /*
 函数：createSessionMethodNotAllowed
 用途：为虚拟 Session 路由返回带精确 Allow header 的 405。
-参数：request 是当前请求；allowedMethod 是 counter/login/logout 需要的唯一方法。
-变量：response 由 createSessionFailureResponse() 创建。
-实现逻辑：生成 405 后写入普通 Allow header，并返回结果。
+参数：request 是当前请求；allowedMethod 是 counter/login/logout 的基础方法。
+变量：response 由 createSessionFailureResponse() 创建；allowValue 保存最终 header。
+实现逻辑：GET 路由同时声明 HEAD；POST 路由只声明 POST，然后返回 405。
 */
 static Response createSessionMethodNotAllowed(
     const Request &request,
     const std::string &allowedMethod)
 {
     Response response = createSessionFailureResponse(request, 405, "");
-    response.setHeader("Allow", allowedMethod);
+    std::string allowValue = allowedMethod;
+    if (allowedMethod == "GET")
+        allowValue = "GET, HEAD";
+    response.setHeader("Allow", allowValue);
     return response;
 }
 
@@ -148,7 +151,7 @@ bool isSessionDemoPath(const std::string &path)
 参数：request 由 RequestParser 完整解析；sessionStore 是服务器级共享对象。
 变量：cookieHeader 来自请求；result 保存示例输出；userName/loginStatus 用于 login body 解析。
 实现逻辑：
-    1. counter 只接受 GET，调用 buildCounterExample()。
+    1. counter 接受 GET 和 HEAD，二者调用同一表示生成逻辑；HEAD 最终不发送 body。
     2. login 只接受 POST，解析 text/plain 或 urlencoded 用户名，再调用 buildLoginExample()。
     3. logout 只接受 POST，调用 buildLogoutExample()。
     4. SessionDemo 返回 false 时生成 500；成功时统一复制到 Response。
@@ -162,12 +165,16 @@ Response buildSessionDemoResponse(const Request &request,
 
     if (request.getPath() == SESSION_COUNTER_PATH)
     {
-        if (request.getMethod() != "GET")
+        if (request.getMethod() != "GET"
+            && request.getMethod() != "HEAD")
             return createSessionMethodNotAllowed(request, "GET");
         if (!SessionDemo::buildCounterExample(cookieHeader,
             sessionStore, 0, result))
             return createSessionFailureResponse(request, 500, "");
-        return applySessionDemoResult(request, result);
+        Response response = applySessionDemoResult(request, result);
+        if (request.getMethod() == "HEAD")
+            response.clearBodyOnly();
+        return response;
     }
 
     if (request.getPath() == SESSION_LOGIN_PATH)

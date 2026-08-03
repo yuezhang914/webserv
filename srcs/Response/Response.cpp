@@ -8,7 +8,6 @@
 用途：取得 Response 类、HeaderMap 和成员函数声明。
 */
 #include "Response.hpp"
-#include <iostream>
 
 /*
 包含：Request.hpp
@@ -186,6 +185,19 @@ void Response::clearBody()
 }
 
 /*
+函数：Response::clearBodyOnly
+用途：清空内部响应体，但保留已经计算好的 Content-Length。
+参数来源：无参数；仅由 HEAD 最终响应处理调用。
+变量说明：无局部变量。
+实现逻辑：只清空 _body，不调用 updateContentLength()，因此发送给客户端的 headers 与对应 GET 保持一致，而实际消息体为空。
+注意事项：普通响应需要同步长度时必须调用 clearBody()。
+*/
+void Response::clearBodyOnly()
+{
+    _body.clear();
+}
+
+/*
 函数：Response::setCloseConnection
 用途：修改发送完成后的连接策略，并同步 Connection header。
 参数来源：closeConnection 来自 ServerManager 策略、Request 的 Connection token 或 CGI 适配结果。
@@ -213,12 +225,6 @@ void Response::setCloseConnection(bool closeConnection)
 */
 std::string Response::responseToString() const
 {
-    // 💡 调试打印：直接对比发送瞬间 Header 里的值 vs Body 的真实 size
-    HeaderMap::const_iterator clIt = _headers.find("Content-Length");
-    std::string clVal = (clIt != _headers.end()) ? clIt->second : "N/A";
-    std::cout << "DEBUG: [Header Content-Length] = " << clVal 
-              << " | [Actual _body.size()] = " << _body.size() << std::endl;
-
     std::ostringstream output;
     output << _version << " " << _statusCode << " "
            << _statusMessage << "\r\n";
@@ -234,4 +240,3 @@ std::string Response::responseToString() const
                      static_cast<std::streamsize>(_body.size()));
     return output.str();
 }
-

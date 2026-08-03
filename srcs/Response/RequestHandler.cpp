@@ -1,11 +1,11 @@
 /*
 文件：srcs/Response/RequestHandler.cpp
-用途：实现普通静态文件 GET，以及 method 字符串到内部动作的映射和 allow_methods 检查。
+用途：实现普通静态文件 GET/HEAD 共用处理，以及 method 字符串到内部动作的映射和 allow_methods 检查。
 拆分说明：目录、上传和删除处理分别移动到独立实现文件；公开 RequestHandler.hpp 接口保持不变。
 */
 /*
 包含：RequestHandler.hpp
-用途：取得 GET/POST/DELETE 公开入口和 RequestAction 映射声明。
+用途：取得 GET/HEAD/POST/DELETE 公开入口和 RequestAction 映射声明。
 */
 #include "RequestHandler.hpp"
 
@@ -122,23 +122,23 @@ Response handleGet(const Request &request, EffectiveRoute &route)
 用途：把 Request.getMethod() 字符串映射为 Response 模块内部 enum。
 参数来源：method 来自 buildResponse() 的 Request。
 变量说明：无局部变量。
-实现逻辑：GET/POST/DELETE 分别返回对应动作，其他合法 token 返回 ACTION_UNSUPPORTED。
+实现逻辑：GET/HEAD/POST/DELETE 分别返回对应动作，其他合法 token 返回 ACTION_UNSUPPORTED。
 */
 RequestAction requestActionFromMethod(const std::string &method)
 {
     if (method == "GET") return ACTION_GET;
+    if (method == "HEAD") return ACTION_HEAD;
     if (method == "POST") return ACTION_POST;
     if (method == "DELETE") return ACTION_DELETE;
-    if (method == "HEAD") return ACTION_HEAD; // 👈 加上这一行
     return ACTION_UNSUPPORTED;
 }
 
 /*
 函数：isMethodAllowed
-用途：检查已经实现的动作是否出现在 EffectiveRoute 最终 allow_methods 中。
+用途：检查已经实现的动作是否被 EffectiveRoute 最终 allow_methods 允许。
 参数来源：action 来自 requestActionFromMethod()；allowMethods 来自 server/location 合并。
 变量说明：无局部变量。
-实现逻辑：按动作查找对应字符串；未知动作返回 false。
+实现逻辑：GET/POST/DELETE 查找同名配置；HEAD 继承 GET 权限，因为 HEAD 使用 GET 的表示元数据且配置语法无需额外声明 HEAD；未知动作返回 false。
 */
 bool isMethodAllowed(RequestAction action,
                      const std::set<std::string> &allowMethods)
@@ -150,7 +150,6 @@ bool isMethodAllowed(RequestAction action,
     if (action == ACTION_DELETE)
         return allowMethods.find("DELETE") != allowMethods.end();
     if (action == ACTION_HEAD)
-        // 💡 严格遵循配置：只有当配置里写了 HEAD（或 limit_except / allow_methods 包含 HEAD）时才允许！
-        return allowMethods.find("HEAD") != allowMethods.end();
+        return allowMethods.find("GET") != allowMethods.end();
     return false;
 }

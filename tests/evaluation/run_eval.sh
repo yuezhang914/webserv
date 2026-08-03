@@ -22,7 +22,7 @@ RUN_BUILD=1
 RUN_MODULES=1
 RUN_STRESS=0
 KEEP_RUNTIME=0
-HEAD_EXPECTED_STATUS="${HEAD_EXPECTED_STATUS:-501}"
+HEAD_EXPECTED_STATUS="${HEAD_EXPECTED_STATUS:-200}"
 CGI_ERROR_EXPECTED_STATUS="${CGI_ERROR_EXPECTED_STATUS:-502}"
 HOST="${EVAL_HOST:-127.0.0.1}"
 PORT="${EVAL_PORT:-18080}"
@@ -41,15 +41,15 @@ Options:
   --stress                Run full tests and Siege / fallback stress test.
   --no-build              Do not run make fclean && make.
   --skip-modules          Do not run tests/module_tests scripts.
-  --head-status CODE      Expected HEAD status. Use 501 when HEAD is unimplemented,
-                          or 405 only for a deliberate project policy.
+  --head-status CODE      Expected HEAD status. Use 200 for implemented HEAD,
+                          501 when unimplemented, or 405 for a deliberate policy.
   --keep                  Keep generated runtime files and logs.
   --help                  Show this help.
 
 Environment overrides:
   EVAL_HOST=127.0.0.1
   EVAL_PORT=18080
-  HEAD_EXPECTED_STATUS=501
+  HEAD_EXPECTED_STATUS=200
   CGI_ERROR_EXPECTED_STATUS=502
 EOF
 }
@@ -97,9 +97,9 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$HEAD_EXPECTED_STATUS" in
-    405|501) ;;
+    200|405|501) ;;
     *)
-        echo "[FATAL] HEAD status must be 405 or 501."
+        echo "[FATAL] HEAD status must be 200, 405 or 501."
         exit 2
         ;;
 esac
@@ -868,10 +868,10 @@ run_core_http_tests()
         -H 'Content-Type: text/plain' --data-binary 'x')"
     assert_status "$status" 405 "POST rejected by GET-only route"
     allow="$(header_value "$headers" "Allow")"
-    if [ "$allow" = "GET" ]; then
-        pass "405 Allow header is GET"
+    if [ "$allow" = "GET, HEAD" ]; then
+        pass "405 Allow header includes GET and implicit HEAD"
     else
-        fail "405 Allow header: expected GET, got [$allow]"
+        fail "405 Allow header: expected GET, HEAD, got [$allow]"
     fi
     if [ ! -e "$SITE_ROOT/readonly/forbidden.txt" ]; then
         pass "Rejected POST did not create a file"
