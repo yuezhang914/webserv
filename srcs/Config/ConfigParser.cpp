@@ -175,7 +175,7 @@ std::vector<ConfigToken> Config::tokenizeConfig(const std::string &content) cons
 
 /*
 函数：Config::validateServerNameIsNew
-用途：在一个 server block 成功关闭时，登记它的 server_name 并检查跨 server 重复。
+用途：在一个 server block 成功关闭时，按端口登记 server_name 并检查名称重复。
 参数来源：parseServerBlock 遇到关闭 server 的 } 时传入当前 server 和 all_server_names。
 变量解释：
     - server：刚解析完成并准备关闭的 ServerConfig，里面的 server_names 已经收集完整。
@@ -186,31 +186,31 @@ std::vector<ConfigToken> Config::tokenizeConfig(const std::string &content) cons
     1. 遍历当前 server.server_names。
     2. 如果名字已经存在于 all_server_names，说明不同 server 使用了重复 server_name，返回 ERROR。
     3. 否则把名字插入 all_server_names。
-为什么在 server 关闭时做：只有 server block 全部解析完后，它的 server_name 才是完整的。
+为什么在 server 关闭时做：只有 server block 全部解析完后，它的 server_name 才是完整的。监听端点是否冲突由 Config::serversHaveUniqueListenPairs() 在全部解析结束后统一检查。
 */
 
-// 🚀 注意：我们将传入的账本升级为 map<端口, set<域名>> 复合物理索引网关
+// 按端口保存已出现的 server_name，作为解析阶段的重复名称防御。
 bool Config::validateServerNameIsNew(ServerConfig &server, std::map<int, std::set<std::string> > &all_server_names) const
 {
     size_t index = 0;
-    int current_port = server.port; // 💡 动态提取当前服务器实例所监听的特定物理端口
+    int current_port = server.port;
 
-    // 提取或创建属于当前特定端口的独立域名防伪子沙盒（局部 set 引用）
+    // 取得当前端口已经登记的 server_name 集合。
     std::set<std::string> &port_scoped_names = all_server_names[current_port];
 
     while (index < server.server_names.size())
     {
         const std::string &name = server.server_names[index];
 
-        // 🔒 像素级互锁：只有在【同一个物理端口内】发生了域名重叠，才是工业级违规！
+        // 同一端口内已经出现相同名称时拒绝配置。
         if (port_scoped_names.find(name) != port_scoped_names.end())
         {
             std::cerr << "Error: Duplicate server_name \"" << name
-                      << "\" detected specifically on port " << current_port << std::endl;
+                      << "\" on port " << current_port << std::endl;
             return ERROR;
         }
 
-        // 安全通关后，仅将其织入属于当前端口的局部防伪结界中
+        // 名称合法，登记到当前端口的集合。
         port_scoped_names.insert(name);
         index++;
     }

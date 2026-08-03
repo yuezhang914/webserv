@@ -608,14 +608,14 @@ static void testGetAndRouting(const ServerConfig &server)
 
 /*
 函数：testHead
-用途：验证当前策略下 HEAD 被识别为合法方法，但统一返回 405，并且任何 HEAD 响应都不序列化 body。
+用途：验证 HEAD 被识别为合法方法，但由于服务器未实现该方法而统一返回 501，并且任何 HEAD 响应都不序列化 body。
 参数来源：server 来自真实 Config；请求由 parseRequest() 构造。
 变量说明：request/response 复用；raw/split 检查 header 与 body 的序列化边界。
 实现逻辑：
-    1. 普通资源 HEAD 返回 405，并按当前路由生成 Allow。
-    2. 只读 location 的 HEAD 返回 405 Allow: GET。
+    1. 普通资源 HEAD 返回 501，不生成 405 专用的 Allow header。
+    2. 只读 location 的 HEAD 仍返回 501，因为 HEAD 在服务器层面未实现。
     3. 重定向仍优先返回 301，但因为请求方法是 HEAD，不发送重定向 HTML body。
-    4. PATCH 继续返回 501，证明 HEAD 特判没有误伤其他未实现方法。
+    4. PATCH 继续返回 501，确认所有未实现方法采用一致状态。
 */
 static void testHead(const ServerConfig &server)
 {
@@ -627,9 +627,9 @@ static void testHead(const ServerConfig &server)
     check(parseRequest("HEAD", "/ping.html", "", "", server, request),
         "解析普通 HEAD 请求");
     response = buildReadyResponse(request);
-    check(response.getStatusCode() == 405
-        && headerEquals(response, "Allow", "GET, POST, DELETE"),
-        "普通 HEAD 返回 405 和 server Allow");
+    check(response.getStatusCode() == 501
+        && headerMissing(response, "Allow"),
+        "未实现的普通 HEAD 返回 501 且不发送 Allow");
     expectedLength << response.getBody().size();
     check(!response.getBody().empty()
         && headerEquals(response, "Content-Length",
@@ -638,14 +638,14 @@ static void testHead(const ServerConfig &server)
     std::string raw = response.responseToString();
     size_t split = raw.find("\r\n\r\n");
     check(split != std::string::npos && raw.size() == split + 4,
-        "普通 HEAD 的 405 响应不序列化 body");
+        "普通 HEAD 的 501 响应不序列化 body");
 
     check(parseRequest("HEAD", "/readonly/file.txt", "", "",
         server, request), "解析只读 location HEAD");
     response = buildReadyResponse(request);
-    check(response.getStatusCode() == 405
-        && headerEquals(response, "Allow", "GET"),
-        "HEAD 使用匹配 location 的 Allow");
+    check(response.getStatusCode() == 501
+        && headerMissing(response, "Allow"),
+        "未实现的 HEAD 不因 location 方法限制变成 405");
     raw = response.responseToString();
     split = raw.find("\r\n\r\n");
     check(split != std::string::npos && raw.size() == split + 4,
@@ -666,7 +666,7 @@ static void testHead(const ServerConfig &server)
         "解析 HEAD 之外的未实现 method");
     response = buildReadyResponse(request);
     check(response.getStatusCode() == 501,
-        "HEAD 特判不改变其他未实现 method 的 501");
+        "HEAD 与其他未实现 method 统一返回 501");
 }
 
 /*

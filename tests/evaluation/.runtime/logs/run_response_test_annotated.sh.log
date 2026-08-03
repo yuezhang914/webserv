@@ -126,13 +126,13 @@ rawPath=[/ping.html]
 [PASS] 解析普通 HEAD 请求
 ===== extractPathInfo DEBUG =====
 rawPath=[/ping.html]
-[PASS] 普通 HEAD 返回 405 和 server Allow
+[PASS] 未实现的普通 HEAD 返回 501 且不发送 Allow
 [PASS] HEAD 保留对应错误表示的 Content-Length
-[PASS] 普通 HEAD 的 405 响应不序列化 body
+[PASS] 普通 HEAD 的 501 响应不序列化 body
 [PASS] 解析只读 location HEAD
 ===== extractPathInfo DEBUG =====
 rawPath=[/readonly/file.txt]
-[PASS] HEAD 使用匹配 location 的 Allow
+[PASS] 未实现的 HEAD 不因 location 方法限制变成 405
 [PASS] 只读 location HEAD 不序列化 body
 [PASS] 解析重定向 HEAD
 ===== extractPathInfo DEBUG =====
@@ -142,7 +142,7 @@ rawPath=[/old/item]
 [PASS] 解析 HEAD 之外的未实现 method
 ===== extractPathInfo DEBUG =====
 rawPath=[/ping.html]
-[PASS] HEAD 特判不改变其他未实现 method 的 501
+[PASS] HEAD 与其他未实现 method 统一返回 501
 
 ========== POST 上传 ==========
 [PASS] 解析普通 POST

@@ -3,6 +3,17 @@
 配置对象基础工具实现。这个文件负责 Config 构造、析构、字符串 trim/split 等底层辅助逻辑；真正的配置语法解析在 ConfigParser.cpp；server/location 指令含义分别在 ServerConfig.cpp、LocationConfig.cpp。
 */
 #include "Webserv.hpp"
+
+/*
+函数：isWildcardHost
+用途：判断配置中的 host 是否代表所有 IPv4 接口。
+参数来源：serversHaveUniqueListenPairs() 传入 ServerConfig.host。
+实现逻辑：listen 只写端口时保存为 INADDR_ANY；显式 0.0.0.0 也表示通配监听，二者都返回 true。
+*/
+static bool isWildcardHost(const std::string &host)
+{
+    return host == "INADDR_ANY" || host == "0.0.0.0";
+}
 /*
 函数：Config::Config
 用途：启动时读取配置文件并建立内存中的配置对象。
@@ -15,8 +26,9 @@
     1. 先把 error 设为 0，表示暂时没有错误。
     2. 调用 parseFile(path)，读取并解析配置文件，把结果放进 servers。
     3. 如果 parseFile 返回 ERROR，说明文件打不开、语法错误或指令非法，打印错误并设置 error=1。
-    4. 如果解析成功，再调用 serversHaveRoot()，确认每个 server 都有 root。
-    5. 如果缺少 root，也设置 error=1，因为后面无法把 URI 映射到真实文件路径。
+    4. 如果解析成功，调用 serversHaveRoot() 确认每个 server 都有 root。
+    5. 调用 serversHaveUniqueListenPairs()，拒绝重复或会实际冲突的 interface:port。
+    6. 任一整体校验失败都设置 error=1，main 不会创建监听 socket。
 后续影响：main() 会检查 config.error；只有没有错误才会继续 setupSockets() 和 serverLoop()。
 */
 Config::Config(const std::string &path)
@@ -38,6 +50,12 @@ Config::Config(const std::string &path)
         std::cerr << "Error: A server is missing the root directive" << std::endl;
         this->error = 1;
     }
+
+    // 本项目不实现 virtual host。
+    // 因此不同 server 不能共享同一个实际监听端点，
+    // 否则请求会始终落到其中一个 ServerConfig。
+    if (serversHaveUniqueListenPairs() == ERROR)
+        this->error = 1;
 }
 /*
 函数：Config::~Config
@@ -82,6 +100,44 @@ bool Config::serversHaveRoot() const
     {
         if (it->has_root == false)
             return ERROR;
+    }
+    return SUCCESS;
+}
+
+/*
+函数：Config::serversHaveUniqueListenPairs
+用途：拒绝多个 server 共享同一个实际监听端点。
+变量解释：i/j 两两比较 servers；left/right 是当前两个配置。
+实现逻辑：
+    1. 端口不同不会冲突。
+    2. 端口相同且 host 相同，属于重复 interface:port。
+    3. 端口相同且任一 host 是通配地址，也会占用另一端点。
+    4. 发现冲突输出两个端点并返回 ERROR；全部通过返回 SUCCESS。
+为什么需要：本项目没有实现 virtual host，不能在共享监听 socket 后根据 Host header 选择 ServerConfig。
+*/
+bool Config::serversHaveUniqueListenPairs() const
+{
+    size_t i = 0;
+    while (i < servers.size())
+    {
+        size_t j = i + 1;
+        while (j < servers.size())
+        {
+            const ServerConfig &left = servers[i];
+            const ServerConfig &right = servers[j];
+            if (left.port == right.port
+                && (left.host == right.host
+                    || isWildcardHost(left.host)
+                    || isWildcardHost(right.host)))
+            {
+                std::cerr << "Error: Conflicting listen endpoints: "
+                          << left.host << ":" << left.port << " and "
+                          << right.host << ":" << right.port << std::endl;
+                return ERROR;
+            }
+            ++j;
+        }
+        ++i;
     }
     return SUCCESS;
 }
