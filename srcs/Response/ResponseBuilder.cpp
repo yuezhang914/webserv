@@ -293,6 +293,11 @@ Response buildResponse(const Request &request,
     {
         response.createResponse(405, "", route.server->error_pages);
         response.setHeader("Allow", buildAllowHeader(route.allow_methods));
+        //💡 加上这句：如果刚好是一个被禁止的 HEAD 请求发过来触发了 405，必须剥离 405 HTML Body！
+        if (request.getMethod() == "HEAD")
+        {
+            response.clearBodyOnly();
+        }
         return response;
     }
 
