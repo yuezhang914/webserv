@@ -277,12 +277,12 @@ Response buildResponse(const Request &request,
         return response;
     }
 
-    if (request.getMethod() == "HEAD")
-    {
-        response.createResponse(405, "", route.server->error_pages);
-        response.setHeader("Allow", buildAllowHeader(route.allow_methods));
-        return response;
-    }
+    // if (request.getMethod() == "HEAD")
+    // {
+    //     response.createResponse(405, "", route.server->error_pages);
+    //     response.setHeader("Allow", buildAllowHeader(route.allow_methods));
+    //     return response;
+    // }
 
     RequestAction action = requestActionFromMethod(request.getMethod());
     if (action == ACTION_UNSUPPORTED)
