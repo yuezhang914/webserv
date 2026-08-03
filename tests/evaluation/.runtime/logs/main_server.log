@@ -943,10 +943,6 @@ rawPath=[/cgi/missing.py]
 ===== extractPathInfo DEBUG =====
 rawPath=[/cgi/bad.py]
 [DEBUG CGI Path] targetPath = /Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/bad.py
-[ServerManager] FD 5 successfully registered to poll tree with events: 1
-[⚡ WebServ Core] Client 4 successfully split into CGI pipeline, client read paused.
-[Radar] --- TICK END for FD 4 ---
-
 ========== MY CGI CODE ==========
 DOCUMENT_ROOT=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site
 GATEWAY_INTERFACE=CGI/1.1
@@ -988,6 +984,10 @@ ENV[13]=SCRIPT_URL=/cgi/bad.py
 ENV[14]=SERVER_NAME=localhost
 ENV[15]=SERVER_PORT=8080
 ENV[16]=SERVER_PROTOCOL=HTTP/1.1
+[ServerManager] FD 5 successfully registered to poll tree with events: 1
+[⚡ WebServ Core] Client 4 successfully split into CGI pipeline, client read paused.
+[Radar] --- TICK END for FD 4 ---
+
 Traceback (most recent call last):
   File "/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/bad.py", line 2, in <module>
     raise RuntimeError("intentional CGI failure")
@@ -1067,7 +1067,6 @@ ENV[17]=SERVER_PORT=8080
 ENV[18]=SERVER_PROTOCOL=HTTP/1.1
 [Radar] -> Routing CGI Read FD 5 to handleCgiRead (POLLIN/POLLHUP)
 [Radar] -> Routing CGI Read FD 5 to handleCgiRead (POLLIN/POLLHUP)
-[Radar] -> Routing CGI Read FD 5 to handleCgiRead (POLLIN/POLLHUP)
 cleanup readFd = 5
 cleanup writeFd = 8
 ========== RAW CGI OUTPUT ==========
@@ -1086,6 +1085,87 @@ BODY=SHELL_BODY
 [Radar] -> Routing Client Socket FD 4 to closeConnection (ERR/HUP)
 [ClientSocket] RAII Closing FD: 4
 [ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
+[ServerManager] FD 4 successfully registered to poll tree with events: 1
+[ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)
+[Radar] --- TICK END for FD 3 ---
+
+[Radar] -> Routing Client FD 4 to handleClientRead (POLLIN)
+[ServerManager] Request parsed successfully for FD 4
+===== extractPathInfo DEBUG =====
+rawPath=[/cgi/slow.py]
+[DEBUG CGI Path] targetPath = /Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/slow.py
+[ServerManager] FD 5 successfully registered to poll tree with events: 1
+[⚡ WebServ Core] Client 4 successfully split into CGI pipeline, client read paused.
+[Radar] --- TICK END for FD 4 ---
+
+========== MY CGI CODE ==========
+DOCUMENT_ROOT=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site
+GATEWAY_INTERFACE=CGI/1.1
+HTTP_ACCEPT=*/*
+HTTP_HOST=127.0.0.1:18080
+HTTP_USER_AGENT=curl/8.7.1
+PATH=/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/X11/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/sbin
+PATH_INFO=
+PATH_TRANSLATED=
+QUERY_STRING=
+REQUEST_METHOD=GET
+REQUEST_URI=/cgi/slow.py
+SCRIPT_FILENAME=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/slow.py
+SCRIPT_NAME=/cgi/slow.py
+SCRIPT_URL=/cgi/slow.py
+SERVER_NAME=localhost
+SERVER_PORT=8080
+SERVER_PROTOCOL=HTTP/1.1
+INTERPRETER=[/usr/bin/python3]
+SCRIPT=[slow.py]
+exists interpreter=0
+errno=Invalid argument
+args[0]=/usr/bin/python3
+args[1]=slow.py
+ENV[0]=DOCUMENT_ROOT=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site
+ENV[1]=GATEWAY_INTERFACE=CGI/1.1
+ENV[2]=HTTP_ACCEPT=*/*
+ENV[3]=HTTP_HOST=127.0.0.1:18080
+ENV[4]=HTTP_USER_AGENT=curl/8.7.1
+ENV[5]=PATH=/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/X11/bin:/Users/Knight/.antigravity/antigravity/bin:/Users/Knight/.local/bin:/Users/Knight/Library/Python/3.9/bin:/usr/local/sbin
+ENV[6]=PATH_INFO=
+ENV[7]=PATH_TRANSLATED=
+ENV[8]=QUERY_STRING=
+ENV[9]=REQUEST_METHOD=GET
+ENV[10]=REQUEST_URI=/cgi/slow.py
+ENV[11]=SCRIPT_FILENAME=/Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site/cgi/slow.py
+ENV[12]=SCRIPT_NAME=/cgi/slow.py
+ENV[13]=SCRIPT_URL=/cgi/slow.py
+ENV[14]=SERVER_NAME=localhost
+ENV[15]=SERVER_PORT=8080
+ENV[16]=SERVER_PROTOCOL=HTTP/1.1
+[Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
+[ServerManager] FD 6 successfully registered to poll tree with events: 1
+[ServerManager] Accepted new connection -> Allocated Client FD: 6 (SUCCESSFULLY SET O_NONBLOCK!)
+[Radar] --- TICK END for FD 3 ---
+
+[Radar] -> Routing Client FD 6 to handleClientRead (POLLIN)
+[ServerManager] Request parsed successfully for FD 6
+===== extractPathInfo DEBUG =====
+rawPath=[/hello.txt]
+[Radar] --- TICK END for FD 6 ---
+
+[Radar] -> Routing Client FD 6 to handleClientWrite (POLLOUT)
+[ServerManager] Sent response completely to FD 6. Resetting event to POLLIN.
+[Radar] --- TICK END for FD 6 ---
+
+[Radar] -> Routing Client Socket FD 6 to closeConnection (ERR/HUP)
+[ClientSocket] RAII Closing FD: 6
+[ServerManager] Client FD 6 successfully closed and cleaned up.
+[CgiManager] Timeout Warning: CGI PID 16815 exceeded 10s timeout! Killing...
+cleanup readFd = 5
+[Radar] -> Routing Client FD 4 to handleClientWrite (POLLOUT)
+[ServerManager] Sent response completely to FD 4. Closing connection per policy.
+[ClientSocket] RAII Closing FD: 4
+[ServerManager] Client FD 4 successfully closed and cleaned up.
+[Radar] --- TICK END for FD 4 ---
+
 [Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
 [ServerManager] FD 4 successfully registered to poll tree with events: 1
 [ServerManager] Accepted new connection -> Allocated Client FD: 4 (SUCCESSFULLY SET O_NONBLOCK!)

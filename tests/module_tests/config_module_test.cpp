@@ -412,6 +412,9 @@ static void testValidGrammar(TestRunner &runner)
                 "# comments may contain \"double\" and 'single' quotes\n" + oneServer(""));
     expectValid(runner, "同一个配置可包含多个 server",
                 "server { listen 8001; root a; }\nserver { listen 8002; root b; }\n");
+    expectValid(runner, "相同端口但不同明确接口可以分别监听",
+                "server { listen 127.0.0.1:8003; root a; }\n"
+                "server { listen 127.0.0.2:8003; root b; }\n");
     expectValid(runner, "相同 server_name 在不同端口允许复用",
                 "server { listen 8001; server_name same.test; root a; }\n"
                 "server { listen 8002; server_name same.test; root b; }\n");
@@ -579,6 +582,18 @@ static void testInvalidServerDirectives(TestRunner &runner)
     expectInvalid(runner, "同一端口的不同 server 不能使用相同 server_name",
                   "server { listen 8000; server_name same; root a; }\n"
                   "server { listen 8000; server_name same; root b; }\n");
+    expectInvalid(runner, "相同 interface:port 即使 server_name 不同也必须拒绝",
+                  "server { listen 127.0.0.1:8001; server_name alpha.test; root a; }\n"
+                  "server { listen 127.0.0.1:8001; server_name beta.test; root b; }\n");
+    expectInvalid(runner, "相同 interface:port 未配置 server_name 也必须拒绝",
+                  "server { listen 127.0.0.1:8002; root a; }\n"
+                  "server { listen 127.0.0.1:8002; root b; }\n");
+    expectInvalid(runner, "INADDR_ANY 与 0.0.0.0 的相同端口属于同一监听端点",
+                  "server { listen 8003; root a; }\n"
+                  "server { listen 0.0.0.0:8003; root b; }\n");
+    expectInvalid(runner, "通配接口与具体接口使用相同端口会发生 bind 冲突",
+                  "server { listen 8004; root a; }\n"
+                  "server { listen 127.0.0.1:8004; root b; }\n");
 
     expectInvalid(runner, "server 缺少 root",
                   "server { listen 8080; index index.html; }\n");

@@ -35,9 +35,9 @@ class Config
 private:
     /*
     成员：all_server_names
-    含义：以端口为绝对地理边界、以域名为微观防伪原子的二维联合交叉索引账本（二维端口-域名隔离锁）。
-    来源：parseServerBlock() 在服务器块解析收工、撞见右大括号 "}" 时，会将当前别墅的端口与域名集送审。
-    用法：validateServerNameIsNew() 遍历并检索它，精准绝杀“同端口内域名打架抢夺句柄”的工业级违规配置，同时释放跨端口域名复用的最高虚拟主机（Virtual Hosting）可用性。
+    含义：按端口记录已经出现过的 server_name，用于拒绝同一端口内重复声明的名称。
+    来源：parseServerBlock() 成功关闭一个 server block 时，把该 server 的端口和名称登记进来。
+    用法：validateServerNameIsNew() 在解析阶段做名称重复防御；由于本项目不实现 virtual host，构造完成后还会由 serversHaveUniqueListenPairs() 拒绝重复的监听端点。
     */
     std::map<int, std::set<std::string> > all_server_names;
     /*
@@ -160,6 +160,15 @@ private:
     */
     bool serversHaveRoot() const;
 
+    /*
+    函数：serversHaveUniqueListenPairs
+    输入：无，检查当前 Config.servers 中所有监听端点。
+    输出：监听端点互不冲突返回 SUCCESS；发现冲突返回 ERROR。
+    实现逻辑：两两比较 ServerConfig；端口不同不冲突；端口相同且 host 相同，或者任一 host 是 INADDR_ANY/0.0.0.0 时判定冲突。
+    为什么需要：本项目没有实现按 Host header 选择虚拟主机，因此不能接受两个 server 共享同一个实际监听端点。
+    */
+    bool serversHaveUniqueListenPairs() const;
+
 public:
     /*
     构造函数：Config
@@ -192,7 +201,7 @@ public:
     /*
     成员：error
     含义：配置解析是否失败的标志。
-    来源：构造函数中根据 parseFile() 和 serversHaveRoot() 的结果设置。
+    来源：构造函数中根据 parseFile()、serversHaveRoot() 和 serversHaveUniqueListenPairs() 的结果设置。
     用法：main() 检查 config.error；如果有错误就不进入 setupSockets/serverLoop。
     */
     bool error;
