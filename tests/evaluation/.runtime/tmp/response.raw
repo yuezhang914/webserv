@@ -1,0 +1,12 @@
+HTTP/1.1 200 OK
+Connection: close
+Content-Length: 106
+Content-Type: text/plain
+
+CGI=PYTHON
+METHOD=POST
+QUERY=
+CONTENT_TYPE=text/plain
+CONTENT_LENGTH=
+BODY=Wikipedia
+RELATIVE=RELATIVE_OK

@@ -51,31 +51,33 @@ static bool badFileName(const std::string &name)
     return false;
 }
 
-
 /*
 函数：handleDelete
 用途：删除 route.targetPath 指向的普通文件，并把错误映射为 HTTP 状态。
 参数来源：request/route 来自 buildResponse() DELETE 分支。
-变量说明：file 保存临时状态；targetInfo 判断目标类型。
+变量说明：file 保存临时状态；targetInfo 判断目标是否存在以及是否为普通文件。
 实现逻辑：
-    1. 提取并验证文件名。
-    2. stat 失败按 errno 生成响应。
-    3. 非普通文件返回 403。
-    4. unlink 失败按 errno 映射；成功返回无 body 的 204。
+    1. 保存解析完成的目标路径。
+    2. stat 失败时立即保存 errno，并映射为对应响应。
+    3. 目标存在但不是普通文件时返回 403，禁止删除目录等对象。
+    4. 对普通文件提取并验证最后一个 path segment。
+    5. unlink 失败时保存 errno 并映射；成功返回无 body 的 204。
 */
 Response handleDelete(const Request &request, const EffectiveRoute &route)
 {
     FileOperation file(request);
-    if (file.getFileName(route) == FILE_OPERATION_ERROR)
-        return file.response;
+    struct stat targetInfo;
 
     file.filePath = route.targetPath;
-    struct stat targetInfo;
+
     if (stat(file.filePath.c_str(), &targetInfo) != 0)
     {
-        file.createDeleteResponse(errno, route.server->error_pages);
+        int errorNumber = errno;
+        file.createDeleteResponse(errorNumber,
+            route.server->error_pages);
         return file.response;
     }
+
     if (!S_ISREG(targetInfo.st_mode))
     {
         file.response.createResponse(403,
@@ -83,12 +85,20 @@ Response handleDelete(const Request &request, const EffectiveRoute &route)
             route.server->error_pages);
         return file.response;
     }
+
+    if (file.getFileName(route) == FILE_OPERATION_ERROR)
+        return file.response;
+
     if (unlink(file.filePath.c_str()) != 0)
     {
-        file.createDeleteResponse(errno, route.server->error_pages);
+        int errorNumber = errno;
+        file.createDeleteResponse(errorNumber,
+            route.server->error_pages);
         return file.response;
     }
-    file.response.createResponse(204, "", route.server->error_pages);
+
+    file.response.createResponse(204, "",
+        route.server->error_pages);
     return file.response;
 }
 

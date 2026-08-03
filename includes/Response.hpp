@@ -51,6 +51,7 @@ private:
     HeaderMap _headers;         /* 名称经过 canonicalHeaderName() 统一的响应头。 */
     std::string _body;          /* 按明确长度保存的二进制安全响应体。 */
     bool _closeConnection;      /* 发送本响应后是否关闭客户端连接。 */
+    bool _suppressBody;         /* HEAD 请求只发送响应头，不发送响应体。 */
 
     /*
     函数：statusMessageFor
@@ -229,7 +230,7 @@ public:
     /* 函数：shouldCloseConnection；用途：返回发送后是否关闭连接；参数：无。 */
     bool shouldCloseConnection() const;
 
-    /*}
+    /*
     函数：getHeader
     用途：大小写不敏感读取指定响应头。
     参数：name 是输入；value 是调用方提供的输出变量。
@@ -292,7 +293,16 @@ public:
     */
     void clearBody();
 
+    /*
+    函数：clearBodyOnly
+    用途：清空内部响应体，但保留已经计算好的 Content-Length。
+    参数：无。
+    使用场景：HEAD 先按 GET 生成相同状态和 headers，随后移除实际 body，
+              使目录页等由 Response(bool) 构造的响应也不会发送消息体。
+    注意事项：普通清空必须使用 clearBody()；只有 HEAD 最终化可以调用本函数。
+    */
     void clearBodyOnly();
+
     /*
     函数：setCloseConnection
     用途：设置发送完成后的连接关闭策略。

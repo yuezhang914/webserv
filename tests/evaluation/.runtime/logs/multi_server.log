@@ -1,0 +1,84 @@
+
+====================================================================
+        🏆 WEBSERV CONFIGURATION TOPOLOGY DUMP (资产自检大阅兵)      
+====================================================================
+[📊 全局域名防伪锁状态]
+  ├─ 🔹 监听端口: [18081]
+  │  └─ 🔒 已绑定防伪域名集: { "site-a.local" }
+  ├─ 🔹 监听端口: [18082]
+  │  └─ 🔒 已绑定防伪域名集: { "site-b.local" }
+--------------------------------------------------------------------
+[🏛️ 内存虚拟主机别墅群 (共 2 个 server 块)]
+  🏠 [Server Block #1]
+    ├─ 📡 Listen Port : 18081
+    ├─ 🏷️ Server Names: [ "site-a.local" ]
+    ├─ 📂 Root Path   : /Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site
+    ├─ ⚖️ Max Body Size: 1048576 Bytes
+    └─ 🚪 Locations 小房间 (共 0 个):
+        
+  🏠 [Server Block #2]
+    ├─ 📡 Listen Port : 18082
+    ├─ 🏷️ Server Names: [ "site-b.local" ]
+    ├─ 📂 Root Path   : /Users/Knight/Desktop/42/ghweb/tests/evaluation/.runtime/site_b
+    ├─ ⚖️ Max Body Size: 1048576 Bytes
+    └─ 🚪 Locations 小房间 (共 0 个):
+        
+====================================================================
+
+[ServerManager] WebServ engine pre-loaded with 2 virtual servers.
+[ServerManager] Initializing network sockets...
+[ServerManager] Successfully listening on 127.0.0.1:18081 (FD: 3)
+[ServerManager] Successfully listening on 127.0.0.1:18082 (FD: 4)
+[ServerManager] Main loop started. Entering the matrix...
+[Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
+[ServerManager] FD 5 successfully registered to poll tree with events: 1
+[ServerManager] Accepted new connection -> Allocated Client FD: 5 (SUCCESSFULLY SET O_NONBLOCK!)
+[Radar] --- TICK END for FD 3 ---
+
+[Radar] -> Routing Client Socket FD 5 to closeConnection (ERR/HUP)
+[ClientSocket] RAII Closing FD: 5
+[ServerManager] Client FD 5 successfully closed and cleaned up.
+[Radar] -> Routing Listen FD 4 to acceptNewConnection (POLLIN)
+[ServerManager] FD 5 successfully registered to poll tree with events: 1
+[ServerManager] Accepted new connection -> Allocated Client FD: 5 (SUCCESSFULLY SET O_NONBLOCK!)
+[Radar] --- TICK END for FD 4 ---
+
+[Radar] -> Routing Client Socket FD 5 to closeConnection (ERR/HUP)
+[ClientSocket] RAII Closing FD: 5
+[ServerManager] Client FD 5 successfully closed and cleaned up.
+[Radar] -> Routing Listen FD 3 to acceptNewConnection (POLLIN)
+[ServerManager] FD 5 successfully registered to poll tree with events: 1
+[ServerManager] Accepted new connection -> Allocated Client FD: 5 (SUCCESSFULLY SET O_NONBLOCK!)
+[Radar] --- TICK END for FD 3 ---
+
+[Radar] -> Routing Client FD 5 to handleClientRead (POLLIN)
+[ServerManager] Request parsed successfully for FD 5
+===== extractPathInfo DEBUG =====
+rawPath=[/]
+[Radar] --- TICK END for FD 5 ---
+
+[Radar] -> Routing Client FD 5 to handleClientWrite (POLLOUT)
+[ServerManager] Sent response completely to FD 5. Resetting event to POLLIN.
+[Radar] --- TICK END for FD 5 ---
+
+[Radar] -> Routing Client Socket FD 5 to closeConnection (ERR/HUP)
+[ClientSocket] RAII Closing FD: 5
+[ServerManager] Client FD 5 successfully closed and cleaned up.
+[Radar] -> Routing Listen FD 4 to acceptNewConnection (POLLIN)
+[ServerManager] FD 5 successfully registered to poll tree with events: 1
+[ServerManager] Accepted new connection -> Allocated Client FD: 5 (SUCCESSFULLY SET O_NONBLOCK!)
+[Radar] --- TICK END for FD 4 ---
+
+[Radar] -> Routing Client FD 5 to handleClientRead (POLLIN)
+[ServerManager] Request parsed successfully for FD 5
+===== extractPathInfo DEBUG =====
+rawPath=[/]
+[Radar] --- TICK END for FD 5 ---
+
+[Radar] -> Routing Client FD 5 to handleClientWrite (POLLOUT)
+[ServerManager] Sent response completely to FD 5. Resetting event to POLLIN.
+[Radar] --- TICK END for FD 5 ---
+
+[Radar] -> Routing Client Socket FD 5 to closeConnection (ERR/HUP)
+[ClientSocket] RAII Closing FD: 5
+[ServerManager] Client FD 5 successfully closed and cleaned up.

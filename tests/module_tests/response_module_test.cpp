@@ -290,6 +290,7 @@ static bool writeConfigFile()
     config += "upload_path /upload/;\n";
     config += "autoindex off;\n";
     config += "location /readonly/ { allow_methods GET; }\n";
+    config += "location /post-only/ { allow_methods POST; }\n";
     config += "location /old/ { return 301 /new/; }\n";
     config += "location /not-modified/ { return 304 /cached/; }\n";
     config += "location /list/ { autoindex on; }\n";
@@ -325,6 +326,8 @@ static void prepareFixtureFiles()
         "创建 index.html");
     check(writeFile(ROOT + "/ping.html", "pong\n"),
         "创建静态文件");
+    check(writeFile(ROOT + "/readonly/file.txt", "readonly\n"),
+        "创建只读 location 文件");
     check(writeFile(ROOT + "/hello world.txt", "space"),
         "创建 percent-decoding 目标文件");
     check(writeFile(ROOT + "/style.css", "body{}"),
@@ -582,14 +585,14 @@ static void testGetAndRouting(const ServerConfig &server)
         "解析只读 location POST");
     response = buildReadyResponse(request);
     check(response.getStatusCode() == 405
-        && headerEquals(response, "Allow", "GET"),
-        "405 返回 Allow");
+        && headerEquals(response, "Allow", "GET, HEAD"),
+        "405 返回包含隐式 HEAD 的 Allow");
 
     check(parseRequest("PATCH", "/ping.html", "", "", server, request),
         "解析未实现 method");
     response = buildReadyResponse(request);
     check(response.getStatusCode() == 501,
-        "合法但未实现 method 返回 501");
+        "其他合法但未实现 method 返回 501");
 
     check(parseRequest("GET", "/missing.txt", "", "", server, request),
         "解析缺失资源");
@@ -604,6 +607,104 @@ static void testGetAndRouting(const ServerConfig &server)
     response = buildReadyResponse(request);
     check(response.shouldCloseConnection(),
         "Connection 列表包含 close 时关闭");
+}
+
+/*
+函数：testHead
+用途：验证 HEAD 完整复用 GET 的状态和表示 headers，同时任何场景都不序列化消息体。
+参数来源：server 来自真实 Config；请求由 parseRequest() 构造。
+变量说明：request/response 复用；raw/split 检查 header 与 body 的序列化边界。
+实现逻辑：
+    1. 普通静态文件与 GET-only location 的 HEAD 返回 200，并保留对应 Content-Type/Content-Length。
+    2. 目录 index 的 HEAD 返回与 GET 相同的 200 和长度，验证目录响应最终也清空 body。
+    3. 缺失资源返回 404，POST-only location 返回 405 Allow: POST。
+    4. 重定向仍优先返回 301；PATCH 继续返回 501。
+*/
+static void testHead(const ServerConfig &server)
+{
+    beginGroup("HEAD 方法");
+    Request request;
+    Response response;
+    std::string raw;
+    size_t split;
+
+    check(parseRequest("HEAD", "/ping.html", "", "", server, request),
+        "解析普通 HEAD 请求");
+    response = buildReadyResponse(request);
+    check(response.getStatusCode() == 200
+        && headerEquals(response, "Content-Type", "text/html")
+        && headerEquals(response, "Content-Length", "5"),
+        "普通 HEAD 返回对应 GET 的状态和 headers");
+    check(response.getBody().empty(),
+        "普通 HEAD 最终不保留实际 body");
+    raw = response.responseToString();
+    split = raw.find("\r\n\r\n");
+    check(split != std::string::npos && raw.size() == split + 4,
+        "普通 HEAD 不序列化 body");
+
+    check(parseRequest("HEAD", "/readonly/file.txt", "", "",
+        server, request), "解析 GET-only location HEAD");
+    response = buildReadyResponse(request);
+    check(response.getStatusCode() == 200
+        && headerEquals(response, "Content-Type", "text/plain")
+        && headerEquals(response, "Content-Length", "9"),
+        "HEAD 自动继承 GET-only location 权限");
+    raw = response.responseToString();
+    split = raw.find("\r\n\r\n");
+    check(split != std::string::npos && raw.size() == split + 4,
+        "GET-only location HEAD 不序列化 body");
+
+    check(parseRequest("HEAD", "/", "", "", server, request),
+        "解析目录 index HEAD");
+    response = buildReadyResponse(request);
+    check(response.getStatusCode() == 200
+        && headerEquals(response, "Content-Type", "text/html")
+        && headerEquals(response, "Content-Length", "5"),
+        "目录 index HEAD 保留 GET 的长度和类型");
+    raw = response.responseToString();
+    split = raw.find("\r\n\r\n");
+    check(response.getBody().empty()
+        && split != std::string::npos && raw.size() == split + 4,
+        "目录 index HEAD 清空并不序列化 body");
+
+    check(parseRequest("HEAD", "/missing.txt", "", "",
+        server, request), "解析缺失资源 HEAD");
+    response = buildReadyResponse(request);
+    check(response.getStatusCode() == 404
+        && headerEquals(response, "Content-Length", "23"),
+        "缺失资源 HEAD 返回对应 GET 的 404 和错误页长度");
+    raw = response.responseToString();
+    split = raw.find("\r\n\r\n");
+    check(split != std::string::npos && raw.size() == split + 4,
+        "404 HEAD 不序列化错误页 body");
+
+    check(parseRequest("HEAD", "/post-only/file.txt", "", "",
+        server, request), "解析 POST-only location HEAD");
+    response = buildReadyResponse(request);
+    check(response.getStatusCode() == 405
+        && headerEquals(response, "Allow", "POST"),
+        "没有 GET 权限时 HEAD 返回 405 和精确 Allow");
+    raw = response.responseToString();
+    split = raw.find("\r\n\r\n");
+    check(split != std::string::npos && raw.size() == split + 4,
+        "405 HEAD 不序列化错误页 body");
+
+    check(parseRequest("HEAD", "/old/item", "", "", server, request),
+        "解析重定向 HEAD");
+    response = buildReadyResponse(request);
+    check(response.getStatusCode() == 301
+        && headerEquals(response, "Location", "/new/"),
+        "重定向规则在 HEAD 方法处理前生效");
+    raw = response.responseToString();
+    split = raw.find("\r\n\r\n");
+    check(split != std::string::npos && raw.size() == split + 4,
+        "重定向 HEAD 不序列化 body");
+
+    check(parseRequest("PATCH", "/ping.html", "", "", server, request),
+        "解析 HEAD 之外的未实现 method");
+    response = buildReadyResponse(request);
+    check(response.getStatusCode() == 501,
+        "其他未实现 method 继续返回 501");
 }
 
 /*
@@ -623,42 +724,43 @@ static void testPost(const ServerConfig &server)
         "Content-Length: 3\r\nContent-Type: text/plain\r\n",
         "abc", server, request), "解析普通 POST");
     response = buildReadyResponse(request);
-    check(response.getStatusCode() == 200
+    check(response.getStatusCode() == 201
+        && response.getStatusMessage() == "Created"
         && readFile(ROOT + "/upload/new.txt") == "abc",
-        "普通 POST 写入配置 upload_path");
+        "普通 POST 创建上传资源返回 201");
 
     check(parseRequest("POST", "/upload/chunk.txt",
         "Transfer-Encoding: chunked\r\nContent-Type: text/plain\r\n",
         "2\r\nhe\r\n3\r\nllo\r\n0\r\n\r\n", server, request),
         "解析 chunked POST");
     response = buildReadyResponse(request);
-    check(response.getStatusCode() == 200
+    check(response.getStatusCode() == 201
         && readFile(ROOT + "/upload/chunk.txt") == "hello",
-        "chunked 解码 body 写盘");
+        "chunked 解码 body 写盘并返回 201");
 
     check(parseRequest("POST", "/missing-parent/name.txt",
         "Content-Length: 1\r\nContent-Type: text/plain\r\n",
         "x", server, request), "解析 URI 父目录不存在 POST");
     response = buildReadyResponse(request);
-    check(response.getStatusCode() == 200
+    check(response.getStatusCode() == 201
         && readFile(ROOT + "/upload/name.txt") == "x",
-        "POST 不错误依赖 URI 父目录");
+        "POST 不依赖 URI 父目录并返回 201");
 
     check(parseRequest("POST", "/joined/child/joined.txt",
         "Content-Length: 4\r\nContent-Type: text/plain\r\n",
         "join", server, request), "解析相对 upload_path POST");
     response = buildReadyResponse(request);
-    check(response.getStatusCode() == 200
+    check(response.getStatusCode() == 201
         && readFile(ROOT + "/joined_upload/joined.txt") == "join",
-        "joinPaths 正确拼 upload_path");
+        "joinPaths 正确拼 upload_path 并返回 201");
 
     check(parseRequest("POST", "/upload/a..b.txt",
         "Content-Length: 2\r\nContent-Type: text/plain\r\n",
         "ok", server, request), "解析连续点文件名");
     response = buildReadyResponse(request);
-    check(response.getStatusCode() == 200
+    check(response.getStatusCode() == 201
         && readFile(ROOT + "/upload/a..b.txt") == "ok",
-        "文件名内部连续点允许");
+        "文件名内部连续点允许并返回 201");
 
     check(parseRequest("POST", "/upload/multipart.bin",
         "Content-Length: 3\r\n"
@@ -686,9 +788,10 @@ static void testPost(const ServerConfig &server)
         "Content-Length: 3\r\n", "new", server, request),
         "解析同名上传");
     response = buildReadyResponse(request);
-    check(readFile(ROOT + "/upload/same.txt") == "old"
+    check(response.getStatusCode() == 201
+        && readFile(ROOT + "/upload/same.txt") == "old"
         && readFile(ROOT + "/upload/same_1.txt") == "new",
-        "同名上传生成 _1 且不覆盖");
+        "同名上传创建 _1 新资源并返回 201");
 }
 
 /*
@@ -949,8 +1052,8 @@ static void testCgiResponseCompatibility(const ServerConfig &server)
         server, request), "解析 CGI location DELETE");
     response = buildReadyResponse(request);
     check(response.getStatusCode() == 405
-        && headerEquals(response, "Allow", "GET, POST"),
-        "CGI 分发前仍先遵守 location allow_methods");
+        && headerEquals(response, "Allow", "GET, HEAD, POST"),
+        "CGI 分发前仍先遵守含隐式 HEAD 的 allow_methods");
 }
 
 /*
@@ -1121,8 +1224,8 @@ static void testSessionResponseIntegration(const ServerConfig &server)
         "解析错误方法 counter");
     response = buildResponse(request, store);
     check(response.getStatusCode() == 405
-        && headerEquals(response, "Allow", "GET"),
-        "counter 错误方法返回 405 Allow GET");
+        && headerEquals(response, "Allow", "GET, HEAD"),
+        "counter 错误方法返回 405 Allow GET, HEAD");
     check(headerEquals(response, "Cache-Control", "no-store")
         && headerEquals(response, "Pragma", "no-cache"),
         "Session 错误响应同样禁止缓存");
@@ -1219,6 +1322,7 @@ int main()
         const ServerConfig &server = servers[0];
         testResponseClass(server);
         testGetAndRouting(server);
+        testHead(server);
         testPost(server);
         testDelete(server);
         testCgiResponseCompatibility(server);

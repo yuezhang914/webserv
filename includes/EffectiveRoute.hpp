@@ -38,7 +38,7 @@
 
 /*
 枚举：RequestAction
-用途：把 Request::getMethod() 映射为 Response 内部动作，替代旧 GET/POST/DELETE 宏。
+用途：把 Request::getMethod() 映射为 Response 内部 GET/HEAD/POST/DELETE 动作。
 数据来源：requestActionFromMethod() 根据解析后的 method 返回其中一个值。
 */
 enum RequestAction
@@ -47,7 +47,7 @@ enum RequestAction
     ACTION_GET,
     ACTION_POST,
     ACTION_DELETE,
-    ACTION_HEAD // 👈 1. 添加 ACTION_HEAD
+    ACTION_HEAD
 };
 
 /*

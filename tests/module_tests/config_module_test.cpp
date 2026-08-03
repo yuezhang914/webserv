@@ -412,6 +412,9 @@ static void testValidGrammar(TestRunner &runner)
                 "# comments may contain \"double\" and 'single' quotes\n" + oneServer(""));
     expectValid(runner, "同一个配置可包含多个 server",
                 "server { listen 8001; root a; }\nserver { listen 8002; root b; }\n");
+    expectValid(runner, "相同端口但不同明确接口可以分别监听",
+                "server { listen 127.0.0.1:8003; root a; }\n"
+                "server { listen 127.0.0.2:8003; root b; }\n");
     expectValid(runner, "相同 server_name 在不同端口允许复用",
                 "server { listen 8001; server_name same.test; root a; }\n"
                 "server { listen 8002; server_name same.test; root b; }\n");
@@ -579,6 +582,18 @@ static void testInvalidServerDirectives(TestRunner &runner)
     expectInvalid(runner, "同一端口的不同 server 不能使用相同 server_name",
                   "server { listen 8000; server_name same; root a; }\n"
                   "server { listen 8000; server_name same; root b; }\n");
+    expectInvalid(runner, "相同 interface:port 即使 server_name 不同也必须拒绝",
+                  "server { listen 127.0.0.1:8001; server_name alpha.test; root a; }\n"
+                  "server { listen 127.0.0.1:8001; server_name beta.test; root b; }\n");
+    expectInvalid(runner, "相同 interface:port 未配置 server_name 也必须拒绝",
+                  "server { listen 127.0.0.1:8002; root a; }\n"
+                  "server { listen 127.0.0.1:8002; root b; }\n");
+    expectInvalid(runner, "INADDR_ANY 与 0.0.0.0 的相同端口属于同一监听端点",
+                  "server { listen 8003; root a; }\n"
+                  "server { listen 0.0.0.0:8003; root b; }\n");
+    expectInvalid(runner, "通配接口与具体接口使用相同端口会发生 bind 冲突",
+                  "server { listen 8004; root a; }\n"
+                  "server { listen 127.0.0.1:8004; root b; }\n");
 
     expectInvalid(runner, "server 缺少 root",
                   "server { listen 8080; index index.html; }\n");
@@ -755,11 +770,13 @@ static void testInvalidLocationDirectives(TestRunner &runner)
 变量解释：
     - config：包含多个相交 location 的测试配置。
     - server：解析得到的唯一 ServerConfig。
-    - use_location：findMatchingLocation() 的输出标志。
-    - loc：当前 URI 匹配到的 LocationConfig 指针。
+    - loc：findMatchingLocation() 返回的只读 LocationConfig 指针。
 主要检查：
-    普通匹配、最长匹配、忽略 query string、无匹配返回 NULL，
+    普通匹配、最长匹配、路径边界、无匹配返回 NULL，
     以及 location body size 覆盖或继承 server 限制。
+说明：
+    当前 findMatchingLocation() 接收已经规范化且已经与 query 分离的 path，
+    因此测试不再传入 query string，也不再使用旧版 use_location 输出参数。
 */
 static void testRouteUtils(TestRunner &runner)
 {
@@ -779,25 +796,24 @@ static void testRouteUtils(TestRunner &runner)
         return;
 
     const ServerConfig &server = result.servers[0];
-    bool use_location = false;
-    LocationConfig *loc = findMatchingLocation("/upload/file.txt", server.locations, use_location);
-    runner.expect(use_location && loc != NULL && loc->path == "/upload/",
+    const LocationConfig *loc =
+        findMatchingLocation("/upload/file.txt", server.locations);
+    runner.expect(loc != NULL && loc->path == "/upload/",
                   "findMatchingLocation 找到普通前缀");
 
-    use_location = false;
-    loc = findMatchingLocation("/upload/images/a.png", server.locations, use_location);
-    runner.expect(use_location && loc != NULL && loc->path == "/upload/images/",
+    loc = findMatchingLocation(
+        "/upload/images/a.png", server.locations);
+    runner.expect(loc != NULL && loc->path == "/upload/images/",
                   "findMatchingLocation 选择最长前缀");
 
-    use_location = false;
-    loc = findMatchingLocation("/upload/images/a.png?size=small", server.locations, use_location);
-    runner.expect(use_location && loc != NULL && loc->path == "/upload/images/",
-                  "location 匹配忽略 query string");
+    loc = findMatchingLocation(
+        "/upload-other/a", server.locations);
+    runner.expect(loc == NULL,
+                  "location 前缀必须位于真实路径边界");
 
-    use_location = true;
-    loc = findMatchingLocation("/other/a", server.locations, use_location);
-    runner.expect(!use_location && loc == NULL,
-                  "没有匹配 location 时返回 NULL 并清除标志");
+    loc = findMatchingLocation("/other/a", server.locations);
+    runner.expect(loc == NULL,
+                  "没有匹配 location 时返回 NULL");
 
     runner.expect(getEffectiveBodyLimit(&server, "/upload/a") == 20UL * 1024UL,
                   "location 明确覆盖 server body limit");

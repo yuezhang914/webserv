@@ -8,7 +8,6 @@
 用途：取得 Response 类、HeaderMap 和成员函数声明。
 */
 #include "Response.hpp"
-#include <iostream>
 
 /*
 包含：Request.hpp
@@ -29,12 +28,13 @@
 变量说明：成员全部在初始化列表中设置；没有额外局部变量。
 实现逻辑：
     1. 初始化合法状态行和空 headers/body。
-    2. 保存调用方给出的连接策略。
+    2. 保存调用方给出的连接策略，并默认允许发送响应体。
     3. 生成受控 Connection 与 Content-Length headers。
 */
 Response::Response(bool closeConnection)
     : _version("HTTP/1.1"), _statusCode(200), _statusMessage("OK"),
-      _headers(), _body(), _closeConnection(closeConnection)
+      _headers(), _body(), _closeConnection(closeConnection),
+      _suppressBody(false)
 {
     updateConnectionHeader();
     updateContentLength();
@@ -48,11 +48,13 @@ Response::Response(bool closeConnection)
 实现逻辑：
     1. 初始化合法状态、空 headers 和空 body。
     2. 调用 requestWantsClose() 得到初始关闭策略。
-    3. 同步 Connection 和 Content-Length。
+    3. HEAD 请求记录为只发送响应头，其他方法允许发送响应体。
+    4. 同步 Connection 和 Content-Length。
 */
 Response::Response(const Request &request)
     : _version("HTTP/1.1"), _statusCode(200), _statusMessage("OK"),
-      _headers(), _body(), _closeConnection(requestWantsClose(request))
+      _headers(), _body(), _closeConnection(requestWantsClose(request)),
+      _suppressBody(request.getMethod() == "HEAD")
 {
     updateConnectionHeader();
     updateContentLength();
@@ -183,6 +185,19 @@ void Response::clearBody()
 }
 
 /*
+函数：Response::clearBodyOnly
+用途：清空内部响应体，但保留已经计算好的 Content-Length。
+参数来源：无参数；仅由 HEAD 最终响应处理调用。
+变量说明：无局部变量。
+实现逻辑：只清空 _body，不调用 updateContentLength()，因此发送给客户端的 headers 与对应 GET 保持一致，而实际消息体为空。
+注意事项：普通响应需要同步长度时必须调用 clearBody()。
+*/
+void Response::clearBodyOnly()
+{
+    _body.clear();
+}
+
+/*
 函数：Response::setCloseConnection
 用途：修改发送完成后的连接策略，并同步 Connection header。
 参数来源：closeConnection 来自 ServerManager 策略、Request 的 Connection token 或 CGI 适配结果。
@@ -206,16 +221,10 @@ void Response::setCloseConnection(bool closeConnection)
     1. 写入状态行和 CRLF。
     2. 逐个写入规范化 header。
     3. 写入空行结束 header 区域。
-    4. 用 output.write(data,size) 写入二进制 body，避免 NUL 截断。
+    4. 非 HEAD 请求用 output.write(data,size) 写入二进制 body；HEAD 请求在空行后结束。
 */
 std::string Response::responseToString() const
 {
-    // 💡 调试打印：直接对比发送瞬间 Header 里的值 vs Body 的真实 size
-    HeaderMap::const_iterator clIt = _headers.find("Content-Length");
-    std::string clVal = (clIt != _headers.end()) ? clIt->second : "N/A";
-    std::cout << "DEBUG: [Header Content-Length] = " << clVal 
-              << " | [Actual _body.size()] = " << _body.size() << std::endl;
-
     std::ostringstream output;
     output << _version << " " << _statusCode << " "
            << _statusMessage << "\r\n";
@@ -226,7 +235,8 @@ std::string Response::responseToString() const
         ++it;
     }
     output << "\r\n";
-    output.write(_body.data(), static_cast<std::streamsize>(_body.size()));
+    if (!_suppressBody)
+        output.write(_body.data(),
+                     static_cast<std::streamsize>(_body.size()));
     return output.str();
 }
-
