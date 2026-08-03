@@ -11,6 +11,8 @@
 #include "SessionStore.hpp"
 
 #include <fstream>
+#include <limits.h>
+#include <stdlib.h>
 #include <iostream>
 #include <sstream>
 #include <sys/stat.h>
@@ -872,6 +874,10 @@ static void testCgiResponseCompatibility(const ServerConfig &server)
     Request request;
     Response response;
     const std::string expectedScript = ROOT + "/cgi/env.sh";
+    std::string expectedInterpreter = "/bin/sh";
+    char resolvedInterpreter[PATH_MAX];
+    if (realpath(expectedInterpreter.c_str(), resolvedInterpreter) != NULL)
+        expectedInterpreter = resolvedInterpreter;
     std::string cgiOutput;
 
     check(parseRequest("GET", "/cgi/env.sh?name=Tom", "", "",
@@ -1021,8 +1027,9 @@ static void testCgiResponseCompatibility(const ServerConfig &server)
         server, request), "解析由解释器执行的不可执行 CGI 脚本请求");
     response = buildReadyResponse(request);
     check(response.getStatusCode() == 200
-        && headerEquals(response, "X-Internal-CGI-Interpreter", "/bin/sh"),
-        "配置解释器时脚本只需可读，并向 ServerManager 交付解释器路径");
+        && headerEquals(response, "X-Internal-CGI-Interpreter",
+            expectedInterpreter),
+        "配置解释器时脚本只需可读，并向 ServerManager 交付可执行解释器路径");
 
     ServerConfig directServer = server;
     size_t locationIndex = 0;

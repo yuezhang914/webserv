@@ -227,3 +227,36 @@ EVAL_PORT=19080 bash tests/evaluation/run_eval.sh --full
 ```bash
 rm -rf tests/evaluation/.runtime
 ```
+清理评测使用的全部端口
+这套脚本通常会用到：
+18080
+18081
+18082
+可以一次检查：
+```
+for port in 18080 18081 18082
+do
+    echo "=== PORT $port ==="
+    lsof -nP -iTCP:$port -sTCP:LISTEN
+done
+清理旧的 Webserv：
+for port in 18080 18081 18082
+do
+    pid=$(lsof -tiTCP:$port -sTCP:LISTEN)
+
+    if [ -n "$pid" ]; then
+        echo "Stopping PID $pid on port $port"
+        kill -INT $pid
+    fi
+done
+
+sleep 1
+```
+再检查：
+```
+for port in 18080 18081 18082
+do
+    lsof -nP -iTCP:$port -sTCP:LISTEN
+done
+```
+应该全部没有输出。
