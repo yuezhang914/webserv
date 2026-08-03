@@ -17,31 +17,63 @@
     4. 数字合法但计算结果超过 body_limit 时返回 REQUEST_BODY_TOO_LARGE。
 */
 int RequestParser::parse_content_length(const std::string& value, unsigned long body_limit, size_t& content_length) {
-	if (value.empty())
-		return REQUEST_ERROR;
-	size_t i = 0;
-	while (i < value.size()) {
-		if (value[i] < '0' || value[i] > '9')
-			return REQUEST_ERROR;
-		++i;
-	}
-	unsigned long result = 0;
-	unsigned long max_ulong = static_cast<unsigned long>(-1);
-	i = 0;
-	while (i < value.size()) {
-		unsigned long digit = static_cast<unsigned long>(value[i] - '0');
-		if (result > (max_ulong - digit) / 10)
-			return REQUEST_BODY_TOO_LARGE;
-		result = result * 10 + digit;
-		if (result > body_limit)
-			return REQUEST_BODY_TOO_LARGE;
-		++i;
-	}
-	const size_t max_size = static_cast<size_t>(-1);
-	if (result > static_cast<unsigned long>(max_size))
-		return REQUEST_BODY_TOO_LARGE;
-	content_length = static_cast<size_t>(result);
-	return REQUEST_OK;
+    if (value.empty())
+        return REQUEST_ERROR;
+
+    // 1. 修剪首尾空格/Tab (OWS)
+    size_t start = 0;
+    while (start < value.size() && (value[start] == ' ' || value[start] == '\t'))
+        ++start;
+
+    size_t end = value.size();
+    while (end > start && (value[end - 1] == ' ' || value[end - 1] == '\t'))
+        --end;
+
+    // 如果全是空格，非法
+    if (start >= end)
+        return REQUEST_ERROR;
+
+    // 2. 检查内部字符是否全为数字（不允许符号如 '+' '-' 或中间空格）
+    for (size_t i = start; i < end; ++i) {
+        if (value[i] < '0' || value[i] > '9')
+            return REQUEST_ERROR;
+    }
+
+    // 3. 防范过长数字串（超过 20 位 `unsigned long` 必溢出）
+    if (end - start > 20) {
+        // 如果前面都是 '0' 可以过滤，或者直接判定为 Body Too Large / Error
+        // 简单处理：非零过长字符串直接报 BODY_TOO_LARGE
+        size_t non_zero = start;
+        while (non_zero < end && value[non_zero] == '0')
+            ++non_zero;
+        if (end - non_zero > 20)
+            return REQUEST_BODY_TOO_LARGE;
+    }
+
+    // 4. 解析数字与溢出判断
+    unsigned long result = 0;
+    unsigned long max_ulong = static_cast<unsigned long>(-1);
+
+    for (size_t i = start; i < end; ++i) {
+        unsigned long digit = static_cast<unsigned long>(value[i] - '0');
+        
+        // 检查乘法/加法溢出
+        if (result > (max_ulong - digit) / 10)
+            return REQUEST_BODY_TOO_LARGE;
+
+        result = result * 10 + digit;
+
+        // 检查配置的 body_limit
+        if (result > body_limit)
+            return REQUEST_BODY_TOO_LARGE;
+    }
+
+    const size_t max_size = static_cast<size_t>(-1);
+    if (result > static_cast<unsigned long>(max_size))
+        return REQUEST_BODY_TOO_LARGE;
+
+    content_length = static_cast<size_t>(result);
+    return REQUEST_OK;
 }
 
 /*

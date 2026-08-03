@@ -129,6 +129,7 @@ RequestAction requestActionFromMethod(const std::string &method)
     if (method == "GET") return ACTION_GET;
     if (method == "POST") return ACTION_POST;
     if (method == "DELETE") return ACTION_DELETE;
+    if (method == "HEAD") return ACTION_HEAD; // 👈 加上这一行
     return ACTION_UNSUPPORTED;
 }
 
@@ -148,5 +149,8 @@ bool isMethodAllowed(RequestAction action,
         return allowMethods.find("POST") != allowMethods.end();
     if (action == ACTION_DELETE)
         return allowMethods.find("DELETE") != allowMethods.end();
+    if (action == ACTION_HEAD)
+        // 💡 严格遵循配置：只有当配置里写了 HEAD（或 limit_except / allow_methods 包含 HEAD）时才允许！
+        return allowMethods.find("HEAD") != allowMethods.end();
     return false;
 }

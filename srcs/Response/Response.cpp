@@ -8,6 +8,7 @@
 用途：取得 Response 类、HeaderMap 和成员函数声明。
 */
 #include "Response.hpp"
+#include <iostream>
 
 /*
 包含：Request.hpp
@@ -209,6 +210,12 @@ void Response::setCloseConnection(bool closeConnection)
 */
 std::string Response::responseToString() const
 {
+    // 💡 调试打印：直接对比发送瞬间 Header 里的值 vs Body 的真实 size
+    HeaderMap::const_iterator clIt = _headers.find("Content-Length");
+    std::string clVal = (clIt != _headers.end()) ? clIt->second : "N/A";
+    std::cout << "DEBUG: [Header Content-Length] = " << clVal 
+              << " | [Actual _body.size()] = " << _body.size() << std::endl;
+
     std::ostringstream output;
     output << _version << " " << _statusCode << " "
            << _statusMessage << "\r\n";

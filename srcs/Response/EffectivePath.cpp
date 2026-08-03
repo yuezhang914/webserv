@@ -109,7 +109,8 @@ std::string joinPaths(const std::string &base,
 int EffectiveRoute::isValidPath(RequestAction action)
 {
     isDir = false;
-    if (action != ACTION_GET)
+    // 💡 只要不是 GET 且不是 HEAD，才跳过检查
+    if (action != ACTION_GET && action != ACTION_HEAD)
         return PATH_OK;
 
     struct stat pathInfo;

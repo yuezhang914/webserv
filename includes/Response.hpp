@@ -229,7 +229,7 @@ public:
     /* 函数：shouldCloseConnection；用途：返回发送后是否关闭连接；参数：无。 */
     bool shouldCloseConnection() const;
 
-    /*
+    /*}
     函数：getHeader
     用途：大小写不敏感读取指定响应头。
     参数：name 是输入；value 是调用方提供的输出变量。
@@ -292,6 +292,7 @@ public:
     */
     void clearBody();
 
+    void clearBodyOnly();
     /*
     函数：setCloseConnection
     用途：设置发送完成后的连接关闭策略。
