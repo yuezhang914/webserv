@@ -71,7 +71,7 @@ std::string getMimeType(const std::string &path)
     if (extension == ".gif") return "image/gif";
     if (extension == ".svg") return "image/svg+xml";
     if (extension == ".pdf") return "application/pdf";
-    return "application/octet-stream";
+    return "text/plain";
 }
 
 /*
@@ -150,6 +150,6 @@ bool isMethodAllowed(RequestAction action,
     if (action == ACTION_DELETE)
         return allowMethods.find("DELETE") != allowMethods.end();
     if (action == ACTION_HEAD)
-        return allowMethods.find("GET") != allowMethods.end();
+        return allowMethods.find("HEAD") != allowMethods.end();
     return false;
 }
