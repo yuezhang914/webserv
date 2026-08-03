@@ -94,30 +94,50 @@ bool Response::loadCgiOutput(const std::string &cgiOutput)
         std::string line = headerBlock.substr(cursor, lineEnd - cursor);
         if (!line.empty() && line[line.size() - 1] == '\r')
             line.erase(line.size() - 1);
+        
+        // 💡 修复 1：空行跳过，不直接报错退出
         if (line.empty())
-            return false;
+        {
+            if (lineEnd == headerBlock.size())
+                break;
+            cursor = lineEnd + 1;
+            continue;
+        }
 
         size_t colon = line.find(':');
+        // 💡 修复 2：如果行中没有 ':'（例如 cgi_tester 吐出的环境变量/调试文本），忽略该行并继续！
         if (colon == std::string::npos)
-            return false;
+        {
+            if (lineEnd == headerBlock.size())
+                break;
+            cursor = lineEnd + 1;
+            continue;
+        }
+
         std::string name = line.substr(0, colon);
         std::string value = responseTrimOws(line.substr(colon + 1));
+
+        // 如果 Header 键值包含非法字符，也是选择跳过，而不是直接崩掉整个 CGI
         if (!isValidHeaderName(name) || !isValidHeaderValue(value))
-            return false;
+        {
+            if (lineEnd == headerBlock.size())
+                break;
+            cursor = lineEnd + 1;
+            continue;
+        }
 
         std::string lowerName = toLowerAscii(name);
         if (lowerName == "status")
         {
-            if (hasStatus)
-                return false;
-            std::istringstream statusStream(value);
-            if (!(statusStream >> importedStatus)
-                || importedStatus < 100 || importedStatus > 599)
-                return false;
-            std::string reason;
-            std::getline(statusStream, reason);
-            reason = responseTrimOws(reason);
-            hasStatus = true;
+            if (!hasStatus)
+            {
+                std::istringstream statusStream(value);
+                if ((statusStream >> importedStatus)
+                    && importedStatus >= 100 && importedStatus <= 599)
+                {
+                    hasStatus = true;
+                }
+            }
         }
         else if (lowerName != "content-length"
             && lowerName != "transfer-encoding"

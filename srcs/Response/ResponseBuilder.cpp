@@ -115,6 +115,10 @@ static std::string buildAllowHeader(const std::set<std::string> &allowMethods)
 变量说明：it 遍历后缀到解释器的映射；extension 是当前后缀。
 实现逻辑：没有 CGI 配置时返回 false；逐个比较完整文件后缀；命中后写出解释器并返回 true。
 */
+
+#include <limits.h>
+#include <stdlib.h>
+
 static bool findConfiguredCgiInterpreter(const LocationConfig *location,
                                          const std::string &path,
                                          std::string &interpreter)
@@ -122,14 +126,29 @@ static bool findConfiguredCgiInterpreter(const LocationConfig *location,
     interpreter.clear();
     if (location == NULL || location->cgi_extensions.empty())
         return false;
+
     std::map<std::string, std::string>::const_iterator it =
         location->cgi_extensions.begin();
     while (it != location->cgi_extensions.end())
     {
         const std::string &extension = it->first;
-        if (!extension.empty() && path.size() >= extension.size() && path.compare(path.size() - extension.size(), extension.size(), extension) == 0)
+        if (!extension.empty() && 
+            path.size() >= extension.size() && 
+            path.compare(path.size() - extension.size(), extension.size(), extension) == 0)
         {
-            interpreter = it->second;
+            std::string rawInterpreter = it->second;
+
+            // 💡 将配置的解释器路径直接转为系统绝对路径
+            char absPath[PATH_MAX];
+            if (realpath(rawInterpreter.c_str(), absPath) != NULL)
+            {
+                interpreter = std::string(absPath);
+            }
+            else
+            {
+                // 如果 realpath 转换失败（说明物理文件确实不存在），退回原始路径
+                interpreter = rawInterpreter;
+            }
             return true;
         }
         ++it;
@@ -285,6 +304,11 @@ Response buildResponse(const Request &request,
     {
         response.createResponse(405, "", route.server->error_pages);
         response.setHeader("Allow", buildAllowHeader(route.allow_methods));
+        //💡 加上这句：如果刚好是一个被禁止的 HEAD 请求发过来触发了 405，必须剥离 405 HTML Body！
+        if (request.getMethod() == "HEAD")
+        {
+            response.clearBodyOnly();
+        }
         return response;
     }
 

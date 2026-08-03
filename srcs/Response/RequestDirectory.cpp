@@ -167,7 +167,16 @@ Response handleIndex(const EffectiveRoute &route,
         return createIndexResponse(fd, indexPath, closeConnection,
             route.server->error_pages);
     }
-    return handleAutoIndex(route, requestPath, closeConnection);
+
+    // 💡 修复：循环结束意味着没有找到可用的 index 文件
+    // 只有在显式开启了 autoindex 时才去生成目录列表；否则统一返回 404 Not Found！
+    if (route.autoindex)
+    {
+        return handleAutoIndex(route, requestPath, closeConnection);
+    }
+
+    response.createResponse(404, "", route.server->error_pages);
+    return response;
 }
 
 /*

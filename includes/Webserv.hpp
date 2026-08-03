@@ -48,6 +48,8 @@
 
 #include "Signal.hpp"
 
+#include <limits.h>
+
 // 全局/静态原子标志位
 extern volatile sig_atomic_t g_loop_running;
 // ...
