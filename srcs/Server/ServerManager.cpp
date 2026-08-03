@@ -372,16 +372,33 @@ void ServerManager::dispatchCgiTask(Connection *conn, int clientFd, const Respon
 void ServerManager::processParsedRequest(Connection *conn, int clientFd)
 {
     static SessionStore sessionStore;
+
+    // 💡 1. 打印请求基本信息与实际 Body 长度
+    std::cout << "\n================ [DEBUG REQUEST] ================" << std::endl;
+    std::cout << "[REQ] Method: " << conn->request.getMethod() 
+              << " | URI: " << conn->request.getPath() 
+              << " | Body Size in Request: " << conn->request.getBody().size() << " bytes" << std::endl;
+
     Response res = buildResponse(conn->request, sessionStore);
+
+    // 💡 2. 提取 Content-Length 头部
+    std::string contentLength;
+    res.getHeader("Content-Length", contentLength);
+
+    std::cout << "[RES] Status: " << res.getStatusCode() 
+              << " | Header Content-Length: " << contentLength << std::endl;
 
     std::string script_path;
     if (res.getHeader("X-Internal-CGI-Path", script_path))
     {
-        std::cout << "[DEBUG CGI Path] targetPath = " << script_path << std::endl;
+        std::cout << "[DEBUG CGI Task] Dispatching CGI -> scriptPath = " << script_path << std::endl;
+        std::cout << "=================================================\n" << std::endl;
         this->dispatchCgiTask(conn, clientFd, res);
     }
     else
     {
+        std::cout << "[DEBUG Normal Task] No CGI header, sending direct response." << std::endl;
+        std::cout << "=================================================\n" << std::endl;
         conn->write_buffer = res.responseToString();
         this->setClientEvents(clientFd, POLLOUT);
     }

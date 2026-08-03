@@ -98,16 +98,23 @@ char **CgiHandler::_buildEnvironment() const
     envMap["SERVER_PROTOCOL"] = "HTTP/1.1";
     envMap["REQUEST_METHOD"] = _method;
     envMap["QUERY_STRING"] = _query;
-    envMap["SCRIPT_NAME"] = scriptName; // 正确剥离后的 /cgi-bin/path_info.py
+    envMap["SCRIPT_NAME"] = scriptName;
     envMap["SCRIPT_FILENAME"] = _script_path;
 
-    envMap["PATH_INFO"] = pathInfo;
-
-    // 💡 3. RFC 3875 规范：PATH_TRANSLATED
+    // 💡 3. 核心修复：针对 42 cgi_tester 的 PATH_INFO 与 PATH_TRANSLATED 规则
     if (!pathInfo.empty())
-        envMap["PATH_TRANSLATED"] = _root + pathInfo; // 例如 /srv/www/abc/def
+    {
+        envMap["PATH_INFO"] = pathInfo;
+        envMap["PATH_TRANSLATED"] = _root + pathInfo;
+    }
     else
-        envMap["PATH_TRANSLATED"] = "";
+    {
+        // 当没有额外的 path_info 时（例如 /directory/youpi.bla）：
+        // cgi_tester 要求 PATH_INFO 不能留空，需设为请求路径 _path
+        // PATH_TRANSLATED 需设为物理脚本路径 _script_path
+        envMap["PATH_INFO"] = _path; 
+        envMap["PATH_TRANSLATED"] = _script_path;
+    }
 
     envMap["SERVER_NAME"] = _host;
     envMap["SERVER_PORT"] = _port;
@@ -123,7 +130,7 @@ char **CgiHandler::_buildEnvironment() const
     else
         envMap["PATH"] = "/usr/local/bin:/usr/bin:/bin";
 
-    // 💡 4. 处理普通 HTTP 请求头并忽略内部标头（同时做大小写无关匹配）
+    // 💡 4. 处理普通 HTTP 请求头并忽略内部标头
     for (std::map<std::string, std::string>::const_iterator it = _headers.begin();
          it != _headers.end(); ++it)
     {
