@@ -150,6 +150,6 @@ bool isMethodAllowed(RequestAction action,
     if (action == ACTION_DELETE)
         return allowMethods.find("DELETE") != allowMethods.end();
     if (action == ACTION_HEAD)
-        return allowMethods.find("HEAD") != allowMethods.end();
+        return allowMethods.find("GET") != allowMethods.end();
     return false;
 }

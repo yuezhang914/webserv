@@ -578,13 +578,6 @@ void ServerManager::handleCgiRead(int cgiReadFd)
 
     if (res.status == CGI_FINISHED)
     {
-        std::cout
-            << "========== RAW CGI OUTPUT =========="
-            << std::endl
-            << res.rawOutput
-            << std::endl
-            << "===================================="
-            << std::endl;
         this->_cgi_read_fd_to_client_map.erase(cgiReadFd);
         this->eraseFdFromPoll(cgiReadFd);
         this->cleanupClientWritePipe(res.clientFd);

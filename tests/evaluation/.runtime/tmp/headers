@@ -1,5 +1,0 @@
-HTTP/1.1 502 Bad Gateway
-Connection: close
-Content-Length: 17
-Content-Type: text/html
-

@@ -352,7 +352,7 @@ std::vector<CgiEventResult> CgiManager::checkTimeouts()
         std::map<int, CgiTask>::iterator current = it++;
         CgiTask &task = current->second;
 
-        if (task.startTime > 0 && (now - task.startTime > 10))
+        if (task.startTime > 0 && (now - task.startTime > MAX_TIME))
         {
             std::cerr << "[CgiManager] Timeout Warning: CGI PID " << task.pid
                       << " exceeded 10s timeout! Killing..." << std::endl;

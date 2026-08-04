@@ -61,6 +61,8 @@ bool Response::loadCgiOutput(const std::string &cgiOutput)
     size_t delimiterLength = 4;
     if (delimiterPos == std::string::npos)
     {
+        _statusCode = 200;
+        _body = cgiOutput;
         delimiterPos = cgiOutput.find("\n\n");
         delimiterLength = 2;
     }
@@ -94,7 +96,7 @@ bool Response::loadCgiOutput(const std::string &cgiOutput)
         std::string line = headerBlock.substr(cursor, lineEnd - cursor);
         if (!line.empty() && line[line.size() - 1] == '\r')
             line.erase(line.size() - 1);
-        
+
         // 💡 修复 1：空行跳过，不直接报错退出
         if (line.empty())
         {
@@ -108,10 +110,7 @@ bool Response::loadCgiOutput(const std::string &cgiOutput)
         // 💡 修复 2：如果行中没有 ':'（例如 cgi_tester 吐出的环境变量/调试文本），忽略该行并继续！
         if (colon == std::string::npos)
         {
-            if (lineEnd == headerBlock.size())
-                break;
-            cursor = lineEnd + 1;
-            continue;
+            return false;
         }
 
         std::string name = line.substr(0, colon);
@@ -120,28 +119,24 @@ bool Response::loadCgiOutput(const std::string &cgiOutput)
         // 如果 Header 键值包含非法字符，也是选择跳过，而不是直接崩掉整个 CGI
         if (!isValidHeaderName(name) || !isValidHeaderValue(value))
         {
-            if (lineEnd == headerBlock.size())
-                break;
-            cursor = lineEnd + 1;
-            continue;
+            return false;
         }
 
         std::string lowerName = toLowerAscii(name);
         if (lowerName == "status")
         {
-            if (!hasStatus)
+            if (hasStatus)
+                return false; // 重复 Status -> 非法 CGI
+
+            std::istringstream statusStream(value);
+            if (!(statusStream >> importedStatus) || importedStatus < 100 || importedStatus > 599)
             {
-                std::istringstream statusStream(value);
-                if ((statusStream >> importedStatus)
-                    && importedStatus >= 100 && importedStatus <= 599)
-                {
-                    hasStatus = true;
-                }
+                return false;
             }
+
+            hasStatus = true;
         }
-        else if (lowerName != "content-length"
-            && lowerName != "transfer-encoding"
-            && lowerName != "connection")
+        else if (lowerName != "content-length" && lowerName != "transfer-encoding" && lowerName != "connection")
         {
             importedHeaders[canonicalHeaderName(name)] = value;
         }
@@ -160,16 +155,14 @@ bool Response::loadCgiOutput(const std::string &cgiOutput)
     HeaderMap::const_iterator it = importedHeaders.begin();
     while (it != importedHeaders.end())
     {
-        if (statusMayHaveBody(_statusCode)
-            || toLowerAscii(it->first) != "content-type")
+        if (statusMayHaveBody(_statusCode) || toLowerAscii(it->first) != "content-type")
             _headers[it->first] = it->second;
         ++it;
     }
 
     if (statusMayHaveBody(_statusCode))
     {
-        if (_headers.find("Content-Type") == _headers.end()
-            && _headers.find("Location") == _headers.end())
+        if (_headers.find("Content-Type") == _headers.end() && _headers.find("Location") == _headers.end())
             _headers["Content-Type"] = "text/html";
         _body = body;
     }
@@ -229,12 +222,12 @@ Response buildCgiResponse(const Request &request,
     const ServerConfig *server = request.getConfig();
     if (server != NULL)
         response.createResponse(502, "Invalid CGI response",
-            server->error_pages);
+                                server->error_pages);
     else
     {
         Response::ErrorPageMap noErrorPages;
         response.createResponse(502, "Invalid CGI response",
-            noErrorPages);
+                                noErrorPages);
     }
     response.setCloseConnection(true);
     return response;

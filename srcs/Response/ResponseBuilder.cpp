@@ -132,8 +132,8 @@ static bool findConfiguredCgiInterpreter(const LocationConfig *location,
     while (it != location->cgi_extensions.end())
     {
         const std::string &extension = it->first;
-        if (!extension.empty() && 
-            path.size() >= extension.size() && 
+        if (!extension.empty() &&
+            path.size() >= extension.size() &&
             path.compare(path.size() - extension.size(), extension.size(), extension) == 0)
         {
             std::string rawInterpreter = it->second;
@@ -304,7 +304,7 @@ Response buildResponse(const Request &request,
     {
         response.createResponse(405, "", route.server->error_pages);
         response.setHeader("Allow", buildAllowHeader(route.allow_methods));
-        //💡 加上这句：如果刚好是一个被禁止的 HEAD 请求发过来触发了 405，必须剥离 405 HTML Body！
+        // 💡 加上这句：如果刚好是一个被禁止的 HEAD 请求发过来触发了 405，必须剥离 405 HTML Body！
         if (request.getMethod() == "HEAD")
         {
             response.clearBodyOnly();
@@ -351,15 +351,17 @@ Response buildResponse(const Request &request,
         return response;
     }
     /* HEAD 使用 GET 的状态和 headers，但最终不保留实际消息体。 */
-    if (action == ACTION_GET || action == ACTION_HEAD)
-    {
-        Response res = handleGet(request, route);
+   if (action == ACTION_GET || action == ACTION_HEAD)
+{
+    Response res = handleGet(request, route);
 
-        /* clearBodyOnly() 保留 GET 已计算的 Content-Length。 */
-        if (action == ACTION_HEAD)
-            res.clearBodyOnly();
-        return res;
+    if (action == ACTION_HEAD)
+    {
+        res.clearBodyOnly();      // 不修改 Content-Length
     }
+
+    return res;
+}
     if (action == ACTION_POST)
         return handlePost(request, route);
     return handleDelete(request, route);

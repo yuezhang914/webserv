@@ -1,4 +1,4 @@
-[PASS] 已定位项目根目录：/home/yzhang2/42cursus/ghgh
+[PASS] 已定位项目根目录：/home/weiyang/Documents/new
 [PASS] buildResponse 继续返回 Response
 [PASS] buildResponse 只保留共享 SessionStore 唯一入口
 [PASS] counter/login/logout 已接入 Response 虚拟路由
@@ -182,7 +182,7 @@
 [PASS] 解析不存在 CGI 脚本请求
 [PASS] 不存在 CGI 脚本在启动前返回 404
 [PASS] 解析由解释器执行的不可执行 CGI 脚本请求
-[FAIL] 配置解释器时脚本只需可读，并向 ServerManager 交付解释器路径
+[PASS] 配置解释器时脚本只需可读，并向 ServerManager 交付可执行解释器路径
 [PASS] 解析无解释器的不可执行 CGI 脚本请求
 [PASS] 没有配置解释器时脚本仍必须拥有执行权限
 [PASS] 解析 CGI location 内普通静态文件
@@ -246,5 +246,5 @@
 
 ========== Response/Session 测试汇总 ==========
 总断言：214
-通过：205
-失败：9
+通过：206
+失败：8
