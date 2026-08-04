@@ -11,5 +11,6 @@
 #define BUFFER_SIZE 4096
 #define ERROR_MAX_BODY_LENGTH -42
 #define CGI_MAX_OUTPUT_SIZE  120 * 1024 * 1024
+#define MAX_TIME 15
 
 #endif
