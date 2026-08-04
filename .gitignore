@@ -5,3 +5,5 @@
 *.o
 *.a
 obj/
+tests/evaluation/.runtime/
+tester_data/
