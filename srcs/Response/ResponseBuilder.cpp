@@ -351,11 +351,17 @@ Response buildResponse(const Request &request,
         return response;
     }
     /* HEAD 使用 GET 的状态和 headers，但最终不保留实际消息体。 */
-    if (action == ACTION_GET || action == ACTION_HEAD)
+   if (action == ACTION_GET || action == ACTION_HEAD)
+{
+    Response res = handleGet(request, route);
+
+    if (action == ACTION_HEAD)
     {
-        Response res = handleGet(request, route);
-        return res;
+        res.clearBodyOnly();      // 不修改 Content-Length
     }
+
+    return res;
+}
     if (action == ACTION_POST)
         return handlePost(request, route);
     return handleDelete(request, route);
