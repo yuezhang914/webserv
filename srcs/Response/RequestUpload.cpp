@@ -109,14 +109,14 @@ Response handlePost(const Request &request, const EffectiveRoute &route)
 int FileOperation::validateUploadRequest(const Request &request,
                                          const EffectiveRoute &route)
 {
-    // std::string contentType;
-    // if (request.getHeader("content-type", contentType)
-    //     && checkContentType(contentType) == FILE_OPERATION_ERROR)
-    // {
-    //     response.createResponse(415, "Unsupported Content-Type",
-    //         route.server->error_pages);
-    //     return FILE_OPERATION_ERROR;
-    // }
+    std::string contentType;
+    if (request.getHeader("content-type", contentType)
+        && checkContentType(contentType) == FILE_OPERATION_ERROR)
+    {
+        response.createResponse(415, "Unsupported Content-Type",
+            route.server->error_pages);
+        return FILE_OPERATION_ERROR;
+    }
 
     std::string headerValue;
     bool hasContentLength = request.getHeader("content-length",
