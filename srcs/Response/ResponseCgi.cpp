@@ -119,10 +119,7 @@ bool Response::loadCgiOutput(const std::string &cgiOutput)
         // 如果 Header 键值包含非法字符，也是选择跳过，而不是直接崩掉整个 CGI
         if (!isValidHeaderName(name) || !isValidHeaderValue(value))
         {
-            if (lineEnd == headerBlock.size())
-                break;
-            cursor = lineEnd + 1;
-            continue;
+            return false;
         }
 
         std::string lowerName = toLowerAscii(name);
