@@ -128,14 +128,16 @@ bool Response::loadCgiOutput(const std::string &cgiOutput)
         std::string lowerName = toLowerAscii(name);
         if (lowerName == "status")
         {
-            if (!hasStatus)
+            if (hasStatus)
+                return false; // 重复 Status -> 非法 CGI
+
+            std::istringstream statusStream(value);
+            if (!(statusStream >> importedStatus) || importedStatus < 100 || importedStatus > 599)
             {
-                std::istringstream statusStream(value);
-                if ((statusStream >> importedStatus) && importedStatus >= 100 && importedStatus <= 599)
-                {
-                    hasStatus = true;
-                }
+                return false;
             }
+
+            hasStatus = true;
         }
         else if (lowerName != "content-length" && lowerName != "transfer-encoding" && lowerName != "connection")
         {
