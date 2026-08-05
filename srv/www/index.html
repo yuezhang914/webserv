@@ -272,7 +272,7 @@
         <span class="badge">DELETE</span>
         <span class="badge">CGI</span>
       </div>
-    </header>
+    </header> 
 
     <div class="layout">
       <section class="card strong">
@@ -358,33 +358,44 @@
         <span class="num">4</span>
         <div>
           <h2>CGI Testing</h2>
-          <p class="help">Test basic CGI, form CGI, and POST requests. A CGI process that exceeds the server timeout should return 504.</p>
+          <p class="help">
+            These default paths match the Webserv evaluation setup: Python scripts live under
+            <span class="mono">/cgi/</span>, and the Shell CGI is the second CGI type.
+            A missing script should return 404, a broken CGI should return 500/502, and a timed-out CGI should return 504.
+          </p>
         </div>
       </div>
 
       <div class="button-group">
-        <button class="btn secondary" type="button" onclick="testCgi('/test_cgi.py','GET')">Basic CGI · GET</button>
-        <button class="btn secondary" type="button" onclick="testCgi('/form_cgi.py','GET')">Form CGI · GET</button>
+        <button class="btn secondary" type="button"
+          onclick="testCgi('/cgi/echo.py?source=browser','GET')">Python CGI · GET</button>
+        <button class="btn secondary" type="button"
+          onclick="testCgi('/cgi/echo.sh?kind=shell','GET')">Shell CGI · GET</button>
+        <button class="btn secondary" type="button"
+          onclick="testCgi('/cgi/bad.py','GET')">Broken CGI · GET</button>
+        <button class="btn secondary" type="button"
+          onclick="testCgi('/cgi/slow.py','GET')">Slow CGI · GET</button>
       </div>
 
       <div class="divider"></div>
-      <h3>Send POST to Form CGI</h3>
+      <h3>Send a form-encoded POST to CGI</h3>
+      <p class="help">
+        This sends one ordinary form field, <span class="mono">message</span>,
+        in the request body using <span class="mono">application/x-www-form-urlencoded</span>.
+      </p>
 
       <form id="cgi-post-form" autocomplete="off">
-        <div class="row">
-          <div class="grow">
-            <label for="cgi-name">Name</label>
-            <input id="cgi-name" type="text" placeholder="Your name" />
-          </div>
-          <div class="grow">
-            <label for="cgi-email">Email</label>
-            <input id="cgi-email" type="text" placeholder="your@email.com" />
-          </div>
-        </div>
+        <label for="cgi-target">Target CGI</label>
+        <select id="cgi-target">
+          <option value="/cgi/echo.py?source=form">Python: /cgi/echo.py</option>
+          <option value="/cgi/echo.sh?kind=form">Shell: /cgi/echo.sh</option>
+        </select>
+
 
         <label for="cgi-message">Message</label>
-        <textarea id="cgi-message" style="min-height:88px" placeholder="Your message..."></textarea>
-        <button class="btn" type="submit" style="margin-top:12px">Submit CGI POST</button>
+        <textarea id="cgi-message" style="min-height:88px" placeholder="Any test message...">Hello from the browser CGI form.</textarea>
+        <div class="url-preview">POST → <span id="cgi-url-preview" class="mono">/cgi/echo.py?source=form</span></div>
+        <button class="btn" type="submit" style="margin-top:12px">Send POST to Selected CGI</button>
       </form>
 
       <div id="cgi-status" class="status"></div>
@@ -528,10 +539,15 @@
         const response = await fetch(path, options);
         const text = await response.text();
         const seconds = ((performance.now() - start) / 1000).toFixed(2);
+        let message = method + " " + path + " → " + response.status + " " + response.statusText + " (" + seconds + "s)";
 
-        cgiStatus.textContent = method + " " + path + " → " + response.status + " " + response.statusText + " (" + seconds + "s)";
+        if (response.status === 404) {
+          message += " — Check that the /cgi/ location exists and that the requested script is inside the configured web root.";
+        }
+
+        cgiStatus.textContent = message;
         cgiStatus.classList.add(response.ok ? "ok" : "err");
-        cgiResult.textContent = text;
+        cgiResult.textContent = text || "(empty response body)";
         cgiResult.style.display = "block";
       } catch (error) {
         const seconds = ((performance.now() - start) / 1000).toFixed(2);
@@ -540,13 +556,21 @@
       }
     }
 
+    const cgiTarget = $("#cgi-target");
+    const cgiUrlPreview = $("#cgi-url-preview");
+
+    function updateCgiPreview() {
+      cgiUrlPreview.textContent = cgiTarget.value;
+    }
+
+    cgiTarget.addEventListener("change", updateCgiPreview);
+    updateCgiPreview();
+
     $("#cgi-post-form").addEventListener("submit", (event) => {
       event.preventDefault();
       const body =
-        "name=" + encodeURIComponent($("#cgi-name").value) +
-        "&email=" + encodeURIComponent($("#cgi-email").value) +
-        "&message=" + encodeURIComponent($("#cgi-message").value);
-      testCgi("/form_cgi.py", "POST", body);
+        "message=" + encodeURIComponent($("#cgi-message").value);
+      testCgi(cgiTarget.value, "POST", body);
     });
   </script>
 </body>

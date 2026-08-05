@@ -283,6 +283,19 @@ raise SystemExit(1)
 PY
 }
 
+wait_for_port_free()
+{
+    attempts=0
+    while [ "$attempts" -lt 50 ]; do
+        if port_is_free "$1"; then
+            return 0
+        fi
+        sleep 0.1
+        attempts=$((attempts + 1))
+    done
+    return 1
+}
+
 start_server()
 {
     config_path="$1"
@@ -290,12 +303,19 @@ start_server()
     expected_port="$3"
 
     cleanup_server
-    if ! port_is_free "$expected_port"; then
-        fail "Port $expected_port is already in use before server startup."
+    if ! wait_for_port_free "$expected_port"; then
+        fail "Port $expected_port is still in use before server startup."
+        if command -v lsof >/dev/null 2>&1; then
+            echo "[INFO] Listener on port $expected_port:"
+            lsof -nP -iTCP:"$expected_port" -sTCP:LISTEN || true
+        fi
         return 1
     fi
 
-    (cd "$PROJECT_ROOT" && "$BIN" "$config_path") >"$log_path" 2>&1 &
+    (
+        cd "$PROJECT_ROOT" || exit 1
+        exec "$BIN" "$config_path"
+    ) >"$log_path" 2>&1 &
     SERVER_PID=$!
 
     if wait_for_port "$expected_port" && kill -0 "$SERVER_PID" 2>/dev/null; then
@@ -1530,8 +1550,10 @@ run_multi_port_tests()
     if ! port_is_free "$PORT_DUPLICATE"; then
         fail "Duplicate-test port $PORT_DUPLICATE was already in use"
     else
-        (cd "$PROJECT_ROOT" && "$BIN" "$CONFIG_DUPLICATE") \
-            >"$LOG_ROOT/duplicate_port_server.log" 2>&1 &
+        (
+            cd "$PROJECT_ROOT" || exit 1
+            exec "$BIN" "$CONFIG_DUPLICATE"
+        ) >"$LOG_ROOT/duplicate_port_server.log" 2>&1 &
         duplicate_pid=$!
         sleep 1
 
@@ -1552,8 +1574,10 @@ run_multi_port_tests()
 
     if start_server "$CONFIG_COMMON_OWNER" "$LOG_ROOT/common_owner.log" "$PORT_COMMON"; then
         owner_pid="$SERVER_PID"
-        (cd "$PROJECT_ROOT" && "$BIN" "$CONFIG_COMMON_CONFLICT") \
-            >"$LOG_ROOT/common_conflict.log" 2>&1 &
+        (
+            cd "$PROJECT_ROOT" || exit 1
+            exec "$BIN" "$CONFIG_COMMON_CONFLICT"
+        ) >"$LOG_ROOT/common_conflict.log" 2>&1 &
         conflict_pid=$!
         sleep 1
 
