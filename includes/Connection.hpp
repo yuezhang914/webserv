@@ -25,6 +25,10 @@ public:
     size_t chunk_decoded_size;
     unsigned long chunk_body_limit;
 
+    // 大型 chunked CGI 的内存准入状态：acquired 表示占用处理槽，waiting 表示已暂停在等待队列。
+    bool large_cgi_slot_acquired;
+    bool large_cgi_waiting;
+
     Connection();
     Connection(int clientFd, const ServerConfig &srv_cfg);
     ~Connection();

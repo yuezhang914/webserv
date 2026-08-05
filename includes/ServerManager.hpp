@@ -6,6 +6,7 @@
 #include "RequestParser.hpp"
 #include "ServerSocket.hpp"
 #include "CgiManager.hpp"
+#include <deque>
 
 class ServerManager
 {
@@ -25,7 +26,16 @@ private:
     std::map<int, int> _cgi_write_fd_to_client_map; // writeFd -> clientFd
     std::vector<struct pollfd> _fds_to_add;         // 延迟追加队列（防 vector 扩容野指针）
 
-    // 4. 物理管道 FD 身份识别
+    // 4. 大型 CGI 内存准入：限制完整 100MB request/response 同时驻留的数量。
+    size_t _active_buffered_large_cgi;
+    std::deque<int> _waiting_buffered_large_cgi_clients;
+
+    // 大 CGI 准入与等待队列维护。
+    bool ensureLargeCgiSlot(Connection *conn, int clientFd);
+    void releaseLargeCgiSlot(int clientFd);
+    void resumeWaitingLargeCgiClients();
+
+    // 5. 物理管道 FD 身份识别
     bool isCgiReadFd(int fd) const;
     bool isCgiWriteFd(int fd) const;
 

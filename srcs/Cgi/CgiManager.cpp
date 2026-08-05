@@ -98,7 +98,7 @@ bool CgiManager::launchTask(
     // 因此这里只保存 const 指针，避免学校 tester 的 100MB body 被任务表重复深拷贝。
     task.inputBody = &reqBody;
     task.bodyBytesSent = 0;
-    task.startTime = std::time(NULL);
+    task.lastActivity = std::time(NULL);
     this->_read_fd_to_task_map[fds.read_fd] = task;
     outReadFd = fds.read_fd;
     if (!reqBody.empty() && fds.write_fd >= 0)
@@ -158,6 +158,8 @@ CgiEventResult CgiManager::handlePipeRead(int cgiReadFd)
         ssize_t bytesRead = ::read(cgiReadFd, buffer, sizeof(buffer));
         if (bytesRead > 0)
         {
+            // 只有真正读到 CGI stdout 才算有进展；EAGAIN 不刷新计时。
+            task.lastActivity = std::time(NULL);
             if (task.outputBuffer.size() + static_cast<size_t>(bytesRead) > CGI_MAX_OUTPUT_SIZE)
             {
                 std::cerr << "[CgiManager] Error: CGI output size exceeded max limit! 502." << std::endl;
@@ -255,6 +257,8 @@ CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
 
     if (bytesWritten > 0)
     {
+        // 只有真正写入 CGI stdin 才算有进展；管道暂时写满不刷新计时。
+        task.lastActivity = std::time(NULL);
         task.bodyBytesSent += static_cast<size_t>(bytesWritten);
         if (task.bodyBytesSent >= bodySize)
         {
@@ -358,7 +362,7 @@ void CgiManager::reapChildren()
 
 /*
 函数：CgiManager::checkTimeouts
-用途：看门狗巡检函数。全量检测运行超时的 CGI 进程，物理强杀并向 ServerManager 返回 504 错误指令。
+用途：看门狗巡检函数。全量检测连续无管道进展的 CGI 进程，物理强杀并向 ServerManager 返回 504 错误指令。
 参数：
     - 无。
 返回值：
@@ -366,7 +370,7 @@ void CgiManager::reapChildren()
 实现逻辑或说明：
     1. 时间获取：调用 std::time(NULL) 获取当前系统时间戳 now。
     2. 安全遍历：使用 C++98 安全迭代器范式（current = it++）遍历 _read_fd_to_task_map。
-    3. 超时判定：若 now - task.startTime > 10（超过 10 秒看门狗阈值）：
+    3. 超时判定：若 now - task.lastActivity 超过 CGI_INACTIVITY_TIMEOUT（连续 10 秒无 stdin/stdout 进展）：
        - 将 CgiEventResult(CGI_ERROR, clientFd, 504) 压入 timeoutResults 数组；
        - 调用 forceKillAndClean 强杀超时 PID 并关闭管道与清除账本。
     4. 结果交付：将 timeoutResults 集合回传给 Reactor 主循环统一给客户端渲染 504 Gateway Timeout 页面。
@@ -382,10 +386,10 @@ std::vector<CgiEventResult> CgiManager::checkTimeouts()
         std::map<int, CgiTask>::iterator current = it++;
         CgiTask &task = current->second;
 
-        if (task.startTime > 0 && (now - task.startTime > MAX_TIME))
+        if (task.lastActivity > 0 && (now - task.lastActivity > CGI_INACTIVITY_TIMEOUT))
         {
             std::cerr << "[CgiManager] Timeout Warning: CGI PID " << task.pid
-                      << " exceeded 10s timeout! Killing..." << std::endl;
+                      << " had no pipe progress for 10s! Killing..." << std::endl;
 
             int clientFd = task.clientFd;
             timeoutResults.push_back(CgiEventResult(CGI_ERROR, clientFd, 504));

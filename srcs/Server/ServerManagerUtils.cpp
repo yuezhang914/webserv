@@ -140,6 +140,8 @@ void ServerManager::eraseFdFromPoll(int targetFd)
 */
 void ServerManager::closeConnection(int clientFd, size_t pollIndex)
 {
+    // 连接无论处于活动槽还是等待队列，都先归还大型 CGI 准入状态。
+    this->releaseLargeCgiSlot(clientFd);
     // 清理该 clientFd 对应的 CGI 任务（CgiManager 内部自动完成 kill + close + erase）
     this->_cgiManager.removeTaskByClientFd(clientFd);
     // 擦除 ServerManager 侧的反查雷达映射（读端 & 写端）
