@@ -138,7 +138,7 @@ RequestAction requestActionFromMethod(const std::string &method)
 用途：检查已经实现的动作是否被 EffectiveRoute 最终 allow_methods 允许。
 参数来源：action 来自 requestActionFromMethod()；allowMethods 来自 server/location 合并。
 变量说明：无局部变量。
-实现逻辑：GET/POST/DELETE 查找同名配置；HEAD 继承 GET 权限，因为 HEAD 使用 GET 的表示元数据且配置语法无需额外声明 HEAD；未知动作返回 false。
+实现逻辑：GET/POST/DELETE 查找同名配置；当前配置语法不接受 HEAD，所以 HEAD 不从 GET 继承权限并返回 false；未知动作同样返回 false。
 */
 bool isMethodAllowed(RequestAction action,
                      const std::set<std::string> &allowMethods)

@@ -79,17 +79,17 @@
 函数：buildAllowHeader
 用途：为 405 Method Not Allowed 生成稳定顺序的 Allow header。
 参数来源：allowMethods 来自 EffectiveRoute 合并后的 server/location allow_methods。
-变量说明：result 逐步拼出 header value，例如 "GET, HEAD, POST"。
+变量说明：result 逐步拼出 header value，例如 "GET, POST, DELETE"。
 实现逻辑：
-    1. 配置允许 GET 时同时列出 GET 和 HEAD，因为 HEAD 继承 GET 权限。
-    2. 再按 POST、DELETE 的固定顺序追加其余已允许方法。
+    1. 按 GET、POST、DELETE 的稳定顺序列出配置中真正允许的方法。
+    2. 不把 HEAD 隐式加入 GET，因为学校 tester 要求未配置的 HEAD 返回 405。
     3. 返回可以直接交给 Response::setHeader("Allow", ...) 的字符串。
 */
 static std::string buildAllowHeader(const std::set<std::string> &allowMethods)
 {
     std::string result;
     if (allowMethods.find("GET") != allowMethods.end())
-        result = "GET, HEAD";
+        result = "GET";
     if (allowMethods.find("POST") != allowMethods.end())
     {
         if (!result.empty())
@@ -245,10 +245,10 @@ static int validateCgiScript(const std::string &scriptPath,
     - action/pathStatus/cgiPathStatus：方法枚举、普通路径检查和 CGI 脚本检查结果。
 实现逻辑：
     1. 检查 Request 是否绑定 ServerConfig，并合并 server/location 路由。
-    2. 优先执行配置重定向；随后检查方法是否实现，并让 HEAD 继承 GET 的 route 权限。
+    2. 优先执行配置重定向；随后检查方法是否实现，并按配置精确检查权限，HEAD 不隐式继承 GET。
     3. 精确匹配三个 Session 示例路径时，把共享 store 交给 SessionResponse 层。
     4. 其他请求生成真实路径；CGI 后缀先验证可执行脚本并交付内部路径 header。
-    5. 普通 GET/HEAD、POST、DELETE 分别交给 RequestHandler 对应函数；HEAD 复用 GET 结果并移除实际 body。
+    5. 普通 GET、POST、DELETE 分别交给 RequestHandler；若未来显式支持 HEAD，则复用 GET 结果并移除实际 body。
 接口约束：本项目不再提供不带 SessionStore 的旧重载，避免调用方误绕过 Session 功能。
 */
 
@@ -304,11 +304,10 @@ Response buildResponse(const Request &request,
     {
         response.createResponse(405, "", route.server->error_pages);
         response.setHeader("Allow", buildAllowHeader(route.allow_methods));
-        //💡 加上这句：如果刚好是一个被禁止的 HEAD 请求发过来触发了 405，必须剥离 405 HTML Body！
+        /* HEAD 的 405 不发送错误页 body，并把 Content-Length 同步为 0，
+           避免客户端在 keep-alive 连接上继续等待不存在的消息体。 */
         if (request.getMethod() == "HEAD")
-        {
-            response.clearBodyOnly();
-        }
+            response.clearBody();
         return response;
     }
 

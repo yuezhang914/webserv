@@ -116,7 +116,7 @@ static std::string encodePathSegment(const std::string &name)
 
 /*
 函数：handleIndex
-用途：按配置顺序寻找目录首页；没有可用首页时进入 autoindex。
+用途：按配置顺序寻找目录首页；没有可用首页时按 autoindex 开关返回目录列表或 404。
 参数来源：route 来自 handleGet()；requestPath 是用户可见 URL path；closeConnection 继承原 Request。
 变量说明：response 是错误分支结果；i 遍历 index 候选；indexPath/fd/fileInfo 检查每个候选。
 实现逻辑：
@@ -124,7 +124,7 @@ static std::string encodePathSegment(const std::string &name)
     2. 不存在时继续下一个候选；权限等错误映射 403，其他错误 500。
     3. fstat 失败返回 500；不是普通文件则继续。
     4. 命中普通文件后调用 createIndexResponse()。
-    5. 全部失败时调用 handleAutoIndex()。
+    5. 全部失败且 autoindex 开启时生成目录列表；关闭时按学校 tester 返回 404。
 */
 Response handleIndex(const EffectiveRoute &route,
                             const std::string &requestPath,
@@ -168,12 +168,10 @@ Response handleIndex(const EffectiveRoute &route,
             route.server->error_pages);
     }
 
-    // 💡 修复：循环结束意味着没有找到可用的 index 文件
-    // 只有在显式开启了 autoindex 时才去生成目录列表；否则统一返回 404 Not Found！
+    /* 没有可用 index 时，只有显式开启 autoindex 才生成列表。
+       autoindex 关闭按学校 tester 隐藏目录存在性并返回 404。 */
     if (route.autoindex)
-    {
         return handleAutoIndex(route, requestPath, closeConnection);
-    }
 
     response.createResponse(404, "", route.server->error_pages);
     return response;
@@ -216,23 +214,15 @@ static Response createIndexResponse(int fd,
 
 /*
 函数：handleAutoIndex
-用途：根据 route.autoindex 决定返回 403 或生成目录列表。
-参数来源：route/requestPath/closeConnection 来自 handleIndex()。
-变量说明：关闭时局部 response 保存 403；开启时无额外变量。
-实现逻辑：autoindex=false 生成错误响应；true 调用 createAutoIndexResponse()。
+用途：为已经确认开启 autoindex 的目录生成安全目录列表。
+参数来源：route/requestPath/closeConnection 来自 handleIndex() 的 route.autoindex=true 分支。
+变量说明：无局部状态；真实目录读取和 HTML 生成交给 createAutoIndexResponse()。
+实现逻辑：直接调用 createAutoIndexResponse()；关闭状态已在 handleIndex() 中统一映射为 404。
 */
 static Response handleAutoIndex(const EffectiveRoute &route,
                                 const std::string &requestPath,
                                 bool closeConnection)
 {
-    if (!route.autoindex)
-    {
-        Response response(closeConnection);
-        response.createResponse(403,
-            "AutoIndex Not allowed by Default (add rule in config file)",
-            route.server->error_pages);
-        return response;
-    }
     return createAutoIndexResponse(route, requestPath, closeConnection);
 }
 
