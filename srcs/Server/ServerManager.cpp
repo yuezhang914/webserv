@@ -703,12 +703,12 @@ void ServerManager::dispatchEvents()
             // POLLHUP 必须走 handleCgiRead：管道里可能还有最后一批未读完的数据！
             if (revents & (POLLIN | POLLHUP))
             {
-                std::cout << "[Radar] -> Routing CGI Read FD " << activeFd << " to handleCgiRead (POLLIN/POLLHUP)" << std::endl;
+                //std::cout << "[Radar] -> Routing CGI Read FD " << activeFd << " to handleCgiRead (POLLIN/POLLHUP)" << std::endl;
                 this->handleCgiRead(activeFd);
             }
             else if (revents & (POLLERR | POLLNVAL))
             {
-                std::cout << "[Radar] -> CGI Read FD " << activeFd << " hardware broken (ERR/NVAL). Forcing cleanup." << std::endl;
+                //std::cout << "[Radar] -> CGI Read FD " << activeFd << " hardware broken (ERR/NVAL). Forcing cleanup." << std::endl;
 
                 int clientFd = this->_cgi_read_fd_to_client_map[activeFd];
                 this->_cgi_read_fd_to_client_map.erase(activeFd);
@@ -731,12 +731,12 @@ void ServerManager::dispatchEvents()
         {
             if (revents & POLLOUT)
             {
-                std::cout << "[Radar] -> Routing CGI Write FD " << activeFd << " to handleCgiWrite (POLLOUT)" << std::endl;
+                //std::cout << "[Radar] -> Routing CGI Write FD " << activeFd << " to handleCgiWrite (POLLOUT)" << std::endl;
                 this->handleCgiWrite(activeFd);
             }
             else if (revents & (POLLERR | POLLHUP | POLLNVAL))
             {
-                std::cout << "[Radar] -> CGI Write FD " << activeFd << " write end broken (ERR/HUP/NVAL). Forcing cleanup." << std::endl;
+               // std::cout << "[Radar] -> CGI Write FD " << activeFd << " write end broken (ERR/HUP/NVAL). Forcing cleanup." << std::endl;
 
                 int clientFd = this->_cgi_write_fd_to_client_map[activeFd];
                 this->_cgi_write_fd_to_client_map.erase(activeFd);
@@ -765,7 +765,7 @@ void ServerManager::dispatchEvents()
             }
             else
             {
-                std::cout << "[Radar] -> Routing Client Socket FD " << activeFd << " to closeConnection (ERR/HUP)" << std::endl;
+                //std::cout << "[Radar] -> Routing Client Socket FD " << activeFd << " to closeConnection (ERR/HUP)" << std::endl;
                 this->closeConnection(activeFd, idx);
             }
             continue;
@@ -776,12 +776,12 @@ void ServerManager::dispatchEvents()
         {
             if (this->isListenFd(activeFd))
             {
-                std::cout << "[Radar] -> Routing Listen FD " << activeFd << " to acceptNewConnection (POLLIN)" << std::endl;
+               // std::cout << "[Radar] -> Routing Listen FD " << activeFd << " to acceptNewConnection (POLLIN)" << std::endl;
                 this->acceptNewConnection(activeFd);
             }
             else
             {
-                std::cout << "[Radar] -> Routing Client FD " << activeFd << " to handleClientRead (POLLIN)" << std::endl;
+                //std::cout << "[Radar] -> Routing Client FD " << activeFd << " to handleClientRead (POLLIN)" << std::endl;
                 this->handleClientRead(activeFd, idx);
             }
         }
@@ -791,16 +791,16 @@ void ServerManager::dispatchEvents()
         {
             if (idx >= this->_poll_fds.size() || this->_poll_fds[idx].fd != activeFd)
             {
-                std::cout << "[Radar] Notice: FD " << activeFd << " vanished or swapped during POLLIN processing. Safe break." << std::endl;
+                //std::cout << "[Radar] Notice: FD " << activeFd << " vanished or swapped during POLLIN processing. Safe break." << std::endl;
                 continue;
             }
 
-            std::cout << "[Radar] -> Routing Client FD " << activeFd << " to handleClientWrite (POLLOUT)" << std::endl;
+            //std::cout << "[Radar] -> Routing Client FD " << activeFd << " to handleClientWrite (POLLOUT)" << std::endl;
             this->handleClientWrite(activeFd, idx);
         }
 
-        std::cout << "[Radar] --- TICK END for FD " << activeFd << " ---" << std::endl
-                  << std::endl;
+        //std::cout << "[Radar] --- TICK END for FD " << activeFd << " ---" << std::endl
+                  //<< std::endl;
     }
 }
 
