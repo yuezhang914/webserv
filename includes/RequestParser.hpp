@@ -58,11 +58,25 @@ private:
     static int validate_trailer_line(const std::string &line);
     static int find_chunked_trailer_end(const std::string &buffer,
         size_t pos, size_t &consumed);
+    static int scan_chunked_buffer(const std::string &buffer,
+        size_t body_start, unsigned long body_limit,
+        size_t &decoded_size, size_t &consumed);
+    static int decode_complete_chunked_body(const std::string &buffer,
+        size_t body_start, size_t decoded_size, Request &req);
     static int parse_chunked_buffer(const std::string &buffer,
         size_t body_start, unsigned long body_limit,
         Request &req, size_t &consumed);
 
 public:
+    /*
+    函数：RequestParser::advanceChunkedScan
+    用途：从 scan_pos 开始只扫描新到达的 chunk 边界，并把进度保留给下一次 socket 读事件。
+    说明：不构造 body；完整后仍由 parseBuffer 做一次最终严格解析和解码。
+    */
+    static int advanceChunkedScan(const std::string &buffer,
+        size_t &scan_pos, unsigned long body_limit,
+        size_t &decoded_size, size_t &consumed);
+
     /*
     函数：RequestParser::parseBuffer
     用途：解析 buffer 前部的第一个 HTTP/1.1 request。

@@ -1,6 +1,7 @@
 #include "Webserv.hpp"
 #include "SessionStore.hpp"
 #include "Signal.hpp"
+#include "ConfigRouteUtils.hpp"
 
 #include <iostream>
 
@@ -405,6 +406,60 @@ void ServerManager::processParsedRequest(Connection *conn, int clientFd)
 }
 
 /*
+函数：requestUsesChunkedBody
+用途：读取 RequestParser 已完成解析的 headers，判断当前未完成请求是否使用 chunked framing。
+参数来源：request 是 Connection 中当前正在解析的 Request。
+实现逻辑：读取 transfer-encoding，修剪 OWS 并转成 ASCII 小写；只有严格等于 chunked 才返回 true。
+*/
+static bool requestUsesChunkedBody(const Request &request)
+{
+    std::string value;
+    if (!request.getHeader("transfer-encoding", value))
+        return false;
+    size_t start = 0;
+    while (start < value.size()
+        && (value[start] == ' ' || value[start] == '\t'))
+        ++start;
+    size_t end = value.size();
+    while (end > start
+        && (value[end - 1] == ' ' || value[end - 1] == '\t'))
+        --end;
+    std::string normalized = value.substr(start, end - start);
+    size_t i = 0;
+    while (i < normalized.size())
+    {
+        if (normalized[i] >= 'A' && normalized[i] <= 'Z')
+            normalized[i] = static_cast<char>(normalized[i] - 'A' + 'a');
+        ++i;
+    }
+    return normalized == "chunked";
+}
+
+/*
+函数：advanceConnectionChunkScan
+用途：为一个 Connection 初始化或继续 chunked 增量边界扫描。
+参数来源：conn 持有原始 read_buffer、已解析 path 与跨 poll 保留的扫描位置；consumed 在完整时接收请求结尾。
+实现逻辑：首次从 header 结束位置建立状态并计算 effective body limit；之后只调用 advanceChunkedScan 扫描新增 chunk。
+*/
+static int advanceConnectionChunkScan(Connection *conn, size_t &consumed)
+{
+    if (!conn->chunk_scan_active)
+    {
+        size_t headerEnd = conn->read_buffer.find("\r\n\r\n");
+        if (headerEnd == std::string::npos)
+            return REQUEST_INCOMPLETE;
+        conn->chunk_scan_active = true;
+        conn->chunk_scan_pos = headerEnd + 4;
+        conn->chunk_decoded_size = 0;
+        conn->chunk_body_limit = getEffectiveBodyLimit(
+            &conn->config, conn->request.getPath());
+    }
+    return RequestParser::advanceChunkedScan(conn->read_buffer,
+        conn->chunk_scan_pos, conn->chunk_body_limit,
+        conn->chunk_decoded_size, consumed);
+}
+
+/*
 函数：ServerManager::handleClientRead
 用途：客户端 Socket 可读（POLLIN）事件入口函数。调度 Socket 缓冲区读取、协议解析与响应分发。
 参数：
@@ -415,57 +470,93 @@ void ServerManager::processParsedRequest(Connection *conn, int clientFd)
 实现逻辑或说明：
     1. 指针防卫：使用 find() 检查 clientFd 对应 Connection 指针的合法性，若非法则安全 closeConnection。
     2. Socket 捞取：调用 readSocketDataToBuffer 将内核缓冲区数据拉入 conn->read_buffer，若遇到关闭事件则提前结束。
-    3. HTTP 协议解析：调用 RequestParser::parseBuffer 尝试解析：
-       - REQUEST_OK         : 解析成功，擦除已消费字节，调用 processParsedRequest 路由处理；
-       - REQUEST_INCOMPLETE : 数据未完结，静默等待下一个 poll 滴答继续接收；
-       - 其它解析错误        : 构建 400 Bad Request 响应报文，将事件切换为 POLLOUT 准备回复错误。
+    3. 首次调用 parseBuffer 解析 request-line/headers；若确认是未完成 chunked 请求，建立 Connection 级扫描状态。
+    4. 后续 poll 只用 advanceChunkedScan 从上次边界继续，避免学校 tester 的大量小 chunk 触发 O(n²) 重扫。
+    5. 收到完整 0-size chunk 后才运行一次最终 parseBuffer 解码 body；成功后释放原始大 buffer 并分发请求。
+    6. 超限返回 413，其他语法错误返回 400。
 */
 void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
 {
-    // 防御 NULL 指针解引用
-    std::map<int, Connection *>::iterator connIt = this->_connections.find(clientFd);
+    std::map<int, Connection *>::iterator connIt =
+        this->_connections.find(clientFd);
     if (connIt == this->_connections.end() || connIt->second == NULL)
     {
-        std::cerr << "[ServerManager] Error: Client FD " << clientFd << " is NULL or unmapped in handleClientRead!" << std::endl;
+        std::cerr << "[ServerManager] Error: Client FD " << clientFd
+                  << " is NULL or unmapped in handleClientRead!" << std::endl;
         this->closeConnection(clientFd, pollIndex);
         return;
     }
     Connection *conn = connIt->second;
-
-    // 抽取数据到 read_buffer 蓄水池
     if (!this->readSocketDataToBuffer(conn, clientFd, pollIndex))
         return;
 
-    // 解析蓄水池里的 HTTP 数据
     size_t consumed = 0;
-    int status = RequestParser::parseBuffer(conn->read_buffer, conn->request, &conn->config, consumed);
+    int status = REQUEST_INCOMPLETE;
+
+    if (conn->chunk_scan_active)
+    {
+        // 大 chunked 请求只推进新到达的边界，不重复运行完整 parser。
+        status = advanceConnectionChunkScan(conn, consumed);
+        if (status == REQUEST_OK)
+        {
+            conn->chunk_scan_active = false;
+            status = RequestParser::parseBuffer(conn->read_buffer,
+                conn->request, &conn->config, consumed);
+        }
+    }
+    else
+    {
+        status = RequestParser::parseBuffer(conn->read_buffer,
+            conn->request, &conn->config, consumed);
+        if (status == REQUEST_INCOMPLETE
+            && requestUsesChunkedBody(conn->request))
+        {
+            status = advanceConnectionChunkScan(conn, consumed);
+            if (status == REQUEST_OK)
+            {
+                conn->chunk_scan_active = false;
+                status = RequestParser::parseBuffer(conn->read_buffer,
+                    conn->request, &conn->config, consumed);
+            }
+        }
+    }
 
     if (status == REQUEST_OK)
     {
-        std::cout << "[ServerManager] Request parsed successfully for FD " << clientFd << std::endl;
+        std::cout << "[ServerManager] Request parsed successfully for FD "
+                  << clientFd << std::endl;
+        conn->chunk_scan_active = false;
+        conn->chunk_scan_pos = 0;
+        conn->chunk_decoded_size = 0;
+        conn->chunk_body_limit = 0;
         conn->read_buffer.erase(0, consumed);
+        // erase() 不保证释放 capacity；完整大请求且无流水线残留时主动归还原始缓冲内存。
+        if (conn->read_buffer.empty())
+            std::string().swap(conn->read_buffer);
         this->processParsedRequest(conn, clientFd);
     }
     else if (status == REQUEST_INCOMPLETE)
     {
-        std::cout << "[ServerManager] Request incomplete for FD " << clientFd << ". Waiting for more data..." << std::endl;
+        // 正常等待下一批 socket 数据；不在 100MB 上传期间逐 tick 打印海量日志。
+        return;
     }
     else if (status == REQUEST_BODY_TOO_LARGE)
     {
-        std::cerr << "[ServerManager] Request body too large on FD " << clientFd << ". Pre-writing 413 response." << std::endl;
+        std::cerr << "[ServerManager] Request body too large on FD "
+                  << clientFd << ". Pre-writing 413 response." << std::endl;
         conn->close_after_write = true;
-
-        // 💡 优先使用你们的 ResponseBuilder，或者直接写 413 标头：
-        std::string error_response = "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-        conn->write_buffer += error_response;
+        conn->write_buffer = "HTTP/1.1 413 Payload Too Large\r\n"
+            "Content-Length: 0\r\nConnection: close\r\n\r\n";
         this->setClientEvents(clientFd, POLLOUT);
     }
     else
     {
-        std::cerr << "[ServerManager] Request error (" << status << ") on FD " << clientFd << ". Pre-writing 400 response." << std::endl;
+        std::cerr << "[ServerManager] Request error (" << status
+                  << ") on FD " << clientFd
+                  << ". Pre-writing 400 response." << std::endl;
         conn->close_after_write = true;
-        std::string error_response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-        conn->write_buffer += error_response;
+        conn->write_buffer = "HTTP/1.1 400 Bad Request\r\n"
+            "Content-Length: 0\r\nConnection: close\r\n\r\n";
         this->setClientEvents(clientFd, POLLOUT);
     }
 }

@@ -19,7 +19,11 @@ public:
     Response response;
     bool close_after_write;
 
-
+    // chunked 大请求的增量扫描状态：只记录下一段边界，不保存额外 body 副本。
+    bool chunk_scan_active;
+    size_t chunk_scan_pos;
+    size_t chunk_decoded_size;
+    unsigned long chunk_body_limit;
 
     Connection();
     Connection(int clientFd, const ServerConfig &srv_cfg);

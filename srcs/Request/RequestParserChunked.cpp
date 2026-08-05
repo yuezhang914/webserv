@@ -266,67 +266,133 @@ int RequestParser::find_chunked_trailer_end(const std::string& buffer,
 }
 
 /*
+函数：advanceChunkedScan
+用途：从 scan_pos 保存的“下一条 chunk-size 行”继续扫描新数据，不回头扫描已经确认的 chunk。
+参数来源：
+    - buffer：当前累计的原始请求字节。
+    - scan_pos：输入时是下一条 chunk-size 行起点；每确认一段后更新到下一段起点。
+    - body_limit：当前路由允许的最大解码 body。
+    - decoded_size：已经确认完成的 chunk data 总长度。
+    - consumed：遇到完整 0-size chunk 与 trailer 后返回整个请求结束位置。
+返回值：成功、未完成、格式错误或 body 超限状态。
+实现逻辑：
+    1. 对当前尚未确认的 chunk 解析 size line；数据没收全时保持 scan_pos 不动。
+    2. 一段 data 和尾部 CRLF 都完整时，累计 decoded_size，并推进 scan_pos。
+    3. 因为已确认的 chunk 永不重复扫描，100MB 小 chunk 上传由 O(n²) 降为 O(n)。
+*/
+int RequestParser::advanceChunkedScan(const std::string& buffer,
+        size_t& scan_pos, unsigned long body_limit,
+        size_t& decoded_size, size_t& consumed) {
+    while (true) {
+        if (scan_pos > buffer.size())
+            return REQUEST_ERROR;
+        size_t line_end = buffer.find("\r\n", scan_pos);
+        if (line_end == std::string::npos) {
+            if (has_invalid_line_endings(
+                    buffer, scan_pos, buffer.size(), true))
+                return REQUEST_ERROR;
+            if (buffer.size() - scan_pos > MAX_CHUNK_SIZE_LINE)
+                return REQUEST_ERROR;
+            return REQUEST_INCOMPLETE;
+        }
+        if (line_end - scan_pos > MAX_CHUNK_SIZE_LINE)
+            return REQUEST_ERROR;
+
+        size_t chunk_size = 0;
+        int size_status = read_chunk_size_for_buffer(
+            buffer.substr(scan_pos, line_end - scan_pos),
+            decoded_size, body_limit, chunk_size);
+        if (size_status != REQUEST_OK)
+            return size_status;
+
+        size_t data_start = line_end + 2;
+        if (chunk_size == 0)
+            return find_chunked_trailer_end(
+                buffer, data_start, consumed);
+        if (data_start > buffer.size())
+            return REQUEST_ERROR;
+
+        size_t available = buffer.size() - data_start;
+        if (available < chunk_size || available - chunk_size < 2)
+            return REQUEST_INCOMPLETE;
+        if (buffer.compare(data_start + chunk_size, 2, "\r\n") != 0)
+            return REQUEST_ERROR;
+
+        decoded_size += chunk_size;
+        scan_pos = data_start + chunk_size + 2;
+    }
+}
+
+/*
+函数：scan_chunked_buffer
+用途：供最终完整解析使用，从 body_start 建立一次局部增量状态并扫描到结尾。
+说明：ServerManager 的跨事件扫描使用 advanceChunkedScan 保存进度；本函数不保存状态。
+*/
+int RequestParser::scan_chunked_buffer(const std::string& buffer,
+        size_t body_start, unsigned long body_limit,
+        size_t& decoded_size, size_t& consumed) {
+    size_t scan_pos = body_start;
+    decoded_size = 0;
+    return advanceChunkedScan(buffer, scan_pos, body_limit,
+        decoded_size, consumed);
+}
+
+/*
+函数：decode_complete_chunked_body
+用途：在 scan_chunked_buffer 已确认整条请求完整合法后，仅执行一次真实 body 拼接。
+参数来源：decoded_size 来自第一次扫描；req 接收最终二进制 body。
+返回值：解码成功返回 REQUEST_OK；理论上不应再出现的 framing 异常返回 REQUEST_ERROR。
+实现逻辑：
+    1. reserve(decoded_size) 一次性申请最终容量，避免 std::string 反复扩容。
+    2. 第二遍只沿已验证的 chunk 边界追加 data，遇到 0-size chunk 停止。
+    3. 用 swap() 把结果转交给 Request，C++98 下不会再深拷贝 100MB。
+*/
+int RequestParser::decode_complete_chunked_body(const std::string& buffer,
+        size_t body_start, size_t decoded_size, Request& req) {
+    size_t pos = body_start;
+    std::string body;
+    body.reserve(decoded_size);
+    while (true) {
+        size_t line_end = buffer.find("\r\n", pos);
+        if (line_end == std::string::npos)
+            return REQUEST_ERROR;
+        size_t chunk_size = 0;
+        int status = read_chunk_size_for_buffer(
+            buffer.substr(pos, line_end - pos), body.size(),
+            static_cast<unsigned long>(decoded_size), chunk_size);
+        if (status != REQUEST_OK)
+            return status;
+        pos = line_end + 2;
+        if (chunk_size == 0)
+            break;
+        body.append(buffer, pos, chunk_size);
+        pos += chunk_size + 2;
+    }
+    req._body.swap(body);
+    return REQUEST_OK;
+}
+
+/*
 函数：parse_chunked_buffer
-用途：在不修改原始 buffer 的前提下，严格解析并还原 Transfer-Encoding: chunked body。
+用途：以“先无拷贝扫描、后一次解码”的两阶段流程还原 Transfer-Encoding: chunked body。
 参数来源：
     - buffer：ServerManager 为当前 client 累积的原始字节。
     - body_start：header 结束空行后的第一个 body 字节。
-    - body_limit：parseBuffer 已按 server 和 normalized path 计算出的有效上限。
+    - body_limit：当前 server/location 的 effective max_body_size。
     - req：输出解析后的 body。
     - consumed：成功时输出整个 request 占用的字节数。
 返回值：成功、未完成、格式错误或 body 超限状态。
-实现逻辑：
-    1. 每个 chunk-size 行必须在 MAX_CHUNK_SIZE_LINE 内结束，否则拒绝。
-    2. size 行通过 read_chunk_size_for_buffer() 做十六进制、extension 和溢出检查。
-    3. chunk data 长度判断使用减法形式，避免 pos + chunk_size + 2 溢出。
-    4. 每段 data 后必须紧跟 CRLF。
-    5. 0-size chunk 后由 find_chunked_trailer_end() 严格解析 trailer。
+为什么修改：学校 tester 会上传 100MB；旧实现每次收到一部分数据都会从头复制全部已收 body，
+导致 O(n²) 拷贝和数百 MB 峰值内存，服务器可能被 bad_alloc/OOM 杀死并让客户端看到 connection reset。
 */
 int RequestParser::parse_chunked_buffer(const std::string& buffer,
-		size_t body_start, unsigned long body_limit,
+        size_t body_start, unsigned long body_limit,
         Request& req, size_t& consumed) {
-	size_t pos = body_start;
-	std::string body;
-	while (true) {
-		if (pos > buffer.size())
-			return REQUEST_ERROR;
-		size_t line_end = buffer.find("\r\n", pos);
-		if (line_end == std::string::npos) {
-			if (has_invalid_line_endings(buffer, pos, buffer.size(), true))
-				return REQUEST_ERROR;
-			if (buffer.size() - pos > MAX_CHUNK_SIZE_LINE)
-				return REQUEST_ERROR;
-			return REQUEST_INCOMPLETE;
-		}
-		if (line_end - pos > MAX_CHUNK_SIZE_LINE)
-			return REQUEST_ERROR;
-		size_t chunk_size = 0;
-		int size_status = read_chunk_size_for_buffer(
-			buffer.substr(pos, line_end - pos),
-			body.size(), body_limit, chunk_size);
-		if (size_status != REQUEST_OK)
-			return size_status;
-		pos = line_end + 2;
-		if (chunk_size == 0) {
-			int trailer_status = find_chunked_trailer_end(
-				buffer, pos, consumed);
-			if (trailer_status != REQUEST_OK)
-				return trailer_status;
-			req._body = body;
-			return REQUEST_OK;
-		}
-		if (pos > buffer.size())
-			return REQUEST_ERROR;
-		size_t available = buffer.size() - pos;
-		if (available < chunk_size)
-			return REQUEST_INCOMPLETE;
-		if (available - chunk_size < 2)
-			return REQUEST_INCOMPLETE;
-		if (buffer.compare(pos + chunk_size, 2, "\r\n") != 0)
-			return REQUEST_ERROR;
-		body.append(buffer, pos, chunk_size);
-		pos += chunk_size + 2;
-	}
+    size_t decoded_size = 0;
+    int status = scan_chunked_buffer(buffer, body_start, body_limit,
+        decoded_size, consumed);
+    if (status != REQUEST_OK)
+        return status;
+    return decode_complete_chunked_body(buffer, body_start,
+        decoded_size, req);
 }
-
- 
