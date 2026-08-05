@@ -1074,7 +1074,7 @@ run_core_http_tests()
     assert_file_contains "$body" "b.txt" "Autoindex contains b.txt"
 
     status="$(http_request GET "$BASE/no-list/" "$headers" "$body")"
-    assert_status "$status" 403 "Autoindex disabled"
+    assert_status "$status" 404 "Autoindex disabled (school tester policy)"
     assert_file_not_contains "$body" "secret.txt" "Disabled autoindex does not leak entries"
 
     status="$(http_request GET "$BASE/mapped/route.txt" "$headers" "$body")"
@@ -1100,11 +1100,10 @@ run_core_http_tests()
     assert_status "$status" 405 "POST rejected by GET-only route"
     allow="$(header_value "$headers" "Allow")"
     normalized_allow="$(printf '%s' "$allow" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
-    if printf ',%s,' "$normalized_allow" | grep -F ',GET,' >/dev/null 2>&1 \
-        && ! printf ',%s,' "$normalized_allow" | grep -E ',(POST|DELETE),' >/dev/null 2>&1; then
-        pass "405 Allow header advertises GET and excludes forbidden methods"
+    if [ "$normalized_allow" = "GET" ]; then
+        pass "405 Allow header advertises only configured GET"
     else
-        fail "405 Allow header should advertise GET only (HEAD may also appear); got [$allow]"
+        fail "405 Allow header should be exactly GET; got [$allow]"
     fi
     if [ ! -e "$SITE_ROOT/readonly/forbidden.txt" ]; then
         pass "Rejected POST did not create a file"

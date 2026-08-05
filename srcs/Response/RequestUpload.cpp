@@ -98,25 +98,43 @@ Response handlePost(const Request &request, const EffectiveRoute &route)
 
 /*
 函数：FileOperation::validateUploadRequest
-用途：检查普通上传支持的 media type，并确认 RequestParser 使用了明确 body framing。
+用途：拒绝尚未实现的 multipart 上传，并确认 RequestParser 使用了明确 body framing。
 参数来源：request/route 来自 handlePost()。
-变量说明：contentType 暂存 Content-Type；headerValue 复用读取 Content-Length/Transfer-Encoding；两个 bool 表示 framing 字段存在性。
+变量说明：contentType/mediaType 用于提取小写主媒体类型；begin/end 去掉 OWS；headerValue 复用读取 Content-Length/Transfer-Encoding；两个 bool 表示 framing 字段存在性。
 实现逻辑：
-    1. 有 Content-Type 时调用 checkContentType()，不支持返回 415。
-    2. 检查 Content-Length 或 Transfer-Encoding 至少存在一个。
-    3. 二者都没有返回 411；其他情况允许继续。
+    1. 只明确拒绝 multipart/form-data 并返回 415，避免把 multipart 边界文本原样写盘。
+    2. 其他媒体类型作为普通原始 body 接受，包括学校 tester 使用的 test/file。
+    3. 检查 Content-Length 或 Transfer-Encoding 至少存在一个；二者都没有返回 411。
 */
 int FileOperation::validateUploadRequest(const Request &request,
                                          const EffectiveRoute &route)
 {
-    // std::string contentType;
-    // if (request.getHeader("content-type", contentType)
-    //     && checkContentType(contentType) == FILE_OPERATION_ERROR)
-    // {
-    //     response.createResponse(415, "Unsupported Content-Type",
-    //         route.server->error_pages);
-    //     return FILE_OPERATION_ERROR;
-    // }
+    std::string contentType;
+    if (request.getHeader("content-type", contentType))
+    {
+        std::string mediaType = requestHandlerToLowerAscii(contentType);
+        size_t semicolon = mediaType.find(';');
+        if (semicolon != std::string::npos)
+            mediaType = mediaType.substr(0, semicolon);
+
+        size_t begin = 0;
+        while (begin < mediaType.size()
+            && (mediaType[begin] == ' ' || mediaType[begin] == '\t'))
+            ++begin;
+        size_t end = mediaType.size();
+        while (end > begin
+            && (mediaType[end - 1] == ' ' || mediaType[end - 1] == '\t'))
+            --end;
+        mediaType = mediaType.substr(begin, end - begin);
+
+        if (mediaType == "multipart/form-data")
+        {
+            response.createResponse(415,
+                "multipart/form-data is not supported",
+                route.server->error_pages);
+            return FILE_OPERATION_ERROR;
+        }
+    }
 
     std::string headerValue;
     bool hasContentLength = request.getHeader("content-length",
