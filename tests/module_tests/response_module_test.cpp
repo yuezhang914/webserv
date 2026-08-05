@@ -587,8 +587,8 @@ static void testGetAndRouting(const ServerConfig &server)
         "解析只读 location POST");
     response = buildReadyResponse(request);
     check(response.getStatusCode() == 405
-        && headerEquals(response, "Allow", "GET, HEAD"),
-        "405 返回包含隐式 HEAD 的 Allow");
+        && headerEquals(response, "Allow", "GET"),
+        "405 Allow 只列出配置允许的 GET");
 
     check(parseRequest("PATCH", "/ping.html", "", "", server, request),
         "解析未实现 method");
@@ -613,14 +613,14 @@ static void testGetAndRouting(const ServerConfig &server)
 
 /*
 函数：testHead
-用途：验证 HEAD 完整复用 GET 的状态和表示 headers，同时任何场景都不序列化消息体。
+用途：按学校 tester 策略验证未配置的 HEAD 返回 405，同时 HEAD 响应不序列化消息体。
 参数来源：server 来自真实 Config；请求由 parseRequest() 构造。
 变量说明：request/response 复用；raw/split 检查 header 与 body 的序列化边界。
 实现逻辑：
-    1. 普通静态文件与 GET-only location 的 HEAD 返回 200，并保留对应 Content-Type/Content-Length。
-    2. 目录 index 的 HEAD 返回与 GET 相同的 200 和长度，验证目录响应最终也清空 body。
-    3. 缺失资源返回 404，POST-only location 返回 405 Allow: POST。
-    4. 重定向仍优先返回 301；PATCH 继续返回 501。
+    1. server 与 GET-only location 都没有显式 HEAD，因此普通文件、目录和缺失资源先返回 405。
+    2. Allow 只列出配置中真正允许的 GET、POST、DELETE，不隐式加入 HEAD。
+    3. POST-only location 返回 405 Allow: POST；所有 HEAD 错误响应都不序列化 body。
+    4. 重定向仍在方法权限检查前返回 301；PATCH 继续返回 501。
 */
 static void testHead(const ServerConfig &server)
 {
@@ -633,10 +633,9 @@ static void testHead(const ServerConfig &server)
     check(parseRequest("HEAD", "/ping.html", "", "", server, request),
         "解析普通 HEAD 请求");
     response = buildReadyResponse(request);
-    check(response.getStatusCode() == 200
-        && headerEquals(response, "Content-Type", "text/html")
-        && headerEquals(response, "Content-Length", "5"),
-        "普通 HEAD 返回对应 GET 的状态和 headers");
+    check(response.getStatusCode() == 405
+        && headerEquals(response, "Allow", "GET, POST, DELETE"),
+        "普通 HEAD 按学校策略返回 405 和精确 Allow");
     check(response.getBody().empty(),
         "普通 HEAD 最终不保留实际 body");
     raw = response.responseToString();
@@ -647,10 +646,9 @@ static void testHead(const ServerConfig &server)
     check(parseRequest("HEAD", "/readonly/file.txt", "", "",
         server, request), "解析 GET-only location HEAD");
     response = buildReadyResponse(request);
-    check(response.getStatusCode() == 200
-        && headerEquals(response, "Content-Type", "text/plain")
-        && headerEquals(response, "Content-Length", "9"),
-        "HEAD 自动继承 GET-only location 权限");
+    check(response.getStatusCode() == 405
+        && headerEquals(response, "Allow", "GET"),
+        "GET-only location 不隐式允许 HEAD");
     raw = response.responseToString();
     split = raw.find("\r\n\r\n");
     check(split != std::string::npos && raw.size() == split + 4,
@@ -659,37 +657,36 @@ static void testHead(const ServerConfig &server)
     check(parseRequest("HEAD", "/", "", "", server, request),
         "解析目录 index HEAD");
     response = buildReadyResponse(request);
-    check(response.getStatusCode() == 200
-        && headerEquals(response, "Content-Type", "text/html")
-        && headerEquals(response, "Content-Length", "5"),
-        "目录 index HEAD 保留 GET 的长度和类型");
+    check(response.getStatusCode() == 405
+        && headerEquals(response, "Allow", "GET, POST, DELETE"),
+        "目录 HEAD 在访问 index 前返回 405");
     raw = response.responseToString();
     split = raw.find("\r\n\r\n");
     check(response.getBody().empty()
         && split != std::string::npos && raw.size() == split + 4,
-        "目录 index HEAD 清空并不序列化 body");
+        "目录 HEAD 清空并不序列化错误页 body");
 
     check(parseRequest("HEAD", "/missing.txt", "", "",
         server, request), "解析缺失资源 HEAD");
     response = buildReadyResponse(request);
-    check(response.getStatusCode() == 404
-        && headerEquals(response, "Content-Length", "23"),
-        "缺失资源 HEAD 返回对应 GET 的 404 和错误页长度");
+    check(response.getStatusCode() == 405
+        && headerEquals(response, "Allow", "GET, POST, DELETE"),
+        "缺失资源 HEAD 在路径检查前返回 405");
     raw = response.responseToString();
     split = raw.find("\r\n\r\n");
     check(split != std::string::npos && raw.size() == split + 4,
-        "404 HEAD 不序列化错误页 body");
+        "405 HEAD 不序列化错误页 body");
 
     check(parseRequest("HEAD", "/post-only/file.txt", "", "",
         server, request), "解析 POST-only location HEAD");
     response = buildReadyResponse(request);
     check(response.getStatusCode() == 405
         && headerEquals(response, "Allow", "POST"),
-        "没有 GET 权限时 HEAD 返回 405 和精确 Allow");
+        "POST-only location HEAD 返回 405 和精确 Allow");
     raw = response.responseToString();
     split = raw.find("\r\n\r\n");
     check(split != std::string::npos && raw.size() == split + 4,
-        "405 HEAD 不序列化错误页 body");
+        "POST-only location HEAD 不序列化错误页 body");
 
     check(parseRequest("HEAD", "/old/item", "", "", server, request),
         "解析重定向 HEAD");
@@ -1059,8 +1056,8 @@ static void testCgiResponseCompatibility(const ServerConfig &server)
         server, request), "解析 CGI location DELETE");
     response = buildReadyResponse(request);
     check(response.getStatusCode() == 405
-        && headerEquals(response, "Allow", "GET, HEAD, POST"),
-        "CGI 分发前仍先遵守含隐式 HEAD 的 allow_methods");
+        && headerEquals(response, "Allow", "GET, POST"),
+        "CGI 分发前仍先遵守配置中的 allow_methods");
 }
 
 /*
