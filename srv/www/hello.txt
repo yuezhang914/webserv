@@ -1,1 +1,1 @@
-Hello Static File Content!
+STATIC_TEXT_OK
