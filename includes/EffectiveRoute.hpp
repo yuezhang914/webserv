@@ -47,7 +47,8 @@ enum RequestAction
     ACTION_GET,
     ACTION_POST,
     ACTION_DELETE,
-    ACTION_HEAD
+    ACTION_HEAD,
+    ACTION_CGI
 };
 
 /*
