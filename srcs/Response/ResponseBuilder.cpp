@@ -132,8 +132,8 @@ static bool findConfiguredCgiInterpreter(const LocationConfig *location,
     while (it != location->cgi_extensions.end())
     {
         const std::string &extension = it->first;
-        if (!extension.empty() && 
-            path.size() >= extension.size() && 
+        if (!extension.empty() &&
+            path.size() >= extension.size() &&
             path.compare(path.size() - extension.size(), extension.size(), extension) == 0)
         {
             std::string rawInterpreter = it->second;
@@ -316,31 +316,32 @@ Response buildResponse(const Request &request,
        GET 路径检查中提前 stat；脚本和解释器随后分别按 CGI 规则验证。 */
     std::string cgiInterpreter;
     bool isCgi = findConfiguredCgiInterpreter(location, scriptPath,
-                                               cgiInterpreter);
+                                              cgiInterpreter);
     RequestAction effectiveAction = isCgi ? ACTION_CGI : action;
     int pathStatus = route.createEffectivePath(scriptPath, effectiveAction);
 
     if (isCgi)
     {
-        /* CGI 脚本本身必须存在且是普通文件。通过解释器启动时脚本只需
-           可读；直接 execve 脚本时必须拥有执行权限。 */
-        int cgiPathStatus = validateCgiScript(route.targetPath,
-                                              cgiInterpreter.empty());
-        if (cgiPathStatus != PATH_OK)
-        {
-            response.createResponse(cgiPathStatus, "",
-                                    route.server->error_pages);
-            return response;
-        }
-
-        /* 配置了解释器时，还要独立确认解释器是可执行普通文件。
-           不能只验证解释器而跳过脚本，否则缺失脚本会延迟到异步层变成 502。 */
+        // 1. 如果指定了独立的 CGI 解释器/可执行文件（如 ./tester_data/cgi_tester）
         if (!cgiInterpreter.empty())
         {
+            // 只校验解释器是否存在且具备执行权限！
             int interpreterStatus = validateCgiScript(cgiInterpreter, true);
             if (interpreterStatus != PATH_OK)
             {
                 response.createResponse(interpreterStatus, "",
+                                        route.server->error_pages);
+                return response;
+            }
+        }
+        else
+        {
+            // 2. 只有在没有指定解释器（直接把 targetPath 拿来 execve）时，
+            // 才需要校验 targetPath 本身是否存在且可执行。
+            int cgiPathStatus = validateCgiScript(route.targetPath, true);
+            if (cgiPathStatus != PATH_OK)
+            {
+                response.createResponse(cgiPathStatus, "",
                                         route.server->error_pages);
                 return response;
             }
