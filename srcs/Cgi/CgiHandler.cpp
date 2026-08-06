@@ -112,7 +112,7 @@ char **CgiHandler::_buildEnvironment() const
         // 当没有额外的 path_info 时（例如 /directory/youpi.bla）：
         // cgi_tester 要求 PATH_INFO 不能留空，需设为请求路径 _path
         // PATH_TRANSLATED 需设为物理脚本路径 _script_path
-        envMap["PATH_INFO"] = _path; 
+        envMap["PATH_INFO"] = _path;
         envMap["PATH_TRANSLATED"] = _script_path;
     }
 
@@ -387,13 +387,6 @@ void CgiHandler::_executeChildProcess(int childReadFd, int parentWriteFd)
     }
     char **env = _buildEnvironment();
 
-    for (int i = 0; env[i]; ++i)
-        dprintf(STDERR_FILENO, "%s\n", env[i]);
-    // for (int i = 0; env[i]; i++)
-    // {
-    //    std::cout << env[i] << std::endl;
-    //     // printf(env[i]);
-    // }
     if (env == NULL)
     {
         ::exit(127);
@@ -404,25 +397,6 @@ void CgiHandler::_executeChildProcess(int childReadFd, int parentWriteFd)
         args[0] = const_cast<char *>(_interpreter_path.c_str());
         args[1] = const_cast<char *>(scriptName.c_str());
         args[2] = NULL;
-        dprintf(STDERR_FILENO,
-                "INTERPRETER=[%s]\n",
-                args[0]);
-
-        dprintf(STDERR_FILENO,
-                "SCRIPT=[%s]\n",
-                args[1]);
-        std::cerr
-            << "exists interpreter="
-            << access(_interpreter_path.c_str(), X_OK)
-            << std::endl;
-
-        std::cerr
-            << "errno="
-            << strerror(errno)
-            << std::endl;
-        std::cerr << "args[0]=" << args[0] << std::endl;
-        std::cerr << "args[1]=" << args[1] << std::endl;
-
         for (int i = 0; env[i]; i++)
         {
             std::cerr << "ENV[" << i << "]="
@@ -436,13 +410,6 @@ void CgiHandler::_executeChildProcess(int childReadFd, int parentWriteFd)
         std::string executable = "./" + scriptName;
         args[0] = const_cast<char *>(executable.c_str());
         args[1] = NULL;
-        dprintf(STDERR_FILENO,
-                "INTERPRETER=[%s]\n",
-                args[0]);
-
-        dprintf(STDERR_FILENO,
-                "SCRIPT=[%s]\n",
-                args[1]);
         ::execve(args[0], args, env);
     }
     perror("execve failed");

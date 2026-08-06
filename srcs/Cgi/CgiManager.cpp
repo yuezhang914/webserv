@@ -181,15 +181,7 @@ CgiEventResult CgiManager::handlePipeRead(int cgiReadFd)
         }
         else 
         {
-            // 非阻塞读取正常结束（没数据了）
-            if (errno == EAGAIN || errno == EWOULDBLOCK)
-            {
-                break;
-            }
-            // 管道发生真正异常错误 (如 EBADF, EPIPE)
-            std::cerr << "[CgiManager] Error reading from CGI pipe fd: " << cgiReadFd << std::endl;
-            this->forceKillAndClean(task);
-            return CgiEventResult(CGI_ERROR, clientFd, 500);
+            break;
         }
     }
     return CgiEventResult(CGI_CONTINUE);
