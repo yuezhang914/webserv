@@ -6,7 +6,7 @@
 *.a
 obj/
 tests/evaluation/.runtime/
-
+tester_data/
 
 
 webserv
