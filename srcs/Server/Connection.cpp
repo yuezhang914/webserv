@@ -6,11 +6,12 @@
 Connection::Connection()
     : socket(NULL), config(), read_buffer(), write_buffer(),
       request(), response(),
-      close_after_write(false), chunk_scan_active(false),
+      close_after_write(false), drain_input_before_close(false),
+      chunk_scan_active(false),
       chunk_scan_pos(0), chunk_decoded_size(0), chunk_body_limit(0),
       large_cgi_slot_acquired(false), large_cgi_waiting(false)
-      
-      
+
+
 {
 }
 
@@ -23,10 +24,11 @@ Connection::Connection()
 Connection::Connection(int clientFd, const ServerConfig &srv_cfg)
     : socket(new ClientSocket(clientFd)), config(srv_cfg), read_buffer(), write_buffer(),
       request(), response(),
-      close_after_write(false), chunk_scan_active(false),
+      close_after_write(false), drain_input_before_close(false),
+      chunk_scan_active(false),
       chunk_scan_pos(0), chunk_decoded_size(0), chunk_body_limit(0),
       large_cgi_slot_acquired(false), large_cgi_waiting(false)
-    
+
 {
 }
 
@@ -47,9 +49,10 @@ void Connection::clear()
     std::string().swap(this->write_buffer);
 
     // 2. 🧹 统一调用原子化 resetCgi() 方法，彻底复位 CGI 状态并释放 cgi_output_buffer 内存
-   
+
 
     this->close_after_write = false;
+    this->drain_input_before_close = false;
 
     // 3. 清空上一条请求的 chunked 增量扫描进度，避免 keep-alive 串线。
     this->chunk_scan_active = false;

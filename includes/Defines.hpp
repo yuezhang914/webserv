@@ -16,10 +16,10 @@
 #define CGI_INACTIVITY_TIMEOUT 10
 
 // 当前 Response/CGI 链路仍会在内存中保存完整请求体和 CGI 输出。
-// 对超过 1MB 的 chunked CGI 做准入控制，只允许 2 个同时进入完整缓冲阶段；
+// 对超过 1MB 的 chunked CGI 做准入控制，只允许 4 个同时进入完整缓冲阶段；
 // 其余客户端暂时停止 POLLIN，由 TCP 接收窗口提供背压，防止 20×100MB 压测触发 OOM。
 #define LARGE_CGI_BUFFER_THRESHOLD (1024UL * 1024UL)
-#define MAX_BUFFERED_LARGE_CGI_TASKS 2
+#define MAX_BUFFERED_LARGE_CGI_TASKS 4
 #define CLIENT_READ_BUDGET (64UL * 1024UL)
 
 #endif
