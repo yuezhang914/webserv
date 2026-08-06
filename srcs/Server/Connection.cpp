@@ -6,7 +6,9 @@
 Connection::Connection()
     : socket(NULL), config(), read_buffer(), write_buffer(),
       request(), response(),
-      close_after_write(false)
+      close_after_write(false), chunk_scan_active(false),
+      chunk_scan_pos(0), chunk_decoded_size(0), chunk_body_limit(0),
+      large_cgi_slot_acquired(false), large_cgi_waiting(false)
       
       
 {
@@ -21,7 +23,9 @@ Connection::Connection()
 Connection::Connection(int clientFd, const ServerConfig &srv_cfg)
     : socket(new ClientSocket(clientFd)), config(srv_cfg), read_buffer(), write_buffer(),
       request(), response(),
-      close_after_write(false)
+      close_after_write(false), chunk_scan_active(false),
+      chunk_scan_pos(0), chunk_decoded_size(0), chunk_body_limit(0),
+      large_cgi_slot_acquired(false), large_cgi_waiting(false)
     
 {
 }
@@ -47,7 +51,17 @@ void Connection::clear()
 
     this->close_after_write = false;
 
-    // 3. 🧹 原地重构 Request 与 Response（彻底防长连接 Keep-Alive 上下文残余污染）
+    // 3. 清空上一条请求的 chunked 增量扫描进度，避免 keep-alive 串线。
+    this->chunk_scan_active = false;
+    this->chunk_scan_pos = 0;
+    this->chunk_decoded_size = 0;
+    this->chunk_body_limit = 0;
+
+    // 4. 大型 CGI 槽由 ServerManager 在调用 clear() 前归还；这里复位连接本地标志。
+    this->large_cgi_slot_acquired = false;
+    this->large_cgi_waiting = false;
+
+    // 5. 🧹 原地重构 Request 与 Response（彻底防长连接 Keep-Alive 上下文残余污染）
     this->clearRequest();
 
     // 如果 Response 需要清空，亦可以像 placement new 一样重置：

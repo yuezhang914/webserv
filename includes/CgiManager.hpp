@@ -16,12 +16,14 @@ struct CgiTask
     int writeFd;
     pid_t pid;
 
-    std::string inputBody;    // 需要喂给 CGI 的 POST Data
-    size_t bodyBytesSent;     // 已喂字节数
-    std::string outputBuffer; // CGI 产出的原始 Response 字节流
-    std::time_t startTime;    // 启动时间
+    const std::string *inputBody; // 非拥有型指针：引用 Connection::request 中的 POST Data，避免 100MB body 深拷贝
+    size_t bodyBytesSent;          // 已喂给 CGI stdin 的字节数
+    std::string outputBuffer;      // CGI 产出的原始 Response 字节流
+    std::time_t lastActivity;      // 最近一次成功读/写 CGI 管道的时间；用于检测“无进展”超时
 
-    CgiTask() : clientFd(-1), readFd(-1), writeFd(-1), pid(-1), bodyBytesSent(0), startTime(0) {}
+    CgiTask()
+        : clientFd(-1), readFd(-1), writeFd(-1), pid(-1),
+          inputBody(NULL), bodyBytesSent(0), lastActivity(0) {}
 };
 
 // CGI 事件响应结果
@@ -75,8 +77,8 @@ public:
     void stopAllTasks();
 
 private:
-    std::map<int, CgiTask> _read_fd_to_task_map;  // cgiReadFd  -> CgiTask
-    std::map<int, CgiTask> _write_fd_to_task_map; // cgiWriteFd -> CgiTask
+    std::map<int, CgiTask> _read_fd_to_task_map;       // 唯一拥有任务状态：cgiReadFd -> CgiTask
+    std::map<int, int> _write_fd_to_read_fd_map;       // 轻量反查：cgiWriteFd -> cgiReadFd，绝不复制大 body
 
     void forceKillAndClean(CgiTask &task);
 };

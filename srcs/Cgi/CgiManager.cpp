@@ -6,7 +6,7 @@
 参数：- 无。
 实现逻辑或说明：
     1. 初始化 CgiManager 实例。
-    2. 私有成员变量 _read_fd_to_task_map 与 _write_fd_to_task_map 账本由 C++98 默认构造函数完成空初始化。
+    2. 私有成员变量 _read_fd_to_task_map 与 _write_fd_to_read_fd_map 账本由 C++98 默认构造函数完成空初始化。
 */
 CgiManager::CgiManager()
 {
@@ -20,7 +20,7 @@ CgiManager::CgiManager()
     1. 遍历私有账本：以 _read_fd_to_task_map 为全量任务宿主主表进行循环遍历。
     2. 迭代器安全自增：采用 std::map<int, CgiTask>::iterator current = it++ 范式，提前备份迭代器，严防 forceKillAndClean 内部 erase 导致迭代器失效野指针。
     3. 调用 forceKillAndClean 强杀子进程并关闭其占用的双向管道 FD。
-    4. 最后清空 _read_fd_to_task_map 与 _write_fd_to_task_map 两个账本，保证 0 进程与 0 FD 泄露。
+    4. 最后清空唯一任务主表与轻量写端反查表，保证 0 进程、0 FD 泄露且不复制大请求体。
 */
 CgiManager::~CgiManager()
 {
@@ -33,7 +33,7 @@ CgiManager::~CgiManager()
     }
 
     this->_read_fd_to_task_map.clear();
-    this->_write_fd_to_task_map.clear();
+    this->_write_fd_to_read_fd_map.clear();
 }
 
 /*
@@ -55,11 +55,11 @@ CgiManager::~CgiManager()
 实现逻辑或说明：
     1. 参数校验：检查 clientFd 是否合法以及 scriptPath 是否为空。
     2. 产生子进程：实例化 CgiHandler 并调用 async_launch()，获得包含 PID、read_fd、write_fd 的 CgiFds。
-    3. 组装 CgiTask：填入 clientFd、readFd、writeFd、pid、inputBody 以及通过 std::time(NULL) 打点的时间戳。
-    4. 读账本登记：将 task 注册进 _read_fd_to_task_map[read_fd]，并赋值 outReadFd。
-    5. 写账本处理：
-       - 若 reqBody 不为空且 fds.write_fd >= 0，注册进 _write_fd_to_task_map 并赋值 outWriteFd；
-       - 若无 Body，主动关掉父进程手里的 write_fd，将 task.writeFd 设为 -1，避免无用写 FD 悬挂。
+    3. 组装 CgiTask：保存 clientFd、管道、PID，以及指向 Connection::Request body 的非拥有型 const 指针。
+    4. 唯一主表登记：完整 task 只注册进 _read_fd_to_task_map[read_fd]，避免 100MB body 被复制两次。
+    5. 写端反查处理：
+       - 若 reqBody 不为空且 write_fd 合法，只登记 writeFd -> readFd 的整数映射；
+       - 若无 Body，主动关闭父进程写端并把主表中的 writeFd 设为 -1。
 */
 bool CgiManager::launchTask(
     int clientFd,
@@ -94,14 +94,17 @@ bool CgiManager::launchTask(
     task.readFd = fds.read_fd;
     task.writeFd = fds.write_fd;
     task.pid = fds.pid;
-    task.inputBody = reqBody;
+    // Request 归 Connection 所有，CGI 完成前客户端事件被暂停且 Request 不会被 clear；
+    // 因此这里只保存 const 指针，避免学校 tester 的 100MB body 被任务表重复深拷贝。
+    task.inputBody = &reqBody;
     task.bodyBytesSent = 0;
-    task.startTime = std::time(NULL);
+    task.lastActivity = std::time(NULL);
     this->_read_fd_to_task_map[fds.read_fd] = task;
     outReadFd = fds.read_fd;
     if (!reqBody.empty() && fds.write_fd >= 0)
     {
-        this->_write_fd_to_task_map[fds.write_fd] = task;
+        // 写端表只保存 readFd 反查键；完整状态始终只存在于读端主表中。
+        this->_write_fd_to_read_fd_map[fds.write_fd] = fds.read_fd;
         outWriteFd = fds.write_fd;
     }
     else
@@ -155,6 +158,8 @@ CgiEventResult CgiManager::handlePipeRead(int cgiReadFd)
         ssize_t bytesRead = ::read(cgiReadFd, buffer, sizeof(buffer));
         if (bytesRead > 0)
         {
+            // 只有真正读到 CGI stdout 才算有进展；EAGAIN 不刷新计时。
+            task.lastActivity = std::time(NULL);
             if (task.outputBuffer.size() + static_cast<size_t>(bytesRead) > CGI_MAX_OUTPUT_SIZE)
             {
                 std::cerr << "[CgiManager] Error: CGI output size exceeded max limit! 502." << std::endl;
@@ -200,51 +205,73 @@ CgiEventResult CgiManager::handlePipeRead(int cgiReadFd)
       - CGI_CONTINUE: 表示 Body 正在传输、Body 传输完毕触发 EOF、或短暂等候，主事件循环应继续。
       - CGI_ERROR   : 表示管道写入遇到物理破裂（如 EPIPE/子进程挂掉），通知 Server 发送 500 错误。
 实现逻辑或说明：
-    1. 查账与防卫：若在 _write_fd_to_task_map 中未找到任务，说明管道已释放，安全 close(cgiWriteFd) 并返回 CGI_CONTINUE。
-    2. 状态检查：若 task.bodyBytesSent >= bodySize，说明先前已发完，主动关闭管道写端、发送 EOF 信号并从写账本擦除。
-    3. 非阻塞切片写入：根据 bodyBytesSent 偏移量计算剩余未发送指针，调用 ::write 尝试发送。
-    4. 结果判定（无 errno 依赖）：
-       - bytesWritten > 0 : 累加已发送字节数。若发完，物理 close 写端触发 EOF 并擦除写账本，返回 CGI_CONTINUE。
-       - bytesWritten == 0: 管道缓冲区满，不做破坏，返回 CGI_CONTINUE 等待下一个 poll Tick。
-       - bytesWritten < 0 : 判定为物理管道破裂（如子进程崩溃），调用 forceKillAndClean 强杀进程并返回 CGI_ERROR (500)。
+    1. 先用轻量写端表找到 readFd，再从唯一任务主表取得 CgiTask，避免状态副本分叉。
+    2. inputBody 只读引用 Connection::Request 的 body，不产生 100MB 深拷贝。
+    3. 每轮最多写 64KB，保证公平性；EAGAIN/EWOULDBLOCK/EINTR 都视为正常暂态。
+    4. Body 发完后关闭写端产生 EOF，并只删除 writeFd -> readFd 反查；读端继续等待 CGI stdout。
+    5. 真正的 EPIPE/EBADF 等错误才清理整个任务并返回 500。
 */
 CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
 {
-    std::map<int, CgiTask>::iterator it = this->_write_fd_to_task_map.find(cgiWriteFd);
-    if (it == this->_write_fd_to_task_map.end())
+    std::map<int, int>::iterator writeIt =
+        this->_write_fd_to_read_fd_map.find(cgiWriteFd);
+    if (writeIt == this->_write_fd_to_read_fd_map.end())
     {
         ::close(cgiWriteFd);
         return CgiEventResult(CGI_CONTINUE);
     }
-    CgiTask &task = it->second;
-    const std::string &body = task.inputBody;
-    size_t bodySize = body.size();
-    size_t sentBytes = task.bodyBytesSent;
-    if (sentBytes >= bodySize)
+
+    std::map<int, CgiTask>::iterator readIt =
+        this->_read_fd_to_task_map.find(writeIt->second);
+    if (readIt == this->_read_fd_to_task_map.end())
     {
         ::close(cgiWriteFd);
-        this->_write_fd_to_task_map.erase(it);
-        task.writeFd = -1;
-        return CgiEventResult(CGI_CONTINUE); // 读端（stdout）还在继续，所以返回 CONTINUE
+        this->_write_fd_to_read_fd_map.erase(writeIt);
+        return CgiEventResult(CGI_CONTINUE);
     }
-    const char *dataPtr = body.data() + sentBytes;
-    size_t remaining = bodySize - sentBytes;
-    ssize_t bytesWritten = ::write(cgiWriteFd, dataPtr, remaining);
+
+    CgiTask &task = readIt->second;
+    if (task.inputBody == NULL)
+    {
+        int clientFd = task.clientFd;
+        this->forceKillAndClean(task);
+        return CgiEventResult(CGI_ERROR, clientFd, 500);
+    }
+
+    const std::string &body = *task.inputBody;
+    size_t bodySize = body.size();
+    if (task.bodyBytesSent >= bodySize)
+    {
+        ::close(cgiWriteFd);
+        this->_write_fd_to_read_fd_map.erase(writeIt);
+        task.writeFd = -1;
+        return CgiEventResult(CGI_CONTINUE);
+    }
+
+    size_t remaining = bodySize - task.bodyBytesSent;
+    const size_t maxWritePerTick = 64 * 1024;
+    size_t writeSize = remaining < maxWritePerTick
+        ? remaining : maxWritePerTick;
+    const char *dataPtr = body.data() + task.bodyBytesSent;
+    ssize_t bytesWritten = ::write(cgiWriteFd, dataPtr, writeSize);
+
     if (bytesWritten > 0)
     {
+        // 只有真正写入 CGI stdin 才算有进展；管道暂时写满不刷新计时。
+        task.lastActivity = std::time(NULL);
         task.bodyBytesSent += static_cast<size_t>(bytesWritten);
         if (task.bodyBytesSent >= bodySize)
         {
             ::close(cgiWriteFd);
-            this->_write_fd_to_task_map.erase(it);
+            this->_write_fd_to_read_fd_map.erase(writeIt);
             task.writeFd = -1;
         }
         return CgiEventResult(CGI_CONTINUE);
     }
-    else if (bytesWritten == 0)
-    {
+    if (bytesWritten == 0
+        || errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
         return CgiEventResult(CGI_CONTINUE);
-    }
+
     std::cerr << "[CgiManager] Error: Failed to write POST body to CGI stdin! 500." << std::endl;
     int clientFd = task.clientFd;
     this->forceKillAndClean(task);
@@ -259,35 +286,42 @@ CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
 返回值：
     - void（无返回值）。
 实现逻辑或说明：
-    1. 读管道清理：若 task.readFd >= 0，调用 ::close 并从 _read_fd_to_task_map 中擦除，重置为 -1。
-    2. 写管道清理：若 task.writeFd >= 0，调用 ::close 并从 _write_fd_to_task_map 中擦除，重置为 -1。
-    3. 子进程强杀与非阻塞收尸：若 task.pid > 0：
-       - 发送 ::kill(task.pid, SIGKILL) 强行抹杀子进程；
-       - 调用 ::waitpid(task.pid, &status, WNOHANG) 立即回收其 PCB 资源，绝不阻塞主线程，并重置 pid 为 -1。
+    1. 先复制 readFd、writeFd、pid；task 是主表元素引用，主表 erase 后绝不能继续访问。
+    2. 关闭写端并删除轻量反查，再关闭读端。
+    3. 先用 waitpid(WNOHANG) 尝试回收；仍运行才 SIGKILL，并处理 EINTR 后完成收尸。
+    4. 所有标量都已复制且资源已处理后，最后擦除 readFd 对应的唯一任务主表元素。
 */
 void CgiManager::forceKillAndClean(CgiTask &task)
 {
-    if (task.readFd >= 0)
+    // task 位于 _read_fd_to_task_map 中；erase 以后引用立即失效，
+    // 所以必须先复制全部标量，再关闭资源，最后才擦除主表。
+    const int readFd = task.readFd;
+    const int writeFd = task.writeFd;
+    const pid_t pid = task.pid;
+
+    if (writeFd >= 0)
     {
-        std::cout << "cleanup readFd = " << task.readFd << std::endl;
-        ::close(task.readFd);
-        this->_read_fd_to_task_map.erase(task.readFd);
-        task.readFd = -1;
+        ::close(writeFd);
+        this->_write_fd_to_read_fd_map.erase(writeFd);
     }
-    if (task.writeFd >= 0) 
+    if (readFd >= 0)
+        ::close(readFd);
+
+    if (pid > 0)
     {
-        std::cout << "cleanup writeFd = " << task.writeFd << std::endl;
-        ::close(task.writeFd);
-        this->_write_fd_to_task_map.erase(task.writeFd);
-        task.writeFd = -1;
+        int status = 0;
+        pid_t waited = ::waitpid(pid, &status, WNOHANG);
+        if (waited == 0)
+        {
+            ::kill(pid, SIGKILL);
+            while (::waitpid(pid, &status, 0) < 0 && errno == EINTR)
+            {
+            }
+        }
     }
-    if (task.pid > 0)
-    {
-        ::kill(task.pid, SIGKILL);
-        int status;
-        ::waitpid(task.pid, &status, 0); 
-        task.pid = -1;
-    }
+
+    if (readFd >= 0)
+        this->_read_fd_to_task_map.erase(readFd);
 }
 
 /*
@@ -328,7 +362,7 @@ void CgiManager::reapChildren()
 
 /*
 函数：CgiManager::checkTimeouts
-用途：看门狗巡检函数。全量检测运行超时的 CGI 进程，物理强杀并向 ServerManager 返回 504 错误指令。
+用途：看门狗巡检函数。全量检测连续无管道进展的 CGI 进程，物理强杀并向 ServerManager 返回 504 错误指令。
 参数：
     - 无。
 返回值：
@@ -336,7 +370,7 @@ void CgiManager::reapChildren()
 实现逻辑或说明：
     1. 时间获取：调用 std::time(NULL) 获取当前系统时间戳 now。
     2. 安全遍历：使用 C++98 安全迭代器范式（current = it++）遍历 _read_fd_to_task_map。
-    3. 超时判定：若 now - task.startTime > 10（超过 10 秒看门狗阈值）：
+    3. 超时判定：若 now - task.lastActivity 超过 CGI_INACTIVITY_TIMEOUT（连续 10 秒无 stdin/stdout 进展）：
        - 将 CgiEventResult(CGI_ERROR, clientFd, 504) 压入 timeoutResults 数组；
        - 调用 forceKillAndClean 强杀超时 PID 并关闭管道与清除账本。
     4. 结果交付：将 timeoutResults 集合回传给 Reactor 主循环统一给客户端渲染 504 Gateway Timeout 页面。
@@ -352,10 +386,10 @@ std::vector<CgiEventResult> CgiManager::checkTimeouts()
         std::map<int, CgiTask>::iterator current = it++;
         CgiTask &task = current->second;
 
-        if (task.startTime > 0 && (now - task.startTime > MAX_TIME))
+        if (task.lastActivity > 0 && (now - task.lastActivity > CGI_INACTIVITY_TIMEOUT))
         {
             std::cerr << "[CgiManager] Timeout Warning: CGI PID " << task.pid
-                      << " exceeded 10s timeout! Killing..." << std::endl;
+                      << " had no pipe progress for 10s! Killing..." << std::endl;
 
             int clientFd = task.clientFd;
             timeoutResults.push_back(CgiEventResult(CGI_ERROR, clientFd, 504));
@@ -405,33 +439,22 @@ void CgiManager::removeTaskByClientFd(int clientFd)
 返回值：
     - bool: 若写任务仍有效（Body 尚未发送完毕）返回 true；若任务已发完注销或 FD 无效则返回 false。
 实现逻辑或说明：
-    1. 在私有写账本 _write_fd_to_task_map 中执行 find(cgiWriteFd) 查找。
-    2. 将迭代器与 _write_fd_to_task_map.end() 进行比较。
+    1. 在私有写账本 _write_fd_to_read_fd_map 中执行 find(cgiWriteFd) 查找。
+    2. 将迭代器与 _write_fd_to_read_fd_map.end() 进行比较。
     3. 供 ServerManager::handleCgiWrite 在处理 CGI_CONTINUE 时进行精准判定，以决定是保留 poll 监听继续发送切片，还是安全注销写 FD。
 */
 bool CgiManager::hasWriteTask(int cgiWriteFd) const
 {
-    return this->_write_fd_to_task_map.find(cgiWriteFd) != this->_write_fd_to_task_map.end();
+    return this->_write_fd_to_read_fd_map.find(cgiWriteFd)
+        != this->_write_fd_to_read_fd_map.end();
 }
 
 void CgiManager::stopAllTasks()
 {
-    // 1. 先收集所有需要清理的任务，避免遍历 map 的同时执行 erase 导致迭代器失效
-    std::vector<CgiTask> tasksToClean;
+    // forceKillAndClean 会擦除主表当前元素，因此始终清理 begin()，
+    // 既不会使迭代器失效，也不会复制任务状态或大请求体。
+    while (!this->_read_fd_to_task_map.empty())
+        this->forceKillAndClean(this->_read_fd_to_task_map.begin()->second);
 
-    for (std::map<int, CgiTask>::iterator it = _read_fd_to_task_map.begin();
-         it != _read_fd_to_task_map.end(); ++it)
-    {
-        tasksToClean.push_back(it->second);
-    }
-
-    // 2. 依次调用你的 forceKillAndClean 进行物理清理
-    for (size_t i = 0; i < tasksToClean.size(); ++i)
-    {
-        this->forceKillAndClean(tasksToClean[i]);
-    }
-
-    // 3. 彻底清空所有 Map 映射
-    _read_fd_to_task_map.clear();
-    _write_fd_to_task_map.clear();
+    this->_write_fd_to_read_fd_map.clear();
 }
