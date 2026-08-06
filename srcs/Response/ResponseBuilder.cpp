@@ -322,37 +322,50 @@ Response buildResponse(const Request &request,
 
     if (isCgi)
     {
-        // 1. 如果指定了独立的 CGI 解释器/可执行文件（如 ./tester_data/cgi_tester）
         if (!cgiInterpreter.empty())
         {
-            // 只校验解释器是否存在且具备执行权限！
+            /* --- 情况 A：配置了独立的二进制解释器 (如 ./tester_data/cgi_tester) --- */
+
+            // 1. 解释器本身必须存在且具备可执行权限 (+x / X_OK)
             int interpreterStatus = validateCgiScript(cgiInterpreter, true);
             if (interpreterStatus != PATH_OK)
             {
-                response.createResponse(interpreterStatus, "",
-                                        route.server->error_pages);
+                response.createResponse(interpreterStatus, "", route.server->error_pages);
                 return response;
+            }
+
+            // 2. 对于 GET / HEAD 请求，cgi_tester 需要读取 targetPath 的内容，因此文件必须可读 (R_OK)；
+            //    对于 POST 请求，targetPath 仅作为 PATH_INFO 传给 cgi_tester 处理 stdin，不校验 targetPath 存在性。
+            if (request.getMethod() == "GET" || request.getMethod() == "HEAD")
+            {
+                int cgiPathStatus = validateCgiScript(route.targetPath, false);
+                if (cgiPathStatus != PATH_OK)
+                {
+                    response.createResponse(cgiPathStatus, "", route.server->error_pages);
+                    return response;
+                }
             }
         }
         else
         {
-            // 2. 只有在没有指定解释器（直接把 targetPath 拿来 execve）时，
-            // 才需要校验 targetPath 本身是否存在且可执行。
+            /* --- 情况 B：没有配置解释器 (直接 execve 脚本本身，如原生 .sh / .cgi) --- */
+
+            // 无论是 POST 还是 GET，缺少解释器时，脚本本身必须存在且【严格要求 X_OK 执行权限】
             int cgiPathStatus = validateCgiScript(route.targetPath, true);
             if (cgiPathStatus != PATH_OK)
             {
-                response.createResponse(cgiPathStatus, "",
-                                        route.server->error_pages);
+                // 文件不存在返回 404；无 +x 权限返回 403
+                response.createResponse(cgiPathStatus, "", route.server->error_pages);
                 return response;
             }
         }
 
+        // 校验全部通过，交付异步层启动 CGI
         response.setStatus(200);
         response.setHeader("X-Internal-CGI-Path", route.targetPath);
         if (!cgiInterpreter.empty())
             response.setHeader("X-Internal-CGI-Interpreter", cgiInterpreter);
 
-        /* 通过内部 headers 把 CGI 路径信息交给异步执行层。 */
         response.setHeader("X-Internal-CGI-Script-Name", scriptPath);
         response.setHeader("X-Internal-CGI-Path-Info", pathInfo);
         response.setHeader("X-Internal-CGI-Document-Root",
