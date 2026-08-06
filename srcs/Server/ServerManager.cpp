@@ -373,9 +373,10 @@ void ServerManager::processParsedRequest(Connection *conn, int clientFd)
               << " | URI: " << conn->request.getPath() 
               << " | Body Size in Request: " << conn->request.getBody().size() << " bytes" << std::endl;
 
+    // 💡 2. 路由与响应对象构建 (如果在 buildResponse 中已修覆 validateCgiScript，不存在的 .bla 也会带上 X-Internal-CGI-* 标头)
     Response res = buildResponse(conn->request, sessionStore);
 
-    // 💡 2. 提取 Content-Length 头部
+    // 💡 3. 提取 Content-Length 与 Status 打印 Debug
     std::string contentLength;
     res.getHeader("Content-Length", contentLength);
 
@@ -393,7 +394,17 @@ void ServerManager::processParsedRequest(Connection *conn, int clientFd)
     {
         std::cout << "[DEBUG Normal Task] No CGI header, sending direct response." << std::endl;
         std::cout << "=================================================\n" << std::endl;
+        
         conn->write_buffer = res.responseToString();
+
+        // 💡 4. 检查 Response Header 是否包含 Connection: close
+        std::string connHeader;
+        if (res.getHeader("Connection", connHeader) && 
+            (connHeader == "close" || connHeader == "Close"))
+        {
+            conn->close_after_write = true;
+        }
+
         this->setClientEvents(clientFd, POLLOUT);
     }
 }

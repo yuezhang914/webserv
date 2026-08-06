@@ -304,8 +304,6 @@ Response buildResponse(const Request &request,
     {
         response.createResponse(405, "", route.server->error_pages);
         response.setHeader("Allow", buildAllowHeader(route.allow_methods));
-        /* HEAD 的 405 不发送错误页 body，并把 Content-Length 同步为 0，
-           避免客户端在 keep-alive 连接上继续等待不存在的消息体。 */
         if (request.getMethod() == "HEAD")
             response.clearBody();
         return response;
@@ -314,47 +312,55 @@ Response buildResponse(const Request &request,
     if (isSessionDemoPath(request.getPath()))
         return buildSessionDemoResponse(request, sessionStore);
 
-    /* 使用剥离后的脚本路径建立真实文件路径，PATH_INFO 不参与 stat()。 */
-    int pathStatus = route.createEffectivePath(scriptPath, action);
+    // 💡 1. 优先检查是否配置了 CGI
     std::string cgiInterpreter;
-    if (findConfiguredCgiInterpreter(location, scriptPath, cgiInterpreter))
+    bool isCgi = findConfiguredCgiInterpreter(location, scriptPath, cgiInterpreter);
+
+    // 💡 2. 如果是 CGI 请求，将 action 设置为 ACTION_CGI，防止 createEffectivePath() 去 stat(youpla.bla)
+    RequestAction effectiveAction = isCgi ? ACTION_CGI : action;
+    int pathStatus = route.createEffectivePath(scriptPath, effectiveAction);
+
+    // 💡 3. 处理 CGI 分支
+    if (isCgi)
     {
-        int cgiPathStatus = validateCgiScript(route.targetPath,
-                                              cgiInterpreter.empty());
+        // 关键修覆：有解释器时校验 cgiInterpreter (cgi_tester)，没解释器时才校验 route.targetPath
+        std::string checkPath = !cgiInterpreter.empty() ? cgiInterpreter : route.targetPath;
+        bool requireExec = !cgiInterpreter.empty() ? true : cgiInterpreter.empty();
+
+        int cgiPathStatus = validateCgiScript(checkPath, requireExec);
         if (cgiPathStatus != PATH_OK)
         {
-            response.createResponse(cgiPathStatus, "",
-                                    route.server->error_pages);
+            // 只有当 cgi_tester 本身不存在或无法执行时，才报 500 / 403
+            response.createResponse(cgiPathStatus, "", route.server->error_pages);
             return response;
         }
+
         response.setStatus(200);
         response.setHeader("X-Internal-CGI-Path", route.targetPath);
         if (!cgiInterpreter.empty())
-            response.setHeader("X-Internal-CGI-Interpreter",
-                               cgiInterpreter);
+            response.setHeader("X-Internal-CGI-Interpreter", cgiInterpreter);
 
         /* 通过内部 headers 把 CGI 路径信息交给异步执行层。 */
         response.setHeader("X-Internal-CGI-Script-Name", scriptPath);
         response.setHeader("X-Internal-CGI-Path-Info", pathInfo);
-        response.setHeader("X-Internal-CGI-Path",
-                           route.targetPath);
         response.setHeader("X-Internal-CGI-Document-Root",
-                           route.root);
+                           route.use_alias ? route.alias : route.root);
 
         return response;
     }
 
+    // 💡 4. 非 CGI 请求才检查 pathStatus (404/403)
     if (pathStatus != PATH_OK)
     {
         response.createResponse(pathStatus, "", route.server->error_pages);
         return response;
     }
+
     /* HEAD 使用 GET 的状态和 headers，但最终不保留实际消息体。 */
     if (action == ACTION_GET || action == ACTION_HEAD)
     {
         Response res = handleGet(request, route);
 
-        /* clearBodyOnly() 保留 GET 已计算的 Content-Length。 */
         if (action == ACTION_HEAD)
             res.clearBodyOnly();
         return res;
