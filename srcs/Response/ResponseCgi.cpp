@@ -95,49 +95,37 @@ bool Response::loadCgiOutput(const std::string &cgiOutput)
         if (!line.empty() && line[line.size() - 1] == '\r')
             line.erase(line.size() - 1);
         
-        // 💡 修复 1：空行跳过，不直接报错退出
+        /* headerBlock 已在第一个空行处截断，内部再次出现空行说明
+           CGI header 区格式不完整，不能静默忽略后继续生成 200。 */
         if (line.empty())
-        {
-            if (lineEnd == headerBlock.size())
-                break;
-            cursor = lineEnd + 1;
-            continue;
-        }
+            return false;
 
         size_t colon = line.find(':');
-        // 💡 修复 2：如果行中没有 ':'（例如 cgi_tester 吐出的环境变量/调试文本），忽略该行并继续！
+        /* CGI header 必须使用 name:value 结构。缺少冒号的调试文本若出现在
+           header 区，会让客户端无法可靠区分元数据和 body，因此返回 502。 */
         if (colon == std::string::npos)
-        {
-            if (lineEnd == headerBlock.size())
-                break;
-            cursor = lineEnd + 1;
-            continue;
-        }
+            return false;
 
         std::string name = line.substr(0, colon);
         std::string value = responseTrimOws(line.substr(colon + 1));
 
-        // 如果 Header 键值包含非法字符，也是选择跳过，而不是直接崩掉整个 CGI
+        /* Header name/value 必须整体合法；不能只跳过坏字段，因为这会把
+           本应判定为坏网关的 CGI 输出伪装成一个正常响应。 */
         if (!isValidHeaderName(name) || !isValidHeaderValue(value))
-        {
-            if (lineEnd == headerBlock.size())
-                break;
-            cursor = lineEnd + 1;
-            continue;
-        }
+            return false;
 
         std::string lowerName = toLowerAscii(name);
         if (lowerName == "status")
         {
-            if (!hasStatus)
-            {
-                std::istringstream statusStream(value);
-                if ((statusStream >> importedStatus)
-                    && importedStatus >= 100 && importedStatus <= 599)
-                {
-                    hasStatus = true;
-                }
-            }
+            /* CGI/1.1 的 Status 字段不能重复，状态码也必须落在 HTTP
+               可表示的 100 到 599 范围内。 */
+            if (hasStatus)
+                return false;
+            std::istringstream statusStream(value);
+            if (!(statusStream >> importedStatus)
+                || importedStatus < 100 || importedStatus > 599)
+                return false;
+            hasStatus = true;
         }
         else if (lowerName != "content-length"
             && lowerName != "transfer-encoding"

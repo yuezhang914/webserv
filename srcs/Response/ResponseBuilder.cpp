@@ -312,27 +312,38 @@ Response buildResponse(const Request &request,
     if (isSessionDemoPath(request.getPath()))
         return buildSessionDemoResponse(request, sessionStore);
 
-    // 💡 1. 优先检查是否配置了 CGI
+    /* 先识别 CGI 后缀。ACTION_CGI 只负责建立 targetPath，不在通用
+       GET 路径检查中提前 stat；脚本和解释器随后分别按 CGI 规则验证。 */
     std::string cgiInterpreter;
-    bool isCgi = findConfiguredCgiInterpreter(location, scriptPath, cgiInterpreter);
-
-    // 💡 2. 如果是 CGI 请求，将 action 设置为 ACTION_CGI，防止 createEffectivePath() 去 stat(youpla.bla)
+    bool isCgi = findConfiguredCgiInterpreter(location, scriptPath,
+                                               cgiInterpreter);
     RequestAction effectiveAction = isCgi ? ACTION_CGI : action;
     int pathStatus = route.createEffectivePath(scriptPath, effectiveAction);
 
-    // 💡 3. 处理 CGI 分支
     if (isCgi)
     {
-        // 关键修覆：有解释器时校验 cgiInterpreter (cgi_tester)，没解释器时才校验 route.targetPath
-        std::string checkPath = !cgiInterpreter.empty() ? cgiInterpreter : route.targetPath;
-        bool requireExec = !cgiInterpreter.empty() ? true : cgiInterpreter.empty();
-
-        int cgiPathStatus = validateCgiScript(checkPath, requireExec);
+        /* CGI 脚本本身必须存在且是普通文件。通过解释器启动时脚本只需
+           可读；直接 execve 脚本时必须拥有执行权限。 */
+        int cgiPathStatus = validateCgiScript(route.targetPath,
+                                              cgiInterpreter.empty());
         if (cgiPathStatus != PATH_OK)
         {
-            // 只有当 cgi_tester 本身不存在或无法执行时，才报 500 / 403
-            response.createResponse(cgiPathStatus, "", route.server->error_pages);
+            response.createResponse(cgiPathStatus, "",
+                                    route.server->error_pages);
             return response;
+        }
+
+        /* 配置了解释器时，还要独立确认解释器是可执行普通文件。
+           不能只验证解释器而跳过脚本，否则缺失脚本会延迟到异步层变成 502。 */
+        if (!cgiInterpreter.empty())
+        {
+            int interpreterStatus = validateCgiScript(cgiInterpreter, true);
+            if (interpreterStatus != PATH_OK)
+            {
+                response.createResponse(interpreterStatus, "",
+                                        route.server->error_pages);
+                return response;
+            }
         }
 
         response.setStatus(200);
@@ -349,7 +360,7 @@ Response buildResponse(const Request &request,
         return response;
     }
 
-    // 💡 4. 非 CGI 请求才检查 pathStatus (404/403)
+    /* 非 CGI 请求继续使用通用路径状态；CGI 已在上方完成专用验证。 */
     if (pathStatus != PATH_OK)
     {
         response.createResponse(pathStatus, "", route.server->error_pages);
