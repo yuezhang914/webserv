@@ -141,20 +141,15 @@ ssize_t ClientSocket::write(const std::string &data) const
     if (data.empty())
         return 0;
 
-    // 💡 采用 MSG_NOSIGNAL 护盾，防止对端已关闭时触发 SIGPIPE 信号打爆主进程
+    // MSG_NOSIGNAL 防止客户端断开时抛出 SIGPIPE 导致主进程崩溃
     ssize_t bytes = ::send(this->_fd, data.data(), data.size(), MSG_NOSIGNAL);
 
     if (bytes >= 0)
         return bytes;
 
-    // 💡 区分“暂态阻塞”与“致命崩溃”
-    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
-    {
-        return -1; // 暂态非阻塞：内核缓冲区已满或被打断，下一次 POLLOUT 继续
-    }
-
-    // 真正的致命错误（如 EPIPE, ECONNRESET, EBADF 等）
-    return -2; // 物理崩塌：上层接收到 -2 后将直接优雅关闭连接
+    // 非阻塞模式下，send < 0 统一返回 -1。
+    // 不依赖 errno，暂态阻塞与断开链接交由上层 Event Loop (EPOLLOUT / EPOLLHUP) 处理。
+    return -1;
 }
 
 /**
