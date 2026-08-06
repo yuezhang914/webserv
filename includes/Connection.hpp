@@ -19,6 +19,9 @@ public:
     Response response;
     bool close_after_write;
 
+    // 413 提前响应后的输入排空状态：响应已发送，但在客户端停止写入并关闭前不主动 reset socket。
+    bool drain_input_before_close;
+
     // chunked 大请求的增量扫描状态：只记录下一段边界，不保存额外 body 副本。
     bool chunk_scan_active;
     size_t chunk_scan_pos;
@@ -33,13 +36,13 @@ public:
     Connection(int clientFd, const ServerConfig &srv_cfg);
     ~Connection();
 
-   
+
 
     void clear();
     void clearRequest();
 
 private:
- 
+
     Connection(const Connection &other);
     Connection &operator=(const Connection &other);
 };

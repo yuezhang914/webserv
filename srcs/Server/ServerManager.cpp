@@ -369,8 +369,8 @@ void ServerManager::processParsedRequest(Connection *conn, int clientFd)
 
     // 💡 1. 打印请求基本信息与实际 Body 长度
     std::cout << "\n================ [DEBUG REQUEST] ================" << std::endl;
-    std::cout << "[REQ] Method: " << conn->request.getMethod() 
-              << " | URI: " << conn->request.getPath() 
+    std::cout << "[REQ] Method: " << conn->request.getMethod()
+              << " | URI: " << conn->request.getPath()
               << " | Body Size in Request: " << conn->request.getBody().size() << " bytes" << std::endl;
 
     // 💡 2. 路由与响应对象构建 (如果在 buildResponse 中已修覆 validateCgiScript，不存在的 .bla 也会带上 X-Internal-CGI-* 标头)
@@ -380,7 +380,7 @@ void ServerManager::processParsedRequest(Connection *conn, int clientFd)
     std::string contentLength;
     res.getHeader("Content-Length", contentLength);
 
-    std::cout << "[RES] Status: " << res.getStatusCode() 
+    std::cout << "[RES] Status: " << res.getStatusCode()
               << " | Header Content-Length: " << contentLength << std::endl;
 
     std::string script_path;
@@ -394,12 +394,12 @@ void ServerManager::processParsedRequest(Connection *conn, int clientFd)
     {
         std::cout << "[DEBUG Normal Task] No CGI header, sending direct response." << std::endl;
         std::cout << "=================================================\n" << std::endl;
-        
+
         conn->write_buffer = res.responseToString();
 
         // 💡 4. 检查 Response Header 是否包含 Connection: close
         std::string connHeader;
-        if (res.getHeader("Connection", connHeader) && 
+        if (res.getHeader("Connection", connHeader) &&
             (connHeader == "close" || connHeader == "Close"))
         {
             conn->close_after_write = true;
@@ -580,7 +580,8 @@ void ServerManager::releaseLargeCgiSlot(int clientFd)
     3. 首次调用 parseBuffer 解析 request-line/headers；若确认是未完成 chunked 请求，建立 Connection 级扫描状态。
     4. 后续 poll 只用 advanceChunkedScan 从上次边界继续，避免学校 tester 的大量小 chunk 触发 O(n²) 重扫。
     5. 收到完整 0-size chunk 后才运行一次最终 parseBuffer 解码 body；成功后释放原始大 buffer 并分发请求。
-    6. 超限返回 413，其他语法错误返回 400。
+    6. 超限时先发送 413，再进入输入排空状态；客户端结束写入并关闭后才释放 socket，避免 RST。
+    7. 其他语法错误返回 400。
 */
 void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
 {
@@ -594,6 +595,28 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
         return;
     }
     Connection *conn = connIt->second;
+
+    /*
+    413 已经发送后只排空客户端仍在写入的剩余 request body。
+    不能在客户端 write() 尚未结束时立刻 close，否则内核会向对端发送 RST，
+    Go 学校 tester 会在写入阶段报 connection reset，而读不到已经生成的 413。
+    响应使用 Connection: close；客户端读到完整 413 后会主动关闭，EOF 时再统一清理。
+    */
+    if (conn->drain_input_before_close)
+    {
+        char discard[BUFFER_SIZE];
+        while (true)
+        {
+            ssize_t bytesRead = conn->socket->read(discard, sizeof(discard));
+            if (bytesRead > 0)
+                continue;
+            if (bytesRead == -1)
+                return;
+            this->closeConnection(clientFd, pollIndex);
+            return;
+        }
+    }
+
     if (!this->readSocketDataToBuffer(conn, clientFd, pollIndex))
         return;
 
@@ -658,8 +681,23 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
     else if (status == REQUEST_BODY_TOO_LARGE)
     {
         std::cerr << "[ServerManager] Request body too large on FD "
-                  << clientFd << ". Pre-writing 413 response." << std::endl;
-        conn->close_after_write = true;
+                  << clientFd
+                  << ". Sending 413, then draining remaining input before close."
+                  << std::endl;
+
+        /*
+        body 超限经常在 chunk-size 行刚到达时就能确定，此时客户端可能仍在 write()。
+        先发送 Content-Length: 0 的 413，但暂不主动 close；发送完成后切回 POLLIN，
+        丢弃后续输入，直到带 Connection: close 的客户端读取响应并主动关闭。
+        已经进入用户态的原始 body 无需继续保留，立即释放以避免超大非法请求占内存。
+        */
+        conn->close_after_write = false;
+        conn->drain_input_before_close = true;
+        conn->chunk_scan_active = false;
+        conn->chunk_scan_pos = 0;
+        conn->chunk_decoded_size = 0;
+        conn->chunk_body_limit = 0;
+        std::string().swap(conn->read_buffer);
         conn->write_buffer = "HTTP/1.1 413 Payload Too Large\r\n"
             "Content-Length: 0\r\nConnection: close\r\n\r\n";
         this->setClientEvents(clientFd, POLLOUT);
@@ -712,6 +750,11 @@ void ServerManager::handleClientWrite(int clientFd, size_t pollIndex)
         {
             this->closeConnection(clientFd, pollIndex);
         }
+        else if (conn->drain_input_before_close)
+        {
+            // 413 已完整发送；保留排空标志并切回 POLLIN，等待客户端结束写入后以 EOF 收尾。
+            this->setClientEvents(clientFd, POLLIN);
+        }
         else
         {
             // 大 CGI 响应已发完，先归还完整缓冲槽，再洗白 keep-alive 上下文。
@@ -736,6 +779,14 @@ void ServerManager::handleClientWrite(int clientFd, size_t pollIndex)
             {
                 std::cout << "[ServerManager] Sent response completely to FD " << clientFd << ". Closing connection per policy." << std::endl;
                 this->closeConnection(clientFd, pollIndex);
+            }
+            else if (conn->drain_input_before_close)
+            {
+                std::cout << "[ServerManager] Sent 413 completely to FD "
+                          << clientFd
+                          << ". Draining remaining request input before close."
+                          << std::endl;
+                this->setClientEvents(clientFd, POLLIN);
             }
             else
             {
