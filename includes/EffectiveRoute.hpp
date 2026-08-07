@@ -83,7 +83,7 @@ struct EffectiveRoute
     std::string redirect_url;            /* 重定向目标。 */
     std::string targetPath;              /* root/alias 与 normalized path 合成的真实路径。 */
     bool isDir;                          /* GET 目标是否为目录。 */
-
+    bool cgi_require_target;
     /*
     函数：EffectiveRoute
     用途：创建尚未绑定配置和路径的空路由对象。

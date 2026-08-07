@@ -8,6 +8,7 @@
 用途：使用 Response 类型以及唯一的带共享 SessionStore 的 buildResponse() 声明。
 */
 #include "Response.hpp"
+#include <iostream>
 
 /*
 包含：ConfigRouteUtils.hpp
@@ -257,6 +258,7 @@ Response buildResponse(const Request &request,
 {
     const ServerConfig *server = request.getConfig();
     Response response(request);
+
     if (server == NULL)
     {
         Response::ErrorPageMap noErrorPages;
@@ -265,132 +267,295 @@ Response buildResponse(const Request &request,
     }
 
     const LocationConfig *location =
-        findMatchingLocation(request.getPath(), server->locations);
+        findMatchingLocation(request.getPath(),
+                             server->locations);
 
-    /* CGI 请求可能在脚本扩展名后携带 PATH_INFO。 */
-    std::string scriptPath, pathInfo;
-    extractPathInfo(request.getPath(), location, scriptPath, pathInfo);
+    /*
+     * CGI PATH_INFO 分离
+     */
+    std::string scriptPath;
+    std::string pathInfo;
+
+    extractPathInfo(request.getPath(),
+                    location,
+                    scriptPath,
+                    pathInfo);
 
     EffectiveRoute route;
-    bool routeReady = location != NULL
-                          ? route.createEffectiveRoute(server, location)
-                          : route.createEffectiveRoute(server);
+
+    bool routeReady =
+        (location != NULL)
+            ? route.createEffectiveRoute(server, location)
+            : route.createEffectiveRoute(server);
+
     if (!routeReady)
     {
-        response.createResponse(500, "", server->error_pages);
+        response.createResponse(
+            500,
+            "",
+            server->error_pages);
         return response;
     }
 
-    if (location != NULL && route.redirect_status >= 300 && route.redirect_status <= 399 && !route.redirect_url.empty())
+    /*
+     * redirect
+     */
+    if (location != NULL &&
+        route.redirect_status >= 300 &&
+        route.redirect_status <= 399 &&
+        !route.redirect_url.empty())
     {
         response.setStatus(route.redirect_status);
-        response.setHeader("Location", route.redirect_url);
+
+        response.setHeader(
+            "Location",
+            route.redirect_url);
+
         if (route.redirect_status != 304)
         {
-            response.setHeader("Content-Type", "text/html");
-            response.setBody("<!DOCTYPE html><html><head><title>Redirect"
-                             "</title></head><body>Redirecting</body></html>");
+            response.setHeader(
+                "Content-Type",
+                "text/html");
+
+            response.setBody(
+                "<!DOCTYPE html><html><body>"
+                "Redirecting"
+                "</body></html>");
         }
+
         return response;
     }
 
-    RequestAction action = requestActionFromMethod(request.getMethod());
+    RequestAction action =
+        requestActionFromMethod(request.getMethod());
+
     if (action == ACTION_UNSUPPORTED)
     {
-        response.createResponse(501, "", route.server->error_pages);
+        response.createResponse(
+            501,
+            "",
+            route.server->error_pages);
         return response;
     }
-    if (!isMethodAllowed(action, route.allow_methods))
+
+    if (!isMethodAllowed(action,
+                         route.allow_methods))
     {
-        response.createResponse(405, "", route.server->error_pages);
-        response.setHeader("Allow", buildAllowHeader(route.allow_methods));
+        response.createResponse(
+            405,
+            "",
+            route.server->error_pages);
+
+        response.setHeader(
+            "Allow",
+            buildAllowHeader(route.allow_methods));
+
         if (request.getMethod() == "HEAD")
             response.clearBody();
+
         return response;
     }
 
     if (isSessionDemoPath(request.getPath()))
-        return buildSessionDemoResponse(request, sessionStore);
+    {
+        return buildSessionDemoResponse(
+            request,
+            sessionStore);
+    }
 
-    /* 先识别 CGI 后缀。ACTION_CGI 只负责建立 targetPath，不在通用
-       GET 路径检查中提前 stat；脚本和解释器随后分别按 CGI 规则验证。 */
+    /*
+     * CGI 判断
+     *
+     * 只根据 extension 判断
+     */
     std::string cgiInterpreter;
-    bool isCgi = findConfiguredCgiInterpreter(location, scriptPath,
-                                              cgiInterpreter);
-    RequestAction effectiveAction = isCgi ? ACTION_CGI : action;
-    int pathStatus = route.createEffectivePath(scriptPath, effectiveAction);
 
+    bool isCgi =
+        findConfiguredCgiInterpreter(
+            location,
+            scriptPath,
+            cgiInterpreter);
+
+    RequestAction effectiveAction =
+        isCgi
+            ? ACTION_CGI
+            : action;
+
+    int pathStatus =
+        route.createEffectivePath(
+            scriptPath,
+            effectiveAction);
+
+    /*
+     * =========================
+     * CGI
+     * =========================
+     */
     if (isCgi)
     {
+        std::cout
+            << "DEBUG cgi_require_target="
+            << route.cgi_require_target
+            << std::endl;
+
+        /*
+         * interpreter 必须存在
+         */
         if (!cgiInterpreter.empty())
         {
-            /* --- 情况 A：配置了独立的二进制解释器 (如 ./tester_data/cgi_tester) --- */
+            int interpreterStatus =
+                validateCgiScript(
+                    cgiInterpreter,
+                    true);
 
-            // 1. 解释器本身必须存在且具备可执行权限 (+x / X_OK)
-            int interpreterStatus = validateCgiScript(cgiInterpreter, true);
             if (interpreterStatus != PATH_OK)
             {
-                response.createResponse(interpreterStatus, "", route.server->error_pages);
+                response.createResponse(
+                    interpreterStatus,
+                    "",
+                    route.server->error_pages);
+
                 return response;
             }
 
-            // 2. 对于 GET / HEAD 请求，cgi_tester 需要读取 targetPath 的内容，因此文件必须可读 (R_OK)；
-            //    对于 POST 请求，targetPath 仅作为 PATH_INFO 传给 cgi_tester 处理 stdin，不校验 targetPath 存在性。
-            if (request.getMethod() == "GET" || request.getMethod() == "HEAD")
+            /*
+             * CGI target 检查规则:
+             *
+             * GET:
+             *      必须存在
+             *
+             * HEAD:
+             *      必须存在
+             *
+             * POST:
+             *      cgi_require_target=true
+             *          必须存在
+             *
+             *      cgi_require_target=false
+             *          可以不存在
+             */
+            bool checkTarget = true;
+
+            if (request.getMethod() == "POST" &&
+                route.cgi_require_target == false)
             {
-                int cgiPathStatus = validateCgiScript(route.targetPath, false);
+                checkTarget = false;
+            }
+
+            if (checkTarget)
+            {
+                int cgiPathStatus =
+                    validateCgiScript(
+                        route.targetPath,
+                        false);
+
                 if (cgiPathStatus != PATH_OK)
                 {
-                    response.createResponse(cgiPathStatus, "", route.server->error_pages);
+                    response.createResponse(
+                        cgiPathStatus,
+                        "",
+                        route.server->error_pages);
+
                     return response;
                 }
             }
         }
         else
         {
-            /* --- 情况 B：没有配置解释器 (直接 execve 脚本本身，如原生 .sh / .cgi) --- */
 
-            // 无论是 POST 还是 GET，缺少解释器时，脚本本身必须存在且【严格要求 X_OK 执行权限】
-            int cgiPathStatus = validateCgiScript(route.targetPath, true);
+            /*
+             * 没有 interpreter:
+             *
+             * 直接执行 CGI 文件
+             *
+             * 必须存在并且可执行
+             */
+            int cgiPathStatus =
+                validateCgiScript(
+                    route.targetPath,
+                    true);
+
             if (cgiPathStatus != PATH_OK)
             {
-                // 文件不存在返回 404；无 +x 权限返回 403
-                response.createResponse(cgiPathStatus, "", route.server->error_pages);
+                response.createResponse(
+                    cgiPathStatus,
+                    "",
+                    route.server->error_pages);
+
                 return response;
             }
         }
 
-        // 校验全部通过，交付异步层启动 CGI
+        /*
+         * CGI 交给异步层
+         */
         response.setStatus(200);
-        response.setHeader("X-Internal-CGI-Path", route.targetPath);
-        if (!cgiInterpreter.empty())
-            response.setHeader("X-Internal-CGI-Interpreter", cgiInterpreter);
 
-        response.setHeader("X-Internal-CGI-Script-Name", scriptPath);
-        response.setHeader("X-Internal-CGI-Path-Info", pathInfo);
-        response.setHeader("X-Internal-CGI-Document-Root",
-                           route.use_alias ? route.alias : route.root);
+        response.setHeader(
+            "X-Internal-CGI-Path",
+            route.targetPath);
+
+        if (!cgiInterpreter.empty())
+        {
+            response.setHeader(
+                "X-Internal-CGI-Interpreter",
+                cgiInterpreter);
+        }
+
+        response.setHeader(
+            "X-Internal-CGI-Script-Name",
+            scriptPath);
+
+        response.setHeader(
+            "X-Internal-CGI-Path-Info",
+            pathInfo);
+
+        response.setHeader(
+            "X-Internal-CGI-Document-Root",
+            route.use_alias
+                ? route.alias
+                : route.root);
 
         return response;
     }
 
-    /* 非 CGI 请求继续使用通用路径状态；CGI 已在上方完成专用验证。 */
+    /*
+     * =========================
+     * 非 CGI
+     * =========================
+     */
+
     if (pathStatus != PATH_OK)
     {
-        response.createResponse(pathStatus, "", route.server->error_pages);
+        response.createResponse(
+            pathStatus,
+            "",
+            route.server->error_pages);
+
         return response;
     }
 
-    /* HEAD 使用 GET 的状态和 headers，但最终不保留实际消息体。 */
-    if (action == ACTION_GET || action == ACTION_HEAD)
+    if (action == ACTION_GET ||
+        action == ACTION_HEAD)
     {
-        Response res = handleGet(request, route);
+        Response res =
+            handleGet(request,
+                      route);
 
         if (action == ACTION_HEAD)
+        {
             res.clearBodyOnly();
+        }
+
         return res;
     }
+
     if (action == ACTION_POST)
-        return handlePost(request, route);
-    return handleDelete(request, route);
+    {
+        return handlePost(request,
+                          route);
+    }
+
+    return handleDelete(request,
+                        route);
 }

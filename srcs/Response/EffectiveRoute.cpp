@@ -103,6 +103,7 @@ bool EffectiveRoute::createEffectiveRoute(const ServerConfig *srv,
     location_prefix = loc->path;
     redirect_status = loc->redirect_status;
     redirect_url = loc->redirect_url;
+    cgi_require_target = loc->cgi_require_target;
     return true;
 }
 
@@ -124,20 +125,30 @@ bool EffectiveRoute::createEffectiveRoute(const ServerConfig *srv)
 {
     if (srv == NULL)
         return false;
+
     server = srv;
     location = NULL;
+
     root.clear();
     alias.clear();
     allow_methods.clear();
     index.clear();
     targetPath.clear();
+
     isDir = false;
     use_alias = false;
 
+    /*
+     * 没有 location 时使用 server 级配置
+     */
     if (!srv->has_root)
         return false;
+
     root = srv->root;
 
+    /*
+     * allow_methods
+     */
     if (!srv->allow_methods.empty())
         allow_methods = srv->allow_methods;
     else
@@ -147,15 +158,30 @@ bool EffectiveRoute::createEffectiveRoute(const ServerConfig *srv)
         allow_methods.insert("DELETE");
     }
 
+    /*
+     * index
+     */
     if (!srv->index.empty())
         index = srv->index;
     else
         index.push_back("index.html");
 
-    upload_path = srv->upload_path.empty() ? "/upload/" : srv->upload_path;
+    /*
+     * upload / autoindex
+     */
+    upload_path =
+        srv->upload_path.empty()
+            ? "/upload/"
+            : srv->upload_path;
+
     autoindex = srv->autoindex;
+
+    /*
+     * redirect
+     */
     location_prefix = "/";
     redirect_status = 0;
     redirect_url.clear();
+
     return true;
 }
