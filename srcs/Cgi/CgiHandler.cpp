@@ -359,7 +359,7 @@ bool CgiHandler::_setupPipes(int pipe_to_parent[2], int pipe_to_child[2])
 */
 void CgiHandler::_executeChildProcess(int childReadFd, int parentWriteFd)
 {
-    dprintf(2, "========== MY CGI CODE ==========\n");
+    //dprintf(2, "========== MY CGI CODE ==========\n");
     if (childReadFd != STDIN_FILENO)
     {
         if (dup2(childReadFd, STDIN_FILENO) < 0)
@@ -397,12 +397,6 @@ void CgiHandler::_executeChildProcess(int childReadFd, int parentWriteFd)
         args[0] = const_cast<char *>(_interpreter_path.c_str());
         args[1] = const_cast<char *>(scriptName.c_str());
         args[2] = NULL;
-        for (int i = 0; env[i]; i++)
-        {
-            std::cerr << "ENV[" << i << "]="
-                      << env[i]
-                      << std::endl;
-        }
         ::execve(args[0], args, env);
     }
     else

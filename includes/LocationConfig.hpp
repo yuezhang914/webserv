@@ -12,8 +12,9 @@
 从哪来：Config::parseFile() 读到 location 指令时创建；Config::parseLocationDirective() 把 allow_methods/root/cgi_extension 等写进它。
 给谁用：Router/EffectiveRoute 根据请求 URI 匹配 location，然后用这里的规则覆盖或补充 ServerConfig 的默认规则。
 */
-class LocationConfig {
-	public:
+class LocationConfig
+{
+public:
 	/* 当前 location 允许的 HTTP 方法。来源：allow_methods GET POST DELETE;。Response 检查方法时优先使用它。 */
 	std::set<std::string> allow_methods;
 	/* location 自己的 root。来源：location 内 root 指令；如果存在，会覆盖 server.root。 */
@@ -46,13 +47,16 @@ class LocationConfig {
 	unsigned long max_body_size;
 	/* 是否显式写过 max_body_size。设计目的：区分“location 没写，继承 server 限制”和“location 明确配置自己的限制”。 */
 	bool has_body_size;
+	
+	bool cgi_require_target;
+	bool has_cgi_require_target;
 
 	/* 构造函数：把所有规则设置为安全默认值，例如 autoindex=false、has_autoindex=false、max_body_size=MAX_BODY_SIZE、redirect_status=0、字符串为空。 */
 	LocationConfig();
 	/* 拷贝构造：复制所有配置字段，供 vector 扩容或返回时使用。 */
-	LocationConfig(const LocationConfig& src);
+	LocationConfig(const LocationConfig &src);
 	/* 赋值运算符：把 rhs 的所有配置字段复制到当前对象。 */
-	LocationConfig& operator=(const LocationConfig& rhs);
+	LocationConfig &operator=(const LocationConfig &rhs);
 	/* 析构函数：没有手动管理的资源，默认清理 string/map/set/vector 即可。 */
 	virtual ~LocationConfig();
 };

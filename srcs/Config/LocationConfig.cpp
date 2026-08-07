@@ -163,22 +163,64 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
     {
         if (values.size() != 2)
         {
-            std::cerr << "Error: Invalid cgi_extension directive" << std::endl;
+            std::cerr << "Error: Invalid cgi_extension directive"
+                      << std::endl;
             return ERROR;
         }
-        /* 🎯 【修改点 6：前置后缀形态断言，封杀空穿透引发的 RCE 漏洞】 */
+
         if (values[0].empty() || values[0][0] != '.' || values[1].empty())
         {
-            std::cerr << "Error: Invalid cgi_extension format. Expected e.g., .py path" << std::endl;
+            std::cerr << "Error: Invalid cgi_extension format"
+                      << std::endl;
             return ERROR;
         }
+
         if (loc->cgi_extensions.find(values[0]) != loc->cgi_extensions.end())
         {
-            std::cerr << "Error: Duplicate cgi_extension for " << values[0]
-                      << " in location " << loc->path << std::endl;
+            std::cerr << "Error: Duplicate cgi_extension for "
+                      << values[0]
+                      << " in location "
+                      << loc->path
+                      << std::endl;
             return ERROR;
         }
+
         loc->cgi_extensions[values[0]] = values[1];
+    }
+    else if (directive == "cgi_require_target")
+    {
+        if (values.size() != 1)
+        {
+            std::cerr << "Error: Invalid cgi_require_target directive"
+                      << std::endl;
+            return ERROR;
+        }
+
+        if (loc->has_cgi_require_target)
+        {
+            std::cerr << "Error: Duplicate cgi_require_target directive in location "
+                      << loc->path
+                      << std::endl;
+            return ERROR;
+        }
+
+        if (values[0] == "on")
+        {
+            loc->cgi_require_target = true;
+            loc->has_cgi_require_target = true;
+        }
+        else if (values[0] == "off")
+        {
+            loc->cgi_require_target = false;
+            loc->has_cgi_require_target = true;
+        }
+        else
+        {
+            std::cerr << "Error: Invalid cgi_require_target value: "
+                      << values[0]
+                      << std::endl;
+            return ERROR;
+        }
     }
     else if (directive == "upload_path")
     {
@@ -266,7 +308,7 @@ LocationConfig::LocationConfig()
       ,
       root("") // 2. 接着声明了 root
       ,
-      autoindex(false), has_autoindex(false), index(), cgi_extensions(), upload_path(""), path(""), redirect_status(0), redirect_url(""), alias(""), has_root(false), has_alias(false), max_body_size(MAX_BODY_SIZE), has_body_size(false)
+      autoindex(false), has_autoindex(false), index(), cgi_extensions(), upload_path(""), path(""), redirect_status(0), redirect_url(""), alias(""), has_root(false), has_alias(false), max_body_size(MAX_BODY_SIZE), has_body_size(false), cgi_require_target(true), has_cgi_require_target(false)
 {
     // 大括号内纯净空荡，零摩擦！
 }
@@ -280,7 +322,8 @@ LocationConfig::LocationConfig()
 使用场景：vector<LocationConfig> 扩容或复制 ServerConfig 时会用到。
 */
 LocationConfig::LocationConfig(const LocationConfig &src)
-    : allow_methods(src.allow_methods), root(src.root), autoindex(src.autoindex), has_autoindex(src.has_autoindex), index(src.index), cgi_extensions(src.cgi_extensions), upload_path(src.upload_path), path(src.path), redirect_status(src.redirect_status), redirect_url(src.redirect_url), alias(src.alias), has_root(src.has_root), has_alias(src.has_alias), max_body_size(src.max_body_size), has_body_size(src.has_body_size)
+    : allow_methods(src.allow_methods), root(src.root), autoindex(src.autoindex), has_autoindex(src.has_autoindex), index(src.index), cgi_extensions(src.cgi_extensions), upload_path(src.upload_path), path(src.path), redirect_status(src.redirect_status), redirect_url(src.redirect_url), alias(src.alias), has_root(src.has_root), has_alias(src.has_alias), max_body_size(src.max_body_size), has_body_size(src.has_body_size),cgi_require_target(src.cgi_require_target), has_cgi_require_target(src.has_cgi_require_target)
+    // 大括号内纯净空荡，零摩擦！ 
 {
 }
 
@@ -315,6 +358,8 @@ LocationConfig &LocationConfig::operator=(const LocationConfig &rhs)
         has_alias = rhs.has_alias;
         max_body_size = rhs.max_body_size;
         has_body_size = rhs.has_body_size;
+        cgi_require_target = rhs.cgi_require_target;
+        has_cgi_require_target = rhs.has_cgi_require_target;
     }
     return *this;
 }
