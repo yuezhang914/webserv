@@ -109,7 +109,7 @@
       <!-- Quick Test Scenario Presets -->
       <label>Preset Test Scenarios (GET & Edge Cases)</label>
       <div class="button-group">
-        <button class="btn secondary" type="button" onclick="testCgi('/cgi/echo.py?user=yzhang&role=student','GET')">
+        <button class="btn secondary" type="button" onclick="testCgi('/cgi/echo.py?user=student&role=student','GET')">
           Python CGI · GET
         </button>
         <button class="btn secondary" type="button" onclick="testCgi('/cgi/echo.sh?shell=bash&test=true','GET')">
@@ -159,7 +159,7 @@
         </div>
 
         <label for="cgi-message">Request Body Content</label>
-        <textarea id="cgi-message" style="min-height:90px" placeholder="Enter test payload for STDIN...">message=Hello+from+Webserv+CGI+TestPanel&user=yzhang</textarea>
+        <textarea id="cgi-message" style="min-height:90px" placeholder="Enter test payload for STDIN...">message=Hello+from+Webserv+CGI+TestPanel&user=student</textarea>
 
         <div class="url-preview">Request Target → <span id="cgi-url-preview" class="mono">/cgi/echo.py?source=custom_form</span></div>
         <button class="btn" type="submit" style="margin-top:12px">Execute Custom CGI POST</button>
