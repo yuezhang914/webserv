@@ -1,10 +1,5 @@
-#!/bin/sh
-
-BODY=$(cat)
-
-printf 'Content-Type: text/plain\r\n'
-printf '\r\n'
-printf 'CGI=SHELL\n'
-printf 'METHOD=%s\n' "$REQUEST_METHOD"
-printf 'QUERY=%s\n' "$QUERY_STRING"
-printf 'BODY=%s\n' "$BODY"
+#!/bin/bash
+printf "Content-Type: text/plain\r\n\r\n"
+echo "Shell CGI Execution Test"
+echo "REQUEST_METHOD: $REQUEST_METHOD"
+echo "QUERY_STRING: $QUERY_STRING"

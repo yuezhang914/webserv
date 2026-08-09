@@ -18,7 +18,7 @@
         <h1>Webserv Test Panel</h1>
         <p class="intro">
           This page sends requests to the same-origin Webserv that serves it. Use it to test static files, autoindex,
-          uploads, deletion, and CGI.
+          uploads, deletion, and CGI standard behavior.
         </p>
       </div>
       <div class="badges">
@@ -57,7 +57,7 @@
           <div class="card-head">
             <span class="num">2</span>
             <div>
-              <h2>File Manager & Drag Upload & Post & DELETE </h2>
+              <h2>File Manager & Drag Upload</h2>
               <p class="help">Upload binary or text files directly, or manage existing files inside your server directory.</p>
             </div>
           </div>
@@ -93,52 +93,84 @@
       </div>
     </div>
 
-    <!-- Section 3: CGI Testing -->
+    <!-- Section 3: Professional CGI Test Suite -->
     <section class="card" style="margin-top:18px">
       <div class="card-head">
         <span class="num">3</span>
         <div>
-          <h2>CGI Testing</h2>
+          <h2>CGI Execution & Spec Testing</h2>
           <p class="help">
-            These default paths match the Webserv evaluation setup: Python scripts live under
-            <span class="mono">/cgi/</span>, and the Shell CGI is the second CGI type.
-            A missing script should return 404, a broken CGI should return 500/502, and a timed-out CGI should return
-            504.
+            Test RFC 3875 CGI implementation, environment variables, multi-language support, 
+            and error conditions (404 missing, 500/502 crash, 504 no-progress timeout).
           </p>
         </div>
       </div>
 
+      <!-- Quick Test Scenario Presets -->
+      <label>Preset Test Scenarios (GET & Edge Cases)</label>
       <div class="button-group">
-        <button class="btn secondary" type="button" onclick="testCgi('/cgi/echo.py?source=browser','GET')">Python CGI ·
-          GET</button>
-        <button class="btn secondary" type="button" onclick="testCgi('/cgi/echo.sh?kind=shell','GET')">Shell CGI ·
-          GET</button>
-        <button class="btn secondary" type="button" onclick="testCgi('/cgi/bad.py','GET')">Broken CGI · GET</button>
-        <button class="btn secondary" type="button" onclick="testCgi('/cgi/slow.py','GET')">Slow CGI · GET</button>
+        <button class="btn secondary" type="button" onclick="testCgi('/cgi/echo.py?user=yzhang&role=student','GET')">
+          Python CGI · GET
+        </button>
+        <button class="btn secondary" type="button" onclick="testCgi('/cgi/echo.sh?shell=bash&test=true','GET')">
+          Shell CGI · GET
+        </button>
+        <button class="btn secondary" type="button" onclick="testCgi('/cgi/bad.py','GET')">
+          Broken CGI · 500/502
+        </button>
+        <button class="btn secondary" type="button" onclick="testCgi('/cgi/slow_timeout.py','GET')">
+          No Activity (11s) · 504
+        </button>
+        <button class="btn secondary" type="button" onclick="testCgi('/cgi/slow_streaming.py','GET')">
+          Streaming (15s total, 2s step) · 200
+        </button>
+        <button class="btn secondary" type="button" onclick="testCgi('/cgi/nonexistent.py','GET')">
+          Missing CGI · 404
+        </button>
       </div>
 
       <div class="divider"></div>
-      <h3>Send a form-encoded POST to CGI</h3>
+
+      <!-- Interactive CGI POST Form -->
+      <h3>Custom CGI Request (POST & Body)</h3>
       <p class="help">
-        This sends one ordinary form field, <span class="mono">message</span>,
-        in the request body using <span class="mono">application/x-www-form-urlencoded</span>.
+        Send request bodies to test <span class="mono">STDIN</span> processing, <span class="mono">CONTENT_LENGTH</span>, and <span class="mono">CONTENT_TYPE</span> headers.
       </p>
 
       <form id="cgi-post-form" autocomplete="off">
-        <label for="cgi-target">Target CGI</label>
-        <select id="cgi-target">
-          <option value="/cgi/echo.py?source=form">Python: /cgi/echo.py</option>
-          <option value="/cgi/echo.sh?kind=form">Shell: /cgi/echo.sh</option>
-        </select>
+        <div class="row">
+          <div class="grow">
+            <label for="cgi-target">Target CGI Script</label>
+            <select id="cgi-target">
+              <option value="/cgi/echo.py?source=custom_form">Python Script (/cgi/echo.py)</option>
+              <option value="/cgi/echo.sh?source=custom_form">Shell Script (/cgi/echo.sh)</option>
+              <option value="/cgi/slow_timeout.py">11s Inactive Timeout (/cgi/slow_timeout.py)</option>
+              <option value="/cgi/slow_streaming.py">15s Active Stream (/cgi/slow_streaming.py)</option>
+            </select>
+          </div>
+          <div class="grow">
+            <label for="cgi-content-type">Content-Type Header</label>
+            <select id="cgi-content-type">
+              <option value="application/x-www-form-urlencoded">application/x-www-form-urlencoded</option>
+              <option value="text/plain">text/plain</option>
+              <option value="application/json">application/json</option>
+            </select>
+          </div>
+        </div>
 
+        <label for="cgi-message">Request Body Content</label>
+        <textarea id="cgi-message" style="min-height:90px" placeholder="Enter test payload for STDIN...">message=Hello+from+Webserv+CGI+TestPanel&user=yzhang</textarea>
 
-        <label for="cgi-message">Message</label>
-        <textarea id="cgi-message" style="min-height:88px"
-          placeholder="Any test message...">Hello from the browser CGI form.</textarea>
-        <div class="url-preview">POST → <span id="cgi-url-preview" class="mono">/cgi/echo.py?source=form</span></div>
-        <button class="btn" type="submit" style="margin-top:12px">Send POST to Selected CGI</button>
+        <div class="url-preview">Request Target → <span id="cgi-url-preview" class="mono">/cgi/echo.py?source=custom_form</span></div>
+        <button class="btn" type="submit" style="margin-top:12px">Execute Custom CGI POST</button>
       </form>
 
+      <!-- CGI Response Dashboard -->
+      <div id="cgi-status-bar" class="cgi-status-bar" style="display: none;">
+        <span id="cgi-status-badge" class="status-badge">200 OK</span>
+        <span id="cgi-time-tag" class="time-tag">0.000s</span>
+        <span id="cgi-endpoint-tag" class="mono text-muted">/cgi/echo.py</span>
+      </div>
       <div id="cgi-status" class="status"></div>
       <div id="cgi-result" class="cgi-result"></div>
     </section>
@@ -188,40 +220,74 @@
         });
     });
 
-    /* --- Section 3: CGI --- */
-    async function testCgi(path, method = "GET", body = null) {
-      const cgiStatus = $("#cgi-status");
-      const cgiResult = $("#cgi-result");
-      cgiStatus.textContent = "Testing " + method + " " + path + "...";
+    /* --- Section 3: CGI Testing & Dashboard --- */
+    const cgiStatusBar = $("#cgi-status-bar");
+    const cgiStatusBadge = $("#cgi-status-badge");
+    const cgiTimeTag = $("#cgi-time-tag");
+    const cgiEndpointTag = $("#cgi-endpoint-tag");
+    const cgiStatus = $("#cgi-status");
+    const cgiResult = $("#cgi-result");
+
+    async function testCgi(path, method = "GET", body = null, contentType = "application/x-www-form-urlencoded") {
+      cgiStatus.textContent = "Executing " + method + " " + path + "...";
       cgiStatus.className = "status";
+      cgiStatusBar.style.display = "none";
       cgiResult.style.display = "none";
       cgiResult.textContent = "";
+
       const start = performance.now();
 
       try {
         const options = { method: method, cache: "no-store" };
         if (body !== null) {
-          options.headers = { "Content-Type": "application/x-www-form-urlencoded" };
+          options.headers = { "Content-Type": contentType };
           options.body = body;
         }
 
         const response = await fetch(path, options);
         const text = await response.text();
-        const seconds = ((performance.now() - start) / 1000).toFixed(2);
-        let message = method + " " + path + " → " + response.status + " " + response.statusText + " (" + seconds + "s)";
+        const seconds = ((performance.now() - start) / 1000).toFixed(3);
+
+        // Update Dashboard Bar
+        cgiStatusBar.style.display = "flex";
+        cgiStatusBadge.textContent = `${response.status} ${response.statusText || ''}`;
+        
+        if (response.status >= 200 && response.status < 300) {
+          cgiStatusBadge.className = "status-badge badge-2xx";
+        } else if (response.status >= 400 && response.status < 500) {
+          cgiStatusBadge.className = "status-badge badge-4xx";
+        } else {
+          cgiStatusBadge.className = "status-badge badge-5xx";
+        }
+
+        cgiTimeTag.textContent = `${seconds}s`;
+        cgiEndpointTag.textContent = `${method} ${path}`;
+
+        let message = `Execution completed in ${seconds} seconds.`;
 
         if (response.status === 404) {
-          message += " — Check that the /cgi/ location exists and that the requested script is inside the configured web root.";
+          message += " (404 Not Found: Check script path / location block configuration)";
+        } else if (response.status === 500 || response.status === 502) {
+          message += " (CGI Error: Script crashed or generated invalid/missing HTTP headers)";
+        } else if (response.status === 504) {
+          message += " (504 Gateway Timeout: Inactive for >= 10s without stdin/stdout progress)";
         }
 
         cgiStatus.textContent = message;
-        cgiStatus.classList.add(response.ok ? "ok" : "err");
-        cgiResult.textContent = text || "(empty response body)";
+        cgiStatus.className = "status " + (response.ok ? "ok" : "err");
+
+        cgiResult.textContent = text || "(Empty Response Body)";
         cgiResult.style.display = "block";
       } catch (error) {
-        const seconds = ((performance.now() - start) / 1000).toFixed(2);
-        cgiStatus.textContent = method + " " + path + " failed: " + error.message + " (" + seconds + "s)";
-        cgiStatus.classList.add("err");
+        const seconds = ((performance.now() - start) / 1000).toFixed(3);
+        cgiStatusBar.style.display = "flex";
+        cgiStatusBadge.textContent = "FETCH ERROR";
+        cgiStatusBadge.className = "status-badge badge-5xx";
+        cgiTimeTag.textContent = `${seconds}s`;
+        cgiEndpointTag.textContent = `${method} ${path}`;
+
+        cgiStatus.textContent = "Network / Processing Error: " + error.message;
+        cgiStatus.className = "status err";
       }
     }
 
@@ -237,9 +303,9 @@
 
     $("#cgi-post-form").addEventListener("submit", (event) => {
       event.preventDefault();
-      const body =
-        "message=" + encodeURIComponent($("#cgi-message").value);
-      testCgi(cgiTarget.value, "POST", body);
+      const body = $("#cgi-message").value;
+      const contentType = $("#cgi-content-type").value;
+      testCgi(cgiTarget.value, "POST", body, contentType);
     });
 
     /* --- Section 2: File Manager & Drag Upload Script --- */
