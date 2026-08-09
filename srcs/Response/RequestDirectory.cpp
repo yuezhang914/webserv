@@ -273,9 +273,23 @@ static Response createAutoIndexResponse(const EffectiveRoute &route,
         if (!isDirectory && !S_ISREG(pathInfo.st_mode))
             continue;
         std::string displayName = isDirectory ? name + "/" : name;
-        std::string href = encodePathSegment(name);
-        if (isDirectory)
-            href += "/";
+
+        // ----------------- 核心修改部分 -----------------
+        // 1. 如果是 ".."，需要拼出父级路径（或者直接保留 "../"）
+        std::string href;
+        if (name == "..")
+        {
+            href = "../";
+        }
+        else
+        {
+            // 2. 将路由前缀 displayPath (如 "/upload/") 与文件/目录名拼接，生成绝对 URI 路径
+            href = displayPath + encodePathSegment(name);
+            if (isDirectory)
+                href += "/";
+        }
+        // ------------------------------------------------
+
         body += "<li><a href=\"";
         body += escapeHtml(href);
         body += "\">";
@@ -290,4 +304,3 @@ static Response createAutoIndexResponse(const EffectiveRoute &route,
     response.setBody(body);
     return response;
 }
-
