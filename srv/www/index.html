@@ -8,6 +8,53 @@
   <link rel="icon"
     href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌐</text></svg>">
   <link rel="stylesheet" href="style.css" />
+  <style>
+    /* 针对 Iframe 预览与 Details 展开框增加的样式控制 */
+    .iframe-preview-container {
+      width: 100%;
+      height: 380px;
+      border: 1px solid var(--border-color, #334155);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #ffffff;
+      margin-top: 10px;
+    }
+
+    .iframe-preview-container iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+    }
+
+    /* 修复 details 和 summary 点击失效问题 */
+    details.raw-details {
+      margin-top: 12px;
+      font-size: 0.85rem;
+      position: relative;
+      z-index: 10; /* 提升层级，防止被上方的 iframe 区域遮挡 */
+    }
+
+    details.raw-details summary {
+      cursor: pointer !important;
+      color: var(--primary-color, #3b82f6);
+      font-weight: 600;
+      padding: 6px 0;
+      user-select: none; /* 防止频繁点击时选中文字 */
+      outline: none;
+      display: list-item; /* 确保原生的展开箭号与点击事件正常触发 */
+    }
+
+    details.raw-details summary:hover {
+      text-decoration: underline;
+    }
+
+    /* 内部源码显示框，完全交由 details 标签接管显示/隐藏 */
+    details.raw-details .cgi-result {
+      display: block !important;
+      margin-top: 6px;
+    }
+  </style>
 </head>
 
 <body>
@@ -180,7 +227,20 @@
         <span id="cgi-endpoint-tag" class="mono text-muted">/cgi/echo.py</span>
       </div>
       <div id="cgi-status" class="status"></div>
-      <div id="cgi-result" class="cgi-result"></div>
+
+      <!-- Iframe 页面方式显示 CGI 响应 Body -->
+      <div id="cgi-iframe-wrapper" style="display: none; margin-top: 12px;">
+        <div class="preview-label"><span>CGI Response Page Render</span><span class="mono">iframe</span></div>
+        <div class="iframe-preview-container">
+          <iframe id="cgi-iframe" title="CGI response preview"></iframe>
+        </div>
+
+        <!-- 纯文本 Raw Response 查看口 -->
+        <details class="raw-details">
+          <summary>Click to toggle Raw Response Body Code View</summary>
+          <div id="cgi-result" class="cgi-result"></div>
+        </details>
+      </div>
     </section>
 
     <!-- Section 4: Session & Cookie Management Test -->
@@ -230,7 +290,20 @@
       </div>
 
       <div id="session-status" class="status" style="margin-top:12px;"></div>
-      <div id="session-result" class="cgi-result" style="display:none; margin-top:8px;"></div>
+
+      <!-- Iframe 页面方式显示 Session 响应 Body -->
+      <div id="session-iframe-wrapper" style="display: none; margin-top: 12px;">
+        <div class="preview-label"><span>Session Response Page Render</span><span class="mono">iframe</span></div>
+        <div class="iframe-preview-container">
+          <iframe id="session-iframe" title="Session response preview"></iframe>
+        </div>
+
+        <!-- 纯文本 Raw Response 查看口 -->
+        <details class="raw-details">
+          <summary>Click to toggle Raw Response Body Code View</summary>
+          <div id="session-result" class="cgi-result"></div>
+        </details>
+      </div>
     </section>
 
     <p class="footer">Place this file in the Webserv static root and open it through the Webserv URL. Do not open it
@@ -285,6 +358,8 @@
     const cgiEndpointTag = $("#cgi-endpoint-tag");
     const cgiStatus = $("#cgi-status");
     const cgiResult = $("#cgi-result");
+    const cgiIframeWrapper = $("#cgi-iframe-wrapper");
+    const cgiIframe = $("#cgi-iframe");
     const cgiContentType = $("#cgi-content-type");
     const cgiMessage = $("#cgi-message");
 
@@ -308,8 +383,9 @@
       cgiStatus.textContent = "Executing " + method + " " + path + "...";
       cgiStatus.className = "status";
       cgiStatusBar.style.display = "none";
-      cgiResult.style.display = "none";
+      cgiIframeWrapper.style.display = "none";
       cgiResult.textContent = "";
+      cgiIframe.srcdoc = "";
 
       const start = performance.now();
 
@@ -351,8 +427,13 @@
         cgiStatus.textContent = message;
         cgiStatus.className = "status " + (response.ok ? "ok" : "err");
 
+        const baseUrl = new URL(path, window.location.origin).href;
+        const htmlContent = text || "<p style='font-family:sans-serif; color:#888; text-align:center; margin-top:20px;'>(Empty Response Body)</p>";
+        cgiIframe.srcdoc = `<base href="${baseUrl}">${htmlContent}`;
+
         cgiResult.textContent = text || "(Empty Response Body)";
-        cgiResult.style.display = "block";
+        cgiIframeWrapper.style.display = "block";
+
       } catch (error) {
         const seconds = ((performance.now() - start) / 1000).toFixed(3);
         cgiStatusBar.style.display = "flex";
@@ -363,6 +444,12 @@
 
         cgiStatus.textContent = "Network / Processing Error: " + error.message;
         cgiStatus.className = "status err";
+
+        cgiIframe.srcdoc = `<div style="color: red; font-family: sans-serif; padding: 20px;">
+          <h3>Processing Error</h3>
+          <p>${error.message}</p>
+        </div>`;
+        cgiIframeWrapper.style.display = "block";
       }
     }
 
@@ -388,6 +475,8 @@
     const sessionRouteInput = $("#session-route-input");
     const sessionStatus = $("#session-status");
     const sessionResult = $("#session-result");
+    const sessionIframeWrapper = $("#session-iframe-wrapper");
+    const sessionIframe = $("#session-iframe");
     const browserCookieDisplay = $("#browser-cookie-display");
 
     function refreshCookieDisplay() {
@@ -403,8 +492,9 @@
 
       sessionStatus.textContent = `Executing session action [${actionType}]...`;
       sessionStatus.className = "status";
-      sessionResult.style.display = "none";
+      sessionIframeWrapper.style.display = "none";
       sessionResult.textContent = "";
+      sessionIframe.srcdoc = "";
 
       try {
         let response;
@@ -431,13 +521,22 @@
           !response.ok
         );
 
-        sessionResult.textContent = text || "(Empty Body)";
-        sessionResult.style.display = "block";
+        const baseUrl = new URL(route, window.location.origin).href;
+        const htmlContent = text || "<p style='font-family:sans-serif; color:#888; text-align:center; margin-top:20px;'>(Empty Response Body)</p>";
+        sessionIframe.srcdoc = `<base href="${baseUrl}">${htmlContent}`;
 
-        // 更新客户端 Cookie 显示
+        sessionResult.textContent = text || "(Empty Body)";
+        sessionIframeWrapper.style.display = "block";
+
         refreshCookieDisplay();
       } catch (err) {
         setStatus(sessionStatus, `Session Request Failed: ${err.message}`, true);
+        
+        sessionIframe.srcdoc = `<div style="color: red; font-family: sans-serif; padding: 20px;">
+          <h3>Session Request Error</h3>
+          <p>${err.message}</p>
+        </div>`;
+        sessionIframeWrapper.style.display = "block";
       }
     }
 
