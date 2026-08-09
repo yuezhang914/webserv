@@ -18,7 +18,7 @@
         <h1>Webserv Test Panel</h1>
         <p class="intro">
           This page sends requests to the same-origin Webserv that serves it. Use it to test static files, autoindex,
-          uploads, deletion, and CGI standard behavior.
+          uploads, deletion, CGI standard behavior, and Session/Cookie management.
         </p>
       </div>
       <div class="badges">
@@ -26,6 +26,7 @@
         <span class="badge">POST</span>
         <span class="badge">DELETE</span>
         <span class="badge">CGI</span>
+        <span class="badge">SESSION</span>
       </div>
     </header>
 
@@ -57,7 +58,7 @@
           <div class="card-head">
             <span class="num">2</span>
             <div>
-              <h2>File Manager & Drag Upload</h2>
+              <h2>File Manager & Drag Upload & Delete</h2>
               <p class="help">Upload binary or text files directly, or manage existing files inside your server
                 directory.</p>
             </div>
@@ -182,6 +183,56 @@
       <div id="cgi-result" class="cgi-result"></div>
     </section>
 
+    <!-- Section 4: Session & Cookie Management Test -->
+    <section class="card" style="margin-top:18px">
+      <div class="card-head">
+        <span class="num">4</span>
+        <div>
+          <h2>Session & Cookie Management</h2>
+          <p class="help">
+            Test HTTP Session storage, Cookie parsing (<span class="mono">Set-Cookie</span> / <span class="mono">Cookie</span>), 
+            login state persistence, and logout flow.
+          </p>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="grow">
+          <label for="session-user-input">Username Payload</label>
+          <input id="session-user-input" type="text" value="student" placeholder="Enter username..." />
+        </div>
+        <div class="grow">
+          <label for="session-route-input">Session Endpoint Route</label>
+          <input id="session-route-input" type="text" value="/session-demo" placeholder="/session-demo" />
+        </div>
+      </div>
+
+      <div class="button-group" style="margin-top:12px;">
+        <button class="btn" type="button" onclick="handleSessionAction('login')">
+          1. Login (Set-Cookie)
+        </button>
+        <button class="btn secondary" type="button" onclick="handleSessionAction('check')">
+          2. Check Session Status (GET)
+        </button>
+        <button class="btn secondary" type="button" onclick="handleSessionAction('logout')" style="border-color: #ef4444; color: #ef4444;">
+          3. Logout (Clear Session)
+        </button>
+      </div>
+
+      <div class="divider"></div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <label style="margin: 0;">Browser Cookie Store (<span class="mono">document.cookie</span>)</label>
+        <button class="btn secondary" type="button" onclick="refreshCookieDisplay()" style="padding: 2px 8px; font-size:0.75rem;">Sync Browser Cookies</button>
+      </div>
+      <div id="browser-cookie-display" class="mono" style="background: rgba(0,0,0,0.2); padding: 8px 12px; border-radius: 6px; font-size: 0.85rem; margin-top: 6px; word-break: break-all;">
+        (No cookies found in current browser context)
+      </div>
+
+      <div id="session-status" class="status" style="margin-top:12px;"></div>
+      <div id="session-result" class="cgi-result" style="display:none; margin-top:8px;"></div>
+    </section>
+
     <p class="footer">Place this file in the Webserv static root and open it through the Webserv URL. Do not open it
       directly with file://.</p>
   </main>
@@ -237,7 +288,6 @@
     const cgiContentType = $("#cgi-content-type");
     const cgiMessage = $("#cgi-message");
 
-    // 联动 1: 切换 Content-Type 时自动匹配对应格式的 Body 模板
     const bodyTemplates = {
       "application/x-www-form-urlencoded": "message=Hello+from+Webserv+CGI+TestPanel&user=student",
       "text/plain": "Hello from Webserv CGI TestPanel!\nUser: student",
@@ -274,7 +324,6 @@
         const text = await response.text();
         const seconds = ((performance.now() - start) / 1000).toFixed(3);
 
-        // Update Dashboard Bar
         cgiStatusBar.style.display = "flex";
         cgiStatusBadge.textContent = `${response.status} ${response.statusText || ''}`;
 
@@ -333,6 +382,67 @@
       const contentType = cgiContentType.value;
       testCgi(cgiTarget.value, "POST", body, contentType);
     });
+
+    /* --- Section 4: Session & Cookie Management --- */
+    const sessionUserInput = $("#session-user-input");
+    const sessionRouteInput = $("#session-route-input");
+    const sessionStatus = $("#session-status");
+    const sessionResult = $("#session-result");
+    const browserCookieDisplay = $("#browser-cookie-display");
+
+    function refreshCookieDisplay() {
+      const cookies = document.cookie;
+      browserCookieDisplay.textContent = cookies && cookies.trim() !== "" 
+        ? cookies 
+        : "(No cookies found in current browser context)";
+    }
+
+    async function handleSessionAction(actionType) {
+      const route = normalizePath(sessionRouteInput.value);
+      const username = sessionUserInput.value.trim();
+
+      sessionStatus.textContent = `Executing session action [${actionType}]...`;
+      sessionStatus.className = "status";
+      sessionResult.style.display = "none";
+      sessionResult.textContent = "";
+
+      try {
+        let response;
+        const options = { cache: "no-store", credentials: "same-origin" };
+
+        if (actionType === 'login') {
+          options.method = "POST";
+          options.headers = { "Content-Type": "application/x-www-form-urlencoded" };
+          options.body = `action=login&user=${encodeURIComponent(username)}`;
+        } else if (actionType === 'logout') {
+          options.method = "POST";
+          options.headers = { "Content-Type": "application/x-www-form-urlencoded" };
+          options.body = "action=logout";
+        } else {
+          options.method = "GET";
+        }
+
+        response = await fetch(route, options);
+        const text = await response.text();
+
+        setStatus(
+          sessionStatus,
+          `${options.method} ${route} → ${response.status} ${response.statusText}`,
+          !response.ok
+        );
+
+        sessionResult.textContent = text || "(Empty Body)";
+        sessionResult.style.display = "block";
+
+        // 更新客户端 Cookie 显示
+        refreshCookieDisplay();
+      } catch (err) {
+        setStatus(sessionStatus, `Session Request Failed: ${err.message}`, true);
+      }
+    }
+
+    // 初始化 Cookie 显示
+    refreshCookieDisplay();
 
     /* --- Section 2: File Manager & Drag Upload Script --- */
     const dropZone = $("#drop-zone");
@@ -411,9 +521,7 @@
       }
     });
 
-    // 在新标签页预览文件，兼顾弹窗防拦截与 Blob 类型覆盖
     async function openInNewWindow(fileUrl) {
-      // 1. 同步打开新窗口，防止浏览器拦截弹窗
       const newWin = window.open('about:blank', '_blank');
       if (newWin) {
         newWin.document.write("<p style='font-family:sans-serif; text-align:center; margin-top:50px;'>Loading file preview...</p>");
@@ -430,7 +538,6 @@
         const blob = await response.blob();
         const ext = fileUrl.split('.').pop().toLowerCase();
 
-        // 2. 补全前端常见的图片/文件 MIME 类型
         let mimeType = blob.type;
         if (ext === 'avif') mimeType = 'image/avif';
         else if (ext === 'png') mimeType = 'image/png';
@@ -443,7 +550,6 @@
         const viewableBlob = new Blob([blob], { type: mimeType });
         const blobUrl = URL.createObjectURL(viewableBlob);
 
-        // 3. 将前面打开的新页面重定向至加载好的 Blob 预览地址
         if (newWin) {
           newWin.location.href = blobUrl;
         } else {
