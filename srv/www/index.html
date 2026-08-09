@@ -234,6 +234,25 @@
     const cgiEndpointTag = $("#cgi-endpoint-tag");
     const cgiStatus = $("#cgi-status");
     const cgiResult = $("#cgi-result");
+    const cgiContentType = $("#cgi-content-type");
+    const cgiMessage = $("#cgi-message");
+
+    // 联动 1: 切换 Content-Type 时自动匹配对应格式的 Body 模板
+    const bodyTemplates = {
+      "application/x-www-form-urlencoded": "message=Hello+from+Webserv+CGI+TestPanel&user=student",
+      "text/plain": "Hello from Webserv CGI TestPanel!\nUser: student",
+      "application/json": JSON.stringify({
+        message: "Hello from Webserv CGI TestPanel",
+        user: "student"
+      }, null, 2)
+    };
+
+    cgiContentType.addEventListener("change", () => {
+      const selectedType = cgiContentType.value;
+      if (bodyTemplates[selectedType]) {
+        cgiMessage.value = bodyTemplates[selectedType];
+      }
+    });
 
     async function testCgi(path, method = "GET", body = null, contentType = "application/x-www-form-urlencoded") {
       cgiStatus.textContent = "Executing " + method + " " + path + "...";
@@ -310,8 +329,8 @@
 
     $("#cgi-post-form").addEventListener("submit", (event) => {
       event.preventDefault();
-      const body = $("#cgi-message").value;
-      const contentType = $("#cgi-content-type").value;
+      const body = cgiMessage.value;
+      const contentType = cgiContentType.value;
       testCgi(cgiTarget.value, "POST", body, contentType);
     });
 
@@ -392,11 +411,18 @@
       }
     });
 
-    // 强制在新标签页预览文件，覆盖服务器的下载 Header
+    // 在新标签页预览文件，兼顾弹窗防拦截与 Blob 类型覆盖
     async function openInNewWindow(fileUrl) {
+      // 1. 同步打开新窗口，防止浏览器拦截弹窗
+      const newWin = window.open('about:blank', '_blank');
+      if (newWin) {
+        newWin.document.write("<p style='font-family:sans-serif; text-align:center; margin-top:50px;'>Loading file preview...</p>");
+      }
+
       try {
         const response = await fetch(fileUrl, { cache: "no-store" });
         if (!response.ok) {
+          if (newWin) newWin.close();
           alert(`Failed to load: ${response.status}`);
           return;
         }
@@ -404,7 +430,7 @@
         const blob = await response.blob();
         const ext = fileUrl.split('.').pop().toLowerCase();
 
-        // 补全前端常见的图片/文件 MIME 类型
+        // 2. 补全前端常见的图片/文件 MIME 类型
         let mimeType = blob.type;
         if (ext === 'avif') mimeType = 'image/avif';
         else if (ext === 'png') mimeType = 'image/png';
@@ -417,9 +443,14 @@
         const viewableBlob = new Blob([blob], { type: mimeType });
         const blobUrl = URL.createObjectURL(viewableBlob);
 
-        // 打开新标签页在线预览
-        window.open(blobUrl, '_blank');
+        // 3. 将前面打开的新页面重定向至加载好的 Blob 预览地址
+        if (newWin) {
+          newWin.location.href = blobUrl;
+        } else {
+          window.open(blobUrl, '_blank');
+        }
       } catch (err) {
+        if (newWin) newWin.close();
         alert("Preview error: " + err.message);
       }
     }
@@ -459,9 +490,9 @@
           const item = document.createElement("div");
           item.className = "file-item";
           item.innerHTML = `
-        <a class="file-name" href="javascript:void(0)" onclick="openInNewWindow('${fullUrl}')" title="Click to preview ${cleanName}">${cleanName}</a>
-        <button class="btn-del" onclick="deleteFileFromList('${fullUrl}')">Delete</button>
-      `;
+            <a class="file-name" href="javascript:void(0)" onclick="openInNewWindow('${fullUrl}')" title="Click to preview ${cleanName}">${cleanName}</a>
+            <button class="btn-del" onclick="deleteFileFromList('${fullUrl}')">Delete</button>
+          `;
           fileListContainer.appendChild(item);
         });
 
@@ -469,6 +500,7 @@
         fileListContainer.innerHTML = `<p class="help err" style="text-align:center;">Error parsing list: ${err.message}</p>`;
       }
     }
+
     async function deleteFileFromList(fileUrl) {
       setStatus(managerDeleteStatus, `Deleting ${fileUrl}...`, false);
       try {
