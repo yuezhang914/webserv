@@ -1,0 +1,4 @@
+{
+  "message": "Hello from Webserv CGI TestPanel",
+  "user": "student"
+}
