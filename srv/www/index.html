@@ -1,259 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Webserv Test Panel</title>
-  <style>
-    :root {
-      --bg: #b88f94;
-      --bg-deep: #987177;
-      --card: rgba(255,255,255,.14);
-      --card-strong: rgba(255,255,255,.20);
-      --border: rgba(255,255,255,.28);
-      --text: #fff;
-      --muted: rgba(255,255,255,.76);
-      --input: rgba(83,48,56,.28);
-      --button: #f7eeee;
-      --button-text: #7e5960;
-      --ok: #effff3;
-      --err: #ffe1e1;
-      --shadow: 0 18px 45px rgba(72,40,48,.18);
-    }
-
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-      background:
-        radial-gradient(circle at 10% 0%, rgba(255,255,255,.19), transparent 34%),
-        linear-gradient(145deg, var(--bg), var(--bg-deep));
-      color: var(--text);
-      font: 16px/1.55 "Avenir Next", "Segoe UI", Arial, sans-serif;
-    }
-
-    button, input, textarea, select { font: inherit; }
-
-    .page {
-      width: min(1180px, calc(100% - 32px));
-      margin: auto;
-      padding: 42px 0 54px;
-    }
-
-    .hero {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-end;
-      gap: 24px;
-      margin-bottom: 24px;
-      padding: 0 4px;
-    }
-
-    .eyebrow {
-      margin: 0 0 8px;
-      color: var(--muted);
-      font-size: .78rem;
-      font-weight: 800;
-      letter-spacing: .18em;
-      text-transform: uppercase;
-    }
-
-    h1, h2, h3, p { margin-top: 0; }
-
-    h1 {
-      margin-bottom: 8px;
-      font: 500 clamp(2rem, 5vw, 3.6rem)/1.05 Georgia, "Times New Roman", serif;
-      letter-spacing: -.035em;
-    }
-
-    h2 { margin-bottom: 5px; font-size: 1.06rem; }
-    h3 { margin-bottom: 10px; font-size: .96rem; }
-
-    .intro {
-      max-width: 720px;
-      margin-bottom: 0;
-      color: var(--muted);
-    }
-
-    .badges { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
-
-    .badge {
-      padding: 5px 11px;
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      background: rgba(255,255,255,.10);
-      font-size: .78rem;
-      font-weight: 800;
-      letter-spacing: .05em;
-    }
-
-    .layout {
-      display: grid;
-      grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr);
-      gap: 18px;
-    }
-
-    .stack { display: grid; gap: 18px; }
-
-    .card {
-      padding: 20px;
-      border: 1px solid var(--border);
-      border-radius: 22px;
-      background: var(--card);
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
-    }
-
-    .card.strong { background: var(--card-strong); }
-
-    .card-head {
-      display: flex;
-      gap: 13px;
-      align-items: flex-start;
-      margin-bottom: 16px;
-    }
-
-    .num {
-      display: grid;
-      place-items: center;
-      flex: 0 0 34px;
-      width: 34px;
-      height: 34px;
-      border-radius: 50%;
-      background: rgba(255,255,255,.18);
-      font-family: Georgia, serif;
-    }
-
-    .help { margin-bottom: 0; color: var(--muted); font-size: .86rem; }
-
-    label {
-      display: block;
-      margin: 13px 0 6px;
-      color: var(--muted);
-      font-size: .82rem;
-      font-weight: 800;
-    }
-
-    input[type="text"], textarea, select {
-      width: 100%;
-      padding: 11px 13px;
-      border: 1px solid var(--border);
-      border-radius: 13px;
-      outline: none;
-      background: var(--input);
-      color: var(--text);
-    }
-
-    input::placeholder, textarea::placeholder { color: rgba(255,255,255,.54); }
-    input:focus, textarea:focus, select:focus { border-color: rgba(255,255,255,.68); }
-    select option { color: #4f383d; background: #f7eded; }
-
-    textarea {
-      min-height: 118px;
-      resize: vertical;
-      font-family: "SFMono-Regular", Consolas, monospace;
-      font-size: .9rem;
-    }
-
-    .row { display: flex; gap: 10px; align-items: stretch; }
-    .grow { flex: 1; min-width: 0; }
-
-    .btn {
-      min-width: 100px;
-      padding: 10px 15px;
-      border: 0;
-      border-radius: 13px;
-      background: var(--button);
-      color: var(--button-text);
-      font-weight: 800;
-      cursor: pointer;
-      box-shadow: 0 8px 22px rgba(74,41,48,.12);
-      transition: transform .16s ease, box-shadow .16s ease;
-    }
-
-    .btn:hover { transform: translateY(-1px); box-shadow: 0 11px 26px rgba(74,41,48,.17); }
-    .btn.secondary { background: rgba(255,255,255,.10); color: var(--text); border: 1px solid var(--border); box-shadow: none; }
-
-    .status {
-      min-height: 24px;
-      margin-top: 12px;
-      color: var(--muted);
-      font-size: .87rem;
-      overflow-wrap: anywhere;
-    }
-
-    .status.ok { color: var(--ok); }
-    .status.err { color: var(--err); }
-
-    .mono { font-family: "SFMono-Regular", Consolas, monospace; }
-
-    .preview-label {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      margin: 15px 0 8px;
-      color: var(--muted);
-      font-size: .79rem;
-    }
-
-    iframe {
-      width: 100%;
-      height: 460px;
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      background: rgba(255,255,255,.93);
-    }
-
-    .url-preview {
-      margin-top: 10px;
-      padding: 9px 11px;
-      border: 1px dashed var(--border);
-      border-radius: 12px;
-      color: var(--muted);
-      font-size: .8rem;
-      overflow-wrap: anywhere;
-    }
-
-    .divider { height: 1px; margin: 19px 0; background: var(--border); }
-    .button-group { display: flex; flex-wrap: wrap; gap: 10px; }
-
-    .cgi-result {
-      display: none;
-      max-height: 330px;
-      overflow: auto;
-      margin-top: 13px;
-      padding: 14px;
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      background: rgba(75,42,49,.27);
-      font: .84rem/1.55 "SFMono-Regular", Consolas, monospace;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-
-    .footer {
-      margin: 20px 4px 0;
-      color: rgba(255,255,255,.67);
-      font-size: .8rem;
-      text-align: center;
-    }
-
-    @media (max-width: 860px) {
-      .hero { align-items: flex-start; flex-direction: column; }
-      .badges { justify-content: flex-start; }
-      .layout { grid-template-columns: 1fr; }
-      iframe { height: 380px; }
-    }
-
-    @media (max-width: 560px) {
-      .page { width: calc(100% - 20px); padding-top: 25px; }
-      .card { padding: 16px; border-radius: 18px; }
-      .row { flex-direction: column; }
-      .btn { width: 100%; }
-    }
-  </style>
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌐</text></svg>">
+  <link rel="stylesheet" href="style.css" />
 </head>
 
 <body>
@@ -263,7 +17,8 @@
         <p class="eyebrow">Local HTTP Testing</p>
         <h1>Webserv Test Panel</h1>
         <p class="intro">
-          This page sends requests to the same-origin Webserv that serves it. Use it to test static files, autoindex, uploads, deletion, and CGI.
+          This page sends requests to the same-origin Webserv that serves it. Use it to test static files, autoindex,
+          uploads, deletion, and CGI.
         </p>
       </div>
       <div class="badges">
@@ -272,15 +27,17 @@
         <span class="badge">DELETE</span>
         <span class="badge">CGI</span>
       </div>
-    </header> 
+    </header>
 
     <div class="layout">
+      <!-- Section 1: GET -->
       <section class="card strong">
         <div class="card-head">
           <span class="num">1</span>
           <div>
             <h2>GET Files and Directories</h2>
-            <p class="help">Enter a file or directory path. When autoindex is enabled, the directory listing will appear below.</p>
+            <p class="help">Enter a file or directory path. When autoindex is enabled, the directory listing will appear
+              below.</p>
           </div>
         </div>
 
@@ -295,86 +52,69 @@
       </section>
 
       <div class="stack">
+        <!-- Section 2: File Manager & Drag Upload -->
         <section class="card">
           <div class="card-head">
             <span class="num">2</span>
             <div>
-              <h2>POST a Text File</h2>
-              <p class="help">Set the upload route, filename, Content-Type, and request body.</p>
+              <h2>File Manager & Drag Upload & Post & DELETE </h2>
+              <p class="help">Upload binary or text files directly, or manage existing files inside your server directory.</p>
             </div>
           </div>
 
-          <form id="post-form" autocomplete="off">
-            <label for="post-fn">Target Filename</label>
-            <input id="post-fn" type="text" placeholder="example.txt" />
+          <div>
+            <label for="manager-route">Upload Route Folder</label>
+            <input id="manager-route" type="text" value="/upload/" placeholder="/upload/" />
 
-            <div class="row">
-              <div class="grow">
-                <label for="post-prefix">Upload Route</label>
-                <input id="post-prefix" type="text" value="/upload/" />
-              </div>
-              <div class="grow">
-                <label for="post-ctype">Content-Type</label>
-                <select id="post-ctype">
-                  <option value="text/plain">text/plain</option>
-                  <option value="application/json">application/json</option>
-                  <option value="application/octet-stream">application/octet-stream</option>
-                </select>
-              </div>
+            <label>Select or Drag File</label>
+            <div id="drop-zone" class="drop-zone">
+              <input type="file" id="file-input" style="display: none;" />
+              <p id="drop-zone-text">Drag and drop file here, or <span class="browse-link">browse</span></p>
             </div>
 
-            <label for="post-body">Request Body</label>
-            <textarea id="post-body" placeholder="Enter the content to send..."></textarea>
-
-            <div class="url-preview">POST → <span id="post-url-preview" class="mono">/upload/&lt;filename&gt;</span></div>
-            <button class="btn" type="submit" style="margin-top:12px">Upload File</button>
-          </form>
-          <div id="post-status" class="status"></div>
-        </section>
-
-        <section class="card">
-          <div class="card-head">
-            <span class="num">3</span>
-            <div>
-              <h2>DELETE a File</h2>
-              <p class="help">After deletion, use the GET panel to confirm that the file is no longer available.</p>
-            </div>
+            <button id="upload-file-btn" class="btn" type="button" style="margin-top:14px; width: 100%;">Upload Selected File</button>
+            <div id="manager-upload-status" class="status"></div>
           </div>
 
-          <form id="del-form" autocomplete="off">
-            <label for="del-fn">Target Filename</label>
-            <input id="del-fn" type="text" placeholder="example.txt" />
-            <label for="del-prefix">Delete Route</label>
-            <input id="del-prefix" type="text" value="/upload/" />
-            <button class="btn" type="submit" style="margin-top:12px">Delete File</button>
-          </form>
-          <div id="del-status" class="status"></div>
+          <div class="divider"></div>
+
+          <div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <label style="margin: 0;">Server File List</label>
+              <button id="fetch-files-btn" class="btn secondary" type="button" style="padding: 4px 10px; min-width: auto; font-size: 0.8rem;">Refresh List</button>
+            </div>
+            
+            <div id="file-list-container" class="file-list-container" style="margin-top: 8px;">
+              <p class="help" style="text-align: center; margin-top: 20px;">Click "Refresh List" to load files via autoindex.</p>
+            </div>
+            <div id="manager-delete-status" class="status"></div>
+          </div>
         </section>
       </div>
     </div>
 
+    <!-- Section 3: CGI Testing -->
     <section class="card" style="margin-top:18px">
       <div class="card-head">
-        <span class="num">4</span>
+        <span class="num">3</span>
         <div>
           <h2>CGI Testing</h2>
           <p class="help">
             These default paths match the Webserv evaluation setup: Python scripts live under
             <span class="mono">/cgi/</span>, and the Shell CGI is the second CGI type.
-            A missing script should return 404, a broken CGI should return 500/502, and a timed-out CGI should return 504.
+            A missing script should return 404, a broken CGI should return 500/502, and a timed-out CGI should return
+            504.
           </p>
         </div>
       </div>
 
       <div class="button-group">
-        <button class="btn secondary" type="button"
-          onclick="testCgi('/cgi/echo.py?source=browser','GET')">Python CGI · GET</button>
-        <button class="btn secondary" type="button"
-          onclick="testCgi('/cgi/echo.sh?kind=shell','GET')">Shell CGI · GET</button>
-        <button class="btn secondary" type="button"
-          onclick="testCgi('/cgi/bad.py','GET')">Broken CGI · GET</button>
-        <button class="btn secondary" type="button"
-          onclick="testCgi('/cgi/slow.py','GET')">Slow CGI · GET</button>
+        <button class="btn secondary" type="button" onclick="testCgi('/cgi/echo.py?source=browser','GET')">Python CGI ·
+          GET</button>
+        <button class="btn secondary" type="button" onclick="testCgi('/cgi/echo.sh?kind=shell','GET')">Shell CGI ·
+          GET</button>
+        <button class="btn secondary" type="button" onclick="testCgi('/cgi/bad.py','GET')">Broken CGI · GET</button>
+        <button class="btn secondary" type="button" onclick="testCgi('/cgi/slow.py','GET')">Slow CGI · GET</button>
       </div>
 
       <div class="divider"></div>
@@ -393,7 +133,8 @@
 
 
         <label for="cgi-message">Message</label>
-        <textarea id="cgi-message" style="min-height:88px" placeholder="Any test message...">Hello from the browser CGI form.</textarea>
+        <textarea id="cgi-message" style="min-height:88px"
+          placeholder="Any test message...">Hello from the browser CGI form.</textarea>
         <div class="url-preview">POST → <span id="cgi-url-preview" class="mono">/cgi/echo.py?source=form</span></div>
         <button class="btn" type="submit" style="margin-top:12px">Send POST to Selected CGI</button>
       </form>
@@ -402,7 +143,8 @@
       <div id="cgi-result" class="cgi-result"></div>
     </section>
 
-    <p class="footer">Place this file in the Webserv static root and open it through the Webserv URL. Do not open it directly with file://.</p>
+    <p class="footer">Place this file in the Webserv static root and open it through the Webserv URL. Do not open it
+      directly with file://.</p>
   </main>
 
   <script>
@@ -422,6 +164,7 @@
       return text.length > 160 ? text.slice(0, 157) + "…" : text;
     }
 
+    /* --- Section 1: GET --- */
     const getForm = $("#get-form");
     const getPath = $("#get-path");
     const getFrame = $("#get-frame");
@@ -445,81 +188,7 @@
         });
     });
 
-    const postForm = $("#post-form");
-    const postFilename = $("#post-fn");
-    const postPrefix = $("#post-prefix");
-    const postBody = $("#post-body");
-    const postContentType = $("#post-ctype");
-    const postStatus = $("#post-status");
-    const postPreview = $("#post-url-preview");
-
-    function updatePostPreview() {
-      postPreview.textContent = normalizePath(postPrefix.value) + (postFilename.value || "<filename>");
-    }
-
-    postFilename.addEventListener("input", updatePostPreview);
-    postPrefix.addEventListener("input", updatePostPreview);
-    updatePostPreview();
-
-    postForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const filename = postFilename.value.trim();
-      const url = normalizePath(postPrefix.value) + filename;
-
-      if (!filename) {
-        setStatus(postStatus, "Please enter a target filename.", true);
-        return;
-      }
-
-      setStatus(postStatus, "Sending POST...", false);
-
-      try {
-        const response = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": postContentType.value },
-          body: postBody.value
-        });
-        const text = await response.text().catch(() => "");
-        setStatus(
-          postStatus,
-          "POST " + url + " → " + response.status + " " + response.statusText + (text ? " — " + truncate(text) : ""),
-          !response.ok
-        );
-      } catch (error) {
-        setStatus(postStatus, "POST " + url + " failed: " + error.message, true);
-      }
-    });
-
-    const deleteForm = $("#del-form");
-    const deleteFilename = $("#del-fn");
-    const deletePrefix = $("#del-prefix");
-    const deleteStatus = $("#del-status");
-
-    deleteForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const filename = deleteFilename.value.trim();
-      const url = normalizePath(deletePrefix.value) + filename;
-
-      if (!filename) {
-        setStatus(deleteStatus, "Please enter the filename to delete.", true);
-        return;
-      }
-
-      setStatus(deleteStatus, "Sending DELETE...", false);
-
-      try {
-        const response = await fetch(url, { method: "DELETE" });
-        const text = await response.text().catch(() => "");
-        setStatus(
-          deleteStatus,
-          "DELETE " + url + " → " + response.status + " " + response.statusText + (text ? " — " + truncate(text) : ""),
-          !response.ok
-        );
-      } catch (error) {
-        setStatus(deleteStatus, "DELETE " + url + " failed: " + error.message, true);
-      }
-    });
-
+    /* --- Section 3: CGI --- */
     async function testCgi(path, method = "GET", body = null) {
       const cgiStatus = $("#cgi-status");
       const cgiResult = $("#cgi-result");
@@ -572,6 +241,151 @@
         "message=" + encodeURIComponent($("#cgi-message").value);
       testCgi(cgiTarget.value, "POST", body);
     });
+
+    /* --- Section 2: File Manager & Drag Upload Script --- */
+    const dropZone = $("#drop-zone");
+    const fileInput = $("#file-input");
+    const dropZoneText = $("#drop-zone-text");
+    const uploadBtn = $("#upload-file-btn");
+    const managerRoute = $("#manager-route");
+    const managerUploadStatus = $("#manager-upload-status");
+    const managerDeleteStatus = $("#manager-delete-status");
+    const fileListContainer = $("#file-list-container");
+    const fetchFilesBtn = $("#fetch-files-btn");
+
+    let selectedFile = null;
+
+    dropZone.addEventListener("click", () => fileInput.click());
+
+    fileInput.addEventListener("change", (e) => {
+      if (e.target.files.length > 0) {
+        setSelectedFile(e.target.files[0]);
+      }
+    });
+
+    dropZone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      dropZone.classList.add("dragover");
+    });
+
+    dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
+
+    dropZone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      dropZone.classList.remove("dragover");
+      if (e.dataTransfer.files.length > 0) {
+        setSelectedFile(e.dataTransfer.files[0]);
+      }
+    });
+
+    function setSelectedFile(file) {
+      selectedFile = file;
+      dropZoneText.textContent = `Selected: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+    }
+
+    uploadBtn.addEventListener("click", async () => {
+      if (!selectedFile) {
+        setStatus(managerUploadStatus, "Please select a file first.", true);
+        return;
+      }
+
+      let route = normalizePath(managerRoute.value);
+      if (!route.endsWith("/")) route += "/";
+      const targetUrl = route + selectedFile.name;
+
+      setStatus(managerUploadStatus, "Uploading file...", false);
+
+      try {
+        const response = await fetch(targetUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": selectedFile.type || "application/octet-stream"
+          },
+          body: selectedFile
+        });
+
+        const text = await response.text().catch(() => "");
+        setStatus(
+          managerUploadStatus,
+          `POST ${targetUrl} → ${response.status} ${response.statusText}${text ? ' — ' + truncate(text) : ''}`,
+          !response.ok
+        );
+
+        if (response.ok) {
+          fetchFileList();
+        }
+      } catch (err) {
+        setStatus(managerUploadStatus, `Upload failed: ${err.message}`, true);
+      }
+    });
+
+    function openInNewWindow(url) {
+      window.open(url, '_blank', 'width=900,height=700,scrollbars=yes,resizable=yes');
+    }
+
+    async function fetchFileList() {
+      let route = normalizePath(managerRoute.value);
+      if (!route.endsWith("/")) route += "/";
+
+      fileListContainer.innerHTML = "<p class='help' style='text-align:center;'>Loading...</p>";
+
+      try {
+        const res = await fetch(route, { cache: "no-store" });
+        if (!res.ok) {
+          fileListContainer.innerHTML = `<p class="help err" style="text-align:center;">Failed to list directory (${res.status})</p>`;
+          return;
+        }
+
+        const htmlText = await res.text();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlText, "text/html");
+        const links = Array.from(doc.querySelectorAll("a"));
+
+        const validFiles = links
+          .map(a => a.getAttribute("href"))
+          .filter(href => href && href !== "../" && href !== "./" && !href.endsWith("/"));
+
+        if (validFiles.length === 0) {
+          fileListContainer.innerHTML = "<p class='help' style='text-align:center;'>No files found or Autoindex disabled.</p>";
+          return;
+        }
+
+        fileListContainer.innerHTML = "";
+        validFiles.forEach(fileName => {
+          const cleanName = fileName.replace(/^.*[\\\/]/, '');
+          const fileUrl = `${route}${cleanName}`;
+          const item = document.createElement("div");
+          item.className = "file-item";
+          item.innerHTML = `
+            <a class="file-name" href="javascript:void(0)" onclick="openInNewWindow('${fileUrl}')" title="Click to open ${cleanName} in new window">${cleanName}</a>
+            <button class="btn-del" onclick="deleteFileFromList('${fileUrl}')">Delete</button>
+          `;
+          fileListContainer.appendChild(item);
+        });
+
+      } catch (err) {
+        fileListContainer.innerHTML = `<p class="help err" style="text-align:center;">Error parsing list: ${err.message}</p>`;
+      }
+    }
+
+    async function deleteFileFromList(fileUrl) {
+      setStatus(managerDeleteStatus, `Deleting ${fileUrl}...`, false);
+      try {
+        const response = await fetch(fileUrl, { method: "DELETE" });
+        const text = await response.text().catch(() => "");
+        setStatus(
+          managerDeleteStatus,
+          `DELETE ${fileUrl} → ${response.status} ${response.statusText}${text ? ' — ' + truncate(text) : ''}`,
+          !response.ok
+        );
+        fetchFileList();
+      } catch (err) {
+        setStatus(managerDeleteStatus, `Delete failed: ${err.message}`, true);
+      }
+    }
+
+    fetchFilesBtn.addEventListener("click", fetchFileList);
   </script>
 </body>
+
 </html>
