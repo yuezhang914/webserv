@@ -58,7 +58,8 @@
             <span class="num">2</span>
             <div>
               <h2>File Manager & Drag Upload</h2>
-              <p class="help">Upload binary or text files directly, or manage existing files inside your server directory.</p>
+              <p class="help">Upload binary or text files directly, or manage existing files inside your server
+                directory.</p>
             </div>
           </div>
 
@@ -72,7 +73,8 @@
               <p id="drop-zone-text">Drag and drop file here, or <span class="browse-link">browse</span></p>
             </div>
 
-            <button id="upload-file-btn" class="btn" type="button" style="margin-top:14px; width: 100%;">Upload Selected File</button>
+            <button id="upload-file-btn" class="btn" type="button" style="margin-top:14px; width: 100%;">Upload Selected
+              File</button>
             <div id="manager-upload-status" class="status"></div>
           </div>
 
@@ -81,11 +83,13 @@
           <div>
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <label style="margin: 0;">Server File List</label>
-              <button id="fetch-files-btn" class="btn secondary" type="button" style="padding: 4px 10px; min-width: auto; font-size: 0.8rem;">Refresh List</button>
+              <button id="fetch-files-btn" class="btn secondary" type="button"
+                style="padding: 4px 10px; min-width: auto; font-size: 0.8rem;">Refresh List</button>
             </div>
-            
+
             <div id="file-list-container" class="file-list-container" style="margin-top: 8px;">
-              <p class="help" style="text-align: center; margin-top: 20px;">Click "Refresh List" to load files via autoindex.</p>
+              <p class="help" style="text-align: center; margin-top: 20px;">Click "Refresh List" to load files via
+                autoindex.</p>
             </div>
             <div id="manager-delete-status" class="status"></div>
           </div>
@@ -100,7 +104,7 @@
         <div>
           <h2>CGI Execution & Spec Testing</h2>
           <p class="help">
-            Test RFC 3875 CGI implementation, environment variables, multi-language support, 
+            Test RFC 3875 CGI implementation, environment variables, multi-language support,
             and error conditions (404 missing, 500/502 crash, 504 no-progress timeout).
           </p>
         </div>
@@ -134,7 +138,8 @@
       <!-- Interactive CGI POST Form -->
       <h3>Custom CGI Request (POST & Body)</h3>
       <p class="help">
-        Send request bodies to test <span class="mono">STDIN</span> processing, <span class="mono">CONTENT_LENGTH</span>, and <span class="mono">CONTENT_TYPE</span> headers.
+        Send request bodies to test <span class="mono">STDIN</span> processing, <span
+          class="mono">CONTENT_LENGTH</span>, and <span class="mono">CONTENT_TYPE</span> headers.
       </p>
 
       <form id="cgi-post-form" autocomplete="off">
@@ -159,9 +164,11 @@
         </div>
 
         <label for="cgi-message">Request Body Content</label>
-        <textarea id="cgi-message" style="min-height:90px" placeholder="Enter test payload for STDIN...">message=Hello+from+Webserv+CGI+TestPanel&user=student</textarea>
+        <textarea id="cgi-message" style="min-height:90px"
+          placeholder="Enter test payload for STDIN...">message=Hello+from+Webserv+CGI+TestPanel&user=student</textarea>
 
-        <div class="url-preview">Request Target → <span id="cgi-url-preview" class="mono">/cgi/echo.py?source=custom_form</span></div>
+        <div class="url-preview">Request Target → <span id="cgi-url-preview"
+            class="mono">/cgi/echo.py?source=custom_form</span></div>
         <button class="btn" type="submit" style="margin-top:12px">Execute Custom CGI POST</button>
       </form>
 
@@ -251,7 +258,7 @@
         // Update Dashboard Bar
         cgiStatusBar.style.display = "flex";
         cgiStatusBadge.textContent = `${response.status} ${response.statusText || ''}`;
-        
+
         if (response.status >= 200 && response.status < 300) {
           cgiStatusBadge.className = "status-badge badge-2xx";
         } else if (response.status >= 400 && response.status < 500) {
@@ -385,8 +392,36 @@
       }
     });
 
-    function openInNewWindow(url) {
-      window.open(url, '_blank', 'width=900,height=700,scrollbars=yes,resizable=yes');
+    // 强制在新标签页预览文件，覆盖服务器的下载 Header
+    async function openInNewWindow(fileUrl) {
+      try {
+        const response = await fetch(fileUrl, { cache: "no-store" });
+        if (!response.ok) {
+          alert(`Failed to load: ${response.status}`);
+          return;
+        }
+
+        const blob = await response.blob();
+        const ext = fileUrl.split('.').pop().toLowerCase();
+
+        // 补全前端常见的图片/文件 MIME 类型
+        let mimeType = blob.type;
+        if (ext === 'avif') mimeType = 'image/avif';
+        else if (ext === 'png') mimeType = 'image/png';
+        else if (ext === 'jpg' || ext === 'jpeg') mimeType = 'image/jpeg';
+        else if (ext === 'webp') mimeType = 'image/webp';
+        else if (ext === 'gif') mimeType = 'image/gif';
+        else if (ext === 'pdf') mimeType = 'application/pdf';
+        else if (ext === 'txt') mimeType = 'text/plain; charset=utf-8';
+
+        const viewableBlob = new Blob([blob], { type: mimeType });
+        const blobUrl = URL.createObjectURL(viewableBlob);
+
+        // 打开新标签页在线预览
+        window.open(blobUrl, '_blank');
+      } catch (err) {
+        alert("Preview error: " + err.message);
+      }
     }
 
     async function fetchFileList() {
@@ -407,25 +442,26 @@
         const doc = parser.parseFromString(htmlText, "text/html");
         const links = Array.from(doc.querySelectorAll("a"));
 
-        const validFiles = links
+        const validHrefList = links
           .map(a => a.getAttribute("href"))
           .filter(href => href && href !== "../" && href !== "./" && !href.endsWith("/"));
 
-        if (validFiles.length === 0) {
+        if (validHrefList.length === 0) {
           fileListContainer.innerHTML = "<p class='help' style='text-align:center;'>No files found or Autoindex disabled.</p>";
           return;
         }
 
         fileListContainer.innerHTML = "";
-        validFiles.forEach(fileName => {
-          const cleanName = fileName.replace(/^.*[\\\/]/, '');
-          const fileUrl = `${route}${cleanName}`;
+        validHrefList.forEach(rawHref => {
+          const cleanName = rawHref.split("?")[0].split("#")[0].replace(/^.*[\\\/]/, '');
+          const fullUrl = rawHref.startsWith("/") ? rawHref : (route + cleanName);
+
           const item = document.createElement("div");
           item.className = "file-item";
           item.innerHTML = `
-            <a class="file-name" href="javascript:void(0)" onclick="openInNewWindow('${fileUrl}')" title="Click to open ${cleanName} in new window">${cleanName}</a>
-            <button class="btn-del" onclick="deleteFileFromList('${fileUrl}')">Delete</button>
-          `;
+        <a class="file-name" href="javascript:void(0)" onclick="openInNewWindow('${fullUrl}')" title="Click to preview ${cleanName}">${cleanName}</a>
+        <button class="btn-del" onclick="deleteFileFromList('${fullUrl}')">Delete</button>
+      `;
           fileListContainer.appendChild(item);
         });
 
@@ -433,7 +469,6 @@
         fileListContainer.innerHTML = `<p class="help err" style="text-align:center;">Error parsing list: ${err.message}</p>`;
       }
     }
-
     async function deleteFileFromList(fileUrl) {
       setStatus(managerDeleteStatus, `Deleting ${fileUrl}...`, false);
       try {
