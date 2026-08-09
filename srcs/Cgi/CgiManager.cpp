@@ -150,40 +150,47 @@ CgiEventResult CgiManager::handlePipeRead(int cgiReadFd)
     }
 
     CgiTask &task = it->second;
-    int clientFd = task.clientFd; // 提前提取基本类型，防止 erase 后引用失效
+    int clientFd = task.clientFd; // 提前提取基本类型，防止被 erase 后引用失效
     char buffer[4096];
 
     while (true)
     {
         ssize_t bytesRead = ::read(cgiReadFd, buffer, sizeof(buffer));
+
         if (bytesRead > 0)
         {
-            // 只有真正读到 CGI stdout 才算有进展；EAGAIN 不刷新计时。
+            // 只有真正读到数据才刷新活跃时间
             task.lastActivity = std::time(NULL);
+
             if (task.outputBuffer.size() + static_cast<size_t>(bytesRead) > CGI_MAX_OUTPUT_SIZE)
             {
                 std::cerr << "[CgiManager] Error: CGI output size exceeded max limit! 502." << std::endl;
-                this->forceKillAndClean(task); // 传入 cgiReadFd 而非 task 引用
+                this->forceKillAndClean(task);
                 return CgiEventResult(CGI_ERROR, clientFd, 502);
             }
+
             task.outputBuffer.append(buffer, static_cast<size_t>(bytesRead));
             continue;
         }
         else if (bytesRead == 0)
         {
-            // 正常读取完毕 (EOF)
+            // 正常读取完毕 (EOF：CGI 子进程关闭了 stdout 管道)
             CgiEventResult result(CGI_FINISHED, clientFd, 200);
             result.rawOutput.swap(task.outputBuffer);
-            
-            // 彻底清理此 Task（包含 pid 回收、close fd、erase map）
+
+            // 彻底清理此 Task（回收 pid、close fd、erase map）
             this->forceKillAndClean(task);
             return result;
         }
         else 
         {
+            // 🚀 不检查 errno！
+            // bytesRead < 0 说明当前非阻塞缓冲区已被掏空 (EAGAIN)，或者收到信号打断。
+            // 直接退出内层循环，保留连接并等待下次 EPOLLIN 事件即可。
             break;
         }
     }
+
     return CgiEventResult(CGI_CONTINUE);
 }
 
@@ -232,6 +239,8 @@ CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
 
     const std::string &body = *task.inputBody;
     size_t bodySize = body.size();
+
+    // 如果 Body 已经发完，关闭写端抛出 EOF
     if (task.bodyBytesSent >= bodySize)
     {
         ::close(cgiWriteFd);
@@ -242,16 +251,17 @@ CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
 
     size_t remaining = bodySize - task.bodyBytesSent;
     const size_t maxWritePerTick = 64 * 1024;
-    size_t writeSize = remaining < maxWritePerTick
-        ? remaining : maxWritePerTick;
+    size_t writeSize = remaining < maxWritePerTick ? remaining : maxWritePerTick;
     const char *dataPtr = body.data() + task.bodyBytesSent;
+
     ssize_t bytesWritten = ::write(cgiWriteFd, dataPtr, writeSize);
 
     if (bytesWritten > 0)
     {
-        // 只有真正写入 CGI stdin 才算有进展；管道暂时写满不刷新计时。
+        // 只有真正写入 CGI stdin 才算有进展，刷新超时计时
         task.lastActivity = std::time(NULL);
         task.bodyBytesSent += static_cast<size_t>(bytesWritten);
+
         if (task.bodyBytesSent >= bodySize)
         {
             ::close(cgiWriteFd);
@@ -260,14 +270,12 @@ CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
         }
         return CgiEventResult(CGI_CONTINUE);
     }
-    if (bytesWritten == 0
-        || errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
-        return CgiEventResult(CGI_CONTINUE);
 
-    std::cerr << "[CgiManager] Error: Failed to write POST body to CGI stdin! 500." << std::endl;
-    int clientFd = task.clientFd;
-    this->forceKillAndClean(task);
-    return CgiEventResult(CGI_ERROR, clientFd, 500);
+    // 🚀 【不看 errno 的核心】：
+    // 当 bytesWritten <= 0 时（无论是暂态 EAGAIN/EWOULDBLOCK 还是管道满），
+    // 统统返回 CGI_CONTINUE，让主循环下一轮继续尝试。
+    // 如果管道确实破裂（如子进程中途退出导致 EPIPE），主 Loop 会检测到 EPOLLERR / EPOLLHUP 并触发清理。
+    return CgiEventResult(CGI_CONTINUE);
 }
 
 /*
@@ -285,8 +293,6 @@ CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
 */
 void CgiManager::forceKillAndClean(CgiTask &task)
 {
-    // task 位于 _read_fd_to_task_map 中；erase 以后引用立即失效，
-    // 所以必须先复制全部标量，再关闭资源，最后才擦除主表。
     const int readFd = task.readFd;
     const int writeFd = task.writeFd;
     const pid_t pid = task.pid;
@@ -297,23 +303,41 @@ void CgiManager::forceKillAndClean(CgiTask &task)
         this->_write_fd_to_read_fd_map.erase(writeFd);
     }
     if (readFd >= 0)
+    {
         ::close(readFd);
+    }
 
     if (pid > 0)
     {
         int status = 0;
+        // 先检查子进程是否已经自然退出
         pid_t waited = ::waitpid(pid, &status, WNOHANG);
+        
         if (waited == 0)
         {
+            // 子进程仍在运行，直接发送 SIGKILL
             ::kill(pid, SIGKILL);
-            while (::waitpid(pid, &status, 0) < 0 && errno == EINTR)
+            
+            // 🚀 【不看 errno 的同步等待】：
+            // SIGKILL 是强制杀进程，内核会立刻清理它。
+            // 使用最多 10 次的有限循环等待，只要 waited == pid (即 > 0) 就成功退出。
+            int retry = 0;
+            while (retry < 10)
             {
+                waited = ::waitpid(pid, &status, 0);
+                if (waited == pid) 
+                {
+                    break; // 成功回收，直接退出
+                }
+                retry++;
             }
         }
     }
 
     if (readFd >= 0)
+    {
         this->_read_fd_to_task_map.erase(readFd);
+    }
 }
 
 /*

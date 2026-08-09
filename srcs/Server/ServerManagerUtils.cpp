@@ -235,26 +235,21 @@ int ServerManager::executePoll(int &retries)
 
     if (ret < 0)
     {
-        // 💡 1. 显式捕获 EINTR 信号打断：直接算作正常暂态，重置/不计入致命错误 retry
-        if (errno == EINTR)
+        // 🚀 不看 errno！无论是因为信号打断还是系统调用异常，统统走统一的弹性重试逻辑
+        if (retries < 5) // 可适当将重试上限调至 3~5 次，给信号打断留足弹性缓冲空间
         {
-            return 0; // 信号打断，安全跳过，下一轮继续 poll
-        }
-
-        // 💡 2. 真正的其他致命底层 poll 错误（如 EFAULT, EINVAL），触发弹性重试
-        if (retries < 3)
-        {
-            std::cerr << "[executePoll] Warning: poll() system call failed with errno "
-                      << errno << ", retrying (" << retries + 1 << "/3)..." << std::endl;
+            std::cerr << "[executePoll] Warning: poll() returned negative value, retrying ("
+                      << retries + 1 << "/5)..." << std::endl;
             retries++;
-            return 0;
+            return 0; // 安全跳过当前轮次，下一轮继续 poll
         }
 
         std::cerr << "[executePoll] Fatal: poll() failed consecutively over limit! Terminating main loop." << std::endl;
-        return -1; // 连续 3 次致命错误，彻底熔断
+        return -1; // 连续多次失败，彻底熔断退出主循环
     }
 
-    retries = 0; // 成功捕获事件或超时，物理复位防崩溃计数器
+    // 成功捕获事件 (ret > 0) 或超时 (ret == 0)，说明 poll 工作正常，复位重试计数器
+    retries = 0;
     return ret;
 }
 
