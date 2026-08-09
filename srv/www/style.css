@@ -292,18 +292,65 @@ iframe {
   gap: 10px;
 }
 
+/* CGI Dashboard & Output Style */
+.cgi-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.status-badge {
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+
+.badge-2xx {
+  background: #2e7d32;
+  color: #e8f5e9;
+}
+
+.badge-4xx {
+  background: #f57c00;
+  color: #fff3e0;
+}
+
+.badge-5xx {
+  background: #c62828;
+  color: #ffebee;
+}
+
+.time-tag {
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-weight: bold;
+}
+
+.text-muted {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .cgi-result {
   display: none;
-  max-height: 330px;
+  max-height: 380px;
   overflow: auto;
   margin-top: 13px;
   padding: 14px;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(75, 42, 49, .27);
+  background: rgba(30, 20, 24, 0.45);
   font: .84rem/1.55 "SFMono-Regular", Consolas, monospace;
   white-space: pre-wrap;
   word-break: break-word;
+  color: #f1f1f1;
 }
 
 .footer {
@@ -313,7 +360,7 @@ iframe {
   text-align: center;
 }
 
-/* File Manager & Drag Upload 专用样式 */
+/* File Manager & Drag Upload 样式 */
 .drop-zone {
   border: 2px dashed var(--border);
   border-radius: 13px;
