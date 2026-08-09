@@ -99,30 +99,21 @@ void ClientSocket::setNonBlocking()
  */
 ssize_t ClientSocket::read(char *buf, size_t size) const
 {
-    // 1. 正常尝试从网线中非阻塞捞取数据
     ssize_t bytes = ::recv(this->_fd, buf, size, 0);
 
     if (bytes == 0)
     {
-        return 0; // 🎯 只有这里，才是神圣且唯一的 EOF（客户端主动优雅拔线）
+        return 0; // 🎯 客户端主动 EOF
     }
 
     if (bytes < 0)
     {
-        // 🚀 【正宗非阻塞测谎大闸】：直接点验操作系统的 errno 账本！
-        // EAGAIN / EWOULDBLOCK 代表：“缓冲区已经被榨干了，现在没货，但连接健康，请下一轮再来！”
-        // EINTR 代表：“刚刚读取时被系统信号临时打断了，不是错误！”
-        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
-        {
-            return -1; // 🟢 优雅返回 -1，通知大管家大功告成，可以安全退出 while(true) 捞货车间了！
-        }
-
-        // ❌ 排除掉上面三种情况后，剩下的 -1 全是结结实实的物理死亡（如 ECONNRESET 破裂）
-        std::cerr << "[ClientSocket] Fatal read error on FD " << this->_fd << ", errno: " << errno << std::endl;
-        return -2; // 🔴 致命断连，通知大管家直接启动 closeConnection 熔断清理
+        // 不在底层区分 EAGAIN 还是 ECONNRESET
+        // 底层统一返回 -1，让上层 Event Loop 根据其监控的事件类型来决定是 continue 还是 close
+        return -1; 
     }
 
-    return bytes; // 🟢 顺利捞到有效物理字节
+    return bytes;
 }
 
 /**
