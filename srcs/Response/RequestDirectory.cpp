@@ -274,21 +274,20 @@ static Response createAutoIndexResponse(const EffectiveRoute &route,
             continue;
         std::string displayName = isDirectory ? name + "/" : name;
 
-        // ----------------- 核心修改部分 -----------------
-        // 1. 如果是 ".."，需要拼出父级路径（或者直接保留 "../"）
-        std::string href;
-        if (name == "..")
-        {
-            href = "../";
-        }
-        else
-        {
-            // 2. 将路由前缀 displayPath (如 "/upload/") 与文件/目录名拼接，生成绝对 URI 路径
-            href = displayPath + encodePathSegment(name);
-            if (isDirectory)
-                href += "/";
-        }
-        // ------------------------------------------------
+        /*
+        autoindex 的 href 使用“相对于当前目录页面”的 URL，而不是把
+        displayPath 再拼进绝对 URI。原因有两点：
+            1. name 必须按单个 path segment 做 percent-encoding，避免文件名中的
+               ?、#、空格、% 等被浏览器解释为 query、fragment 或非法路径。
+            2. requestPath 已经是 RequestParser 规范化后的可见路径；若父目录原始 URL
+               含 %3F、%23 等编码，再直接拼 displayPath 可能把已解码字符重新解释。
+        浏览器会以当前 autoindex 页面 URL 为基准解析相对 href；测试面板的 File
+        Manager 也会把相对 href 与所请求的 route 组合，因此文件仍然可以直接打开。
+        对目录项补 '/'，其中 ".." 编码后仍是 ".."，自然得到 "../"。
+        */
+        std::string href = encodePathSegment(name);
+        if (isDirectory)
+            href += "/";
 
         body += "<li><a href=\"";
         body += escapeHtml(href);
