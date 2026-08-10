@@ -26,7 +26,7 @@
       display: block;
     }
 
-    /* Response Response 视图切换 Tab 控件样式 */
+    /* Response 视图切换 Tab 控件样式 */
     .response-view-wrapper {
       margin-top: 14px;
       border: 1px solid var(--border-color, #334155);
@@ -282,535 +282,574 @@
       </div>
     </section>
 
-    <!-- Section 4: Session & Cookie Management Test -->
-    <section class="card" style="margin-top:18px">
+    <!-- Section 4: Session & Cookie Management Test (Redesigned) -->
+    <section id="session-section" class="card" style="margin-top:18px">
       <div class="card-head">
         <span class="num">4</span>
         <div>
           <h2>Session & Cookie Management</h2>
           <p class="help">
-            Test HTTP Session storage, Cookie parsing (<span class="mono">Set-Cookie</span> / <span
-              class="mono">Cookie</span>),
-            login state persistence, and logout flow.
+            Test HTTP Session storage, <span class="mono">Set-Cookie</span> headers, login rotation, sliding expiration,
+            and logout destruction.
           </p>
         </div>
       </div>
 
+      <!-- 步进操作区 -->
       <div class="row">
         <div class="grow">
-          <label for="session-user-input">Username Payload</label>
+          <label for="session-user-input">Username Payload (for Login)</label>
           <input id="session-user-input" type="text" value="student" placeholder="Enter username..." />
         </div>
         <div class="grow">
-          <label for="session-route-input">Session Endpoint Route</label>
-          <input id="session-route-input" type="text" value="/session-demo" placeholder="/session-demo" />
+          <label for="session-route-select">Session Preset Endpoints</label>
+          <select id="session-route-select">
+            <option value="/session/login">1. POST /session/login (Login & Regenerate ID)</option>
+            <option value="/session/counter">2. GET /session/counter (Visits Increment & Sliding Renewal)</option>
+            <option value="/session/logout">3. POST /session/logout (Destroy Session & Max-Age=0)</option>
+          </select>
         </div>
       </div>
 
-      <div class="button-group" style="margin-top:12px;">
-        <button class="btn" type="button" onclick="handleSessionAction('login')">
-          1. Login (Set-Cookie)
+      <div class="button-group" style="margin-top:14px;">
+        <button class="btn" type="button" onclick="runSessionStep('login')">
+          🔑 1. Login (/session/login)
         </button>
-        <button class="btn secondary" type="button" onclick="handleSessionAction('check')">
-          2. Check Session Status (GET)
+        <button class="btn secondary" type="button" onclick="runSessionStep('counter')">
+          🔄 2. Visit Counter (/session/counter)
         </button>
-        <button class="btn secondary" type="button" onclick="handleSessionAction('logout')"
-          style="border-color: #ef4444; color: #ef4444;">
-          3. Logout (Clear Session)
+        <button class="btn secondary" type="button" onclick="runSessionStep('logout')"
+          style="border-color: #ef4444; color: #f87171;">
+          🚪 3. Logout (/session/logout)
         </button>
       </div>
 
       <div class="divider"></div>
 
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <label style="margin: 0;">Browser Cookie Store (<span class="mono">document.cookie</span>)</label>
-        <button class="btn secondary" type="button" onclick="refreshCookieDisplay()"
-          style="padding: 2px 8px; font-size:0.75rem;">Sync Browser Cookies</button>
+      <!-- Live Session State Indicators -->
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+        <label style="margin: 0;">Client-Side Session State & Headers</label>
+        <button class="btn secondary" type="button" onclick="syncSessionCookieNotice()"
+          style="padding: 2px 8px; font-size:0.75rem;">Sync Browser Context</button>
       </div>
-      <div id="browser-cookie-display" class="mono"
-        style="background: rgba(0,0,0,0.2); padding: 8px 12px; border-radius: 6px; font-size: 0.85rem; margin-top: 6px; word-break: break-all;">
-        (No cookies found in current browser context)
+      <div id="session-state-bar" class="mono"
+        style="background: #0f172a; padding: 10px 14px; border-radius: 6px; font-size: 0.82rem; border: 1px solid #334155; color: #94a3b8;">
+        <span>Current Active Cookie: </span><span id="session-cookie-val" style="color: #38bdf8; font-weight: 600;">(No
+          HttpOnly cookie visible to JS, check Live Response Headers below)</span>
       </div>
 
       <div id="session-status" class="status" style="margin-top:12px;"></div>
 
-      <!-- Session 响应交互区：HTML 网页与 RAW DATA 互相切换选项卡 -->
-      <div id="session-response-wrapper" class="response-view-wrapper" style="display: none;">
+      <!-- 💡 新增：浏览器 Set-Cookie 安全限制说明提示框 -->
+      <div class="mono"
+        style="margin-top: 12px; padding: 10px 12px; background: rgba(59, 130, 246, 0.08); border-left: 3px solid #3b82f6; border-radius: 4px; font-size: 0.8rem; color: #93c5fd; line-height: 1.4;">
+        ℹ️ <strong>Note:</strong> <span class="mono">Set-Cookie</span> headers are stripped by browser security policy
+        in JavaScript <span class="mono">fetch()</span>. Check F12 Network tab or <span
+          class="mono">document.cookie</span> / Server logs for actual cookie headers.
+      </div>
+
+      <!-- Response Interactive Container -->
+      <div id="session-response-wrapper" class="response-view-wrapper" style="margin-top: 12px;">
         <div class="response-tabs">
           <button id="session-tab-html" class="tab-btn active" onclick="switchResponseTab('session', 'html')">🌐 HTML
             Render (Page)</button>
-          <button id="session-tab-raw" class="tab-btn" onclick="switchResponseTab('session', 'raw')">📄 Raw Response
-            Data</button>
+          <button id="session-tab-raw" class="tab-btn" onclick="switchResponseTab('session', 'raw')">📄 Full HTTP
+            Response & Headers</button>
         </div>
 
-        <!-- HTML 页面渲染视窗 -->
+        <!-- HTML Render Window -->
         <div id="session-panel-html" class="tab-panel active">
           <div class="iframe-preview-container">
-            <iframe id="session-iframe" title="Session response preview"></iframe>
+            <iframe id="session-iframe" title="Session response preview"
+              srcdoc="<div style='color:#64748b; font-family:sans-serif; text-align:center; padding-top:120px;'>Ready to test. Click Login, Counter or Logout above.</div>"></iframe>
           </div>
         </div>
 
-        <!-- Raw 源码数据视窗 -->
+        <!-- Raw Headers & Body Window -->
         <div id="session-panel-raw" class="tab-panel">
-          <pre id="session-result" class="raw-data-container"></pre>
+          <pre id="session-result" class="raw-data-container">HTTP/1.1 (No request sent yet)</pre>
         </div>
       </div>
     </section>
 
-    <p class="footer">Place this file in the Webserv static root and open it through the Webserv URL. Do not open it
-      directly with file://.</p>
-  </main>
+    <script>
+      const $ = (selector) => document.querySelector(selector);
 
-  <script>
-    const $ = (selector) => document.querySelector(selector);
-
-    function normalizePath(path) {
-      if (!path) return "/";
-      return path.startsWith("/") ? path : "/" + path;
-    }
-
-    function setStatus(node, message, isError) {
-      node.className = "status " + (isError ? "err" : "ok");
-      node.textContent = message;
-    }
-
-    function truncate(text) {
-      return text.length > 160 ? text.slice(0, 157) + "…" : text;
-    }
-
-    /* --- 通用：HTML 与 RAW DATA 选项卡切换控制 --- */
-    function switchResponseTab(prefix, tabType) {
-      const htmlBtn = $(`#${prefix}-tab-html`);
-      const rawBtn = $(`#${prefix}-tab-raw`);
-      const htmlPanel = $(`#${prefix}-panel-html`);
-      const rawPanel = $(`#${prefix}-panel-raw`);
-
-      if (tabType === 'html') {
-        htmlBtn.classList.add('active');
-        rawBtn.classList.remove('active');
-        htmlPanel.classList.add('active');
-        rawPanel.classList.remove('active');
-      } else {
-        rawBtn.classList.add('active');
-        htmlBtn.classList.remove('active');
-        rawPanel.classList.add('active');
-        htmlPanel.classList.remove('active');
+      function normalizePath(path) {
+        if (!path) return "/";
+        return path.startsWith("/") ? path : "/" + path;
       }
-    }
 
-    /* --- Section 1: GET --- */
-    const getForm = $("#get-form");
-    const getPath = $("#get-path");
-    const getFrame = $("#get-frame");
-    const getStatus = $("#get-status");
-
-    getForm.addEventListener("submit", (event) => {
-      event.preventDefault();
-      const path = normalizePath(getPath.value);
-      getFrame.src = path;
-      getStatus.className = "status";
-      getStatus.textContent = "Requesting " + path + "...";
-
-      fetch(path, { method: "GET", cache: "no-store" })
-        .then((response) => {
-          getStatus.textContent = "GET " + path + " → " + response.status + " " + response.statusText;
-          getStatus.classList.add(response.ok ? "ok" : "err");
-        })
-        .catch((error) => {
-          getStatus.textContent = "GET " + path + " failed: " + error.message;
-          getStatus.classList.add("err");
-        });
-    });
-
-    /* --- Section 3: CGI Testing & Dashboard --- */
-    const cgiStatusBar = $("#cgi-status-bar");
-    const cgiStatusBadge = $("#cgi-status-badge");
-    const cgiTimeTag = $("#cgi-time-tag");
-    const cgiEndpointTag = $("#cgi-endpoint-tag");
-    const cgiStatus = $("#cgi-status");
-    const cgiResult = $("#cgi-result");
-    const cgiResponseWrapper = $("#cgi-response-wrapper");
-    const cgiIframe = $("#cgi-iframe");
-    const cgiContentType = $("#cgi-content-type");
-    const cgiMessage = $("#cgi-message");
-
-    const bodyTemplates = {
-      "application/x-www-form-urlencoded": "message=Hello+from+Webserv+CGI+TestPanel&user=student",
-      "text/plain": "Hello from Webserv CGI TestPanel!\nUser: student",
-      "application/json": JSON.stringify({
-        message: "Hello from Webserv CGI TestPanel",
-        user: "student"
-      }, null, 2)
-    };
-
-    cgiContentType.addEventListener("change", () => {
-      const selectedType = cgiContentType.value;
-      if (bodyTemplates[selectedType]) {
-        cgiMessage.value = bodyTemplates[selectedType];
+      function setStatus(node, message, isError) {
+        node.className = "status " + (isError ? "err" : "ok");
+        node.textContent = message;
       }
-    });
 
-    async function testCgi(path, method = "GET", body = null, contentType = "application/x-www-form-urlencoded") {
-      cgiStatus.textContent = "Executing " + method + " " + path + "...";
-      cgiStatus.className = "status";
-      cgiStatusBar.style.display = "none";
+      function truncate(text) {
+        return text.length > 160 ? text.slice(0, 157) + "…" : text;
+      }
 
-      // 不再隐藏 cgiResponseWrapper
-      cgiResult.textContent = "Loading raw output...";
-      cgiIframe.srcdoc = "<p style='font-family:sans-serif; color:#888; text-align:center; margin-top:50px;'>Executing CGI script...</p>";
-      cgiResponseWrapper.style.display = "block";
+      /* --- 通用：HTML 与 RAW DATA 选项卡切换控制 --- */
+      function switchResponseTab(prefix, tabType) {
+        const htmlBtn = $(`#${prefix}-tab-html`);
+        const rawBtn = $(`#${prefix}-tab-raw`);
+        const htmlPanel = $(`#${prefix}-panel-html`);
+        const rawPanel = $(`#${prefix}-panel-raw`);
 
-      const start = performance.now();
-
-      try {
-        const options = { method: method, cache: "no-store" };
-        if (body !== null) {
-          options.headers = { "Content-Type": contentType };
-          options.body = body;
-        }
-
-        const response = await fetch(path, options);
-        const text = await response.text();
-        const seconds = ((performance.now() - start) / 1000).toFixed(3);
-
-        cgiStatusBar.style.display = "flex";
-        cgiStatusBadge.textContent = `${response.status} ${response.statusText || ''}`;
-
-        if (response.status >= 200 && response.status < 300) {
-          cgiStatusBadge.className = "status-badge badge-2xx";
-        } else if (response.status >= 400 && response.status < 500) {
-          cgiStatusBadge.className = "status-badge badge-4xx";
+        if (tabType === 'html') {
+          htmlBtn.classList.add('active');
+          rawBtn.classList.remove('active');
+          htmlPanel.classList.add('active');
+          rawPanel.classList.remove('active');
         } else {
-          cgiStatusBadge.className = "status-badge badge-5xx";
+          rawBtn.classList.add('active');
+          htmlBtn.classList.remove('active');
+          rawPanel.classList.add('active');
+          htmlPanel.classList.remove('active');
         }
+      }
 
-        cgiTimeTag.textContent = `${seconds}s`;
-        cgiEndpointTag.textContent = `${method} ${path}`;
+      /* --- Section 1: GET --- */
+      const getForm = $("#get-form");
+      const getPath = $("#get-path");
+      const getFrame = $("#get-frame");
+      const getStatus = $("#get-status");
 
-        let message = `Execution completed in ${seconds} seconds.`;
+      getForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const path = normalizePath(getPath.value);
+        getFrame.src = path;
+        getStatus.className = "status";
+        getStatus.textContent = "Requesting " + path + "...";
 
-        if (response.status === 404) {
-          message += " (404 Not Found: Check script path / location block configuration)";
-        } else if (response.status === 500 || response.status === 502) {
-          message += " (CGI Error: Script crashed or generated invalid/missing HTTP headers)";
-        } else if (response.status === 504) {
-          message += " (504 Gateway Timeout: Inactive for >= 10s without stdin/stdout progress)";
+        fetch(path, { method: "GET", cache: "no-store" })
+          .then((response) => {
+            getStatus.textContent = "GET " + path + " → " + response.status + " " + response.statusText;
+            getStatus.classList.add(response.ok ? "ok" : "err");
+          })
+          .catch((error) => {
+            getStatus.textContent = "GET " + path + " failed: " + error.message;
+            getStatus.classList.add("err");
+          });
+      });
+
+      /* --- Section 2: File Manager & Drag Upload Script --- */
+      const dropZone = $("#drop-zone");
+      const fileInput = $("#file-input");
+      const dropZoneText = $("#drop-zone-text");
+      const uploadBtn = $("#upload-file-btn");
+      const managerRoute = $("#manager-route");
+      const managerUploadStatus = $("#manager-upload-status");
+      const managerDeleteStatus = $("#manager-delete-status");
+      const fileListContainer = $("#file-list-container");
+      const fetchFilesBtn = $("#fetch-files-btn");
+
+      let selectedFile = null;
+
+      dropZone.addEventListener("click", () => fileInput.click());
+
+      fileInput.addEventListener("change", (e) => {
+        if (e.target.files.length > 0) {
+          setSelectedFile(e.target.files[0]);
         }
+      });
 
-        cgiStatus.textContent = message;
-        cgiStatus.className = "status " + (response.ok ? "ok" : "err");
+      dropZone.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        dropZone.classList.add("dragover");
+      });
 
-        const baseUrl = new URL(path, window.location.origin).href;
-        const htmlContent = text || "<p style='font-family:sans-serif; color:#888; text-align:center; margin-top:20px;'>(Empty Response Body)</p>";
-        cgiIframe.srcdoc = `<base href="${baseUrl}">${htmlContent}`;
+      dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
 
-        cgiResult.textContent = text || "(Empty Response Body)";
-
-        // 平滑定位到 Response 视图
-        cgiResponseWrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-
-      } catch (error) {
-        const seconds = ((performance.now() - start) / 1000).toFixed(3);
-        cgiStatusBar.style.display = "flex";
-        cgiStatusBadge.textContent = "FETCH ERROR";
-        cgiStatusBadge.className = "status-badge badge-5xx";
-        cgiTimeTag.textContent = `${seconds}s`;
-        cgiEndpointTag.textContent = `${method} ${path}`;
-
-        cgiStatus.textContent = "Network / Processing Error: " + error.message;
-        cgiStatus.className = "status err";
-
-        cgiIframe.srcdoc = `<div style="color: red; font-family: sans-serif; padding: 20px;">
-      <h3>Processing Error</h3>
-      <p>${error.message}</p>
-    </div>`;
-        cgiResult.textContent = `Error: ${error.message}`;
-
-        cgiResponseWrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }
-    }
-
-    const cgiTarget = $("#cgi-target");
-    const cgiUrlPreview = $("#cgi-url-preview");
-
-    function updateCgiPreview() {
-      cgiUrlPreview.textContent = cgiTarget.value;
-    }
-
-    cgiTarget.addEventListener("change", updateCgiPreview);
-    updateCgiPreview();
-
-    $("#cgi-post-form").addEventListener("submit", (event) => {
-      event.preventDefault();
-      const body = cgiMessage.value;
-      const contentType = cgiContentType.value;
-      testCgi(cgiTarget.value, "POST", body, contentType);
-    });
-
-    /* --- Section 4: Session & Cookie Management --- */
-    const sessionUserInput = $("#session-user-input");
-    const sessionRouteInput = $("#session-route-input");
-    const sessionStatus = $("#session-status");
-    const sessionResult = $("#session-result");
-    const sessionResponseWrapper = $("#session-response-wrapper");
-    const sessionIframe = $("#session-iframe");
-    const browserCookieDisplay = $("#browser-cookie-display");
-
-    function refreshCookieDisplay() {
-      const cookies = document.cookie;
-      browserCookieDisplay.textContent = cookies && cookies.trim() !== ""
-        ? cookies
-        : "(No cookies found in current browser context)";
-    }
-
-    async function handleSessionAction(actionType) {
-      const route = normalizePath(sessionRouteInput.value);
-      const username = sessionUserInput.value.trim();
-
-      sessionStatus.textContent = `Executing session action [${actionType}]...`;
-      sessionStatus.className = "status";
-
-      // 💡 关键改动：不再隐藏 sessionResponseWrapper，避免页面布局塌陷跳动
-      // 仅在发起请求前清空旧内容
-      sessionResult.textContent = "Loading raw output...";
-      sessionIframe.srcdoc = "<p style='font-family:sans-serif; color:#888; text-align:center; margin-top:50px;'>Executing request...</p>";
-
-      // 确保 Response 容器处于显示状态
-      sessionResponseWrapper.style.display = "block";
-
-      try {
-        let response;
-        const options = { cache: "no-store", credentials: "same-origin" };
-
-        if (actionType === 'login') {
-          options.method = "POST";
-          options.headers = { "Content-Type": "application/x-www-form-urlencoded" };
-          options.body = `action=login&user=${encodeURIComponent(username)}`;
-        } else if (actionType === 'logout') {
-          options.method = "POST";
-          options.headers = { "Content-Type": "application/x-www-form-urlencoded" };
-          options.body = "action=logout";
-        } else {
-          options.method = "GET";
+      dropZone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        dropZone.classList.remove("dragover");
+        if (e.dataTransfer.files.length > 0) {
+          setSelectedFile(e.dataTransfer.files[0]);
         }
+      });
 
-        response = await fetch(route, options);
-        const text = await response.text();
-
-        setStatus(
-          sessionStatus,
-          `${options.method} ${route} → ${response.status} ${response.statusText}`,
-          !response.ok
-        );
-
-        const baseUrl = new URL(route, window.location.origin).href;
-        const htmlContent = text || "<p style='font-family:sans-serif; color:#888; text-align:center; margin-top:20px;'>(Empty Response Body)</p>";
-        sessionIframe.srcdoc = `<base href="${baseUrl}">${htmlContent}`;
-
-        sessionResult.textContent = text || "(Empty Body)";
-
-        refreshCookieDisplay();
-
-        // 💡 关键改动：平滑将页面视口定位到 Response 区域
-        sessionResponseWrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-
-      } catch (err) {
-        setStatus(sessionStatus, `Session Request Failed: ${err.message}`, true);
-
-        sessionIframe.srcdoc = `<div style="color: red; font-family: sans-serif; padding: 20px;">
-      <h3>Session Request Error</h3>
-      <p>${err.message}</p>
-    </div>`;
-        sessionResult.textContent = `Error: ${err.message}`;
-
-        sessionResponseWrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }
-    }
-
-    refreshCookieDisplay();
-
-    /* --- Section 2: File Manager & Drag Upload Script --- */
-    const dropZone = $("#drop-zone");
-    const fileInput = $("#file-input");
-    const dropZoneText = $("#drop-zone-text");
-    const uploadBtn = $("#upload-file-btn");
-    const managerRoute = $("#manager-route");
-    const managerUploadStatus = $("#manager-upload-status");
-    const managerDeleteStatus = $("#manager-delete-status");
-    const fileListContainer = $("#file-list-container");
-    const fetchFilesBtn = $("#fetch-files-btn");
-
-    let selectedFile = null;
-
-    dropZone.addEventListener("click", () => fileInput.click());
-
-    fileInput.addEventListener("change", (e) => {
-      if (e.target.files.length > 0) {
-        setSelectedFile(e.target.files[0]);
-      }
-    });
-
-    dropZone.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      dropZone.classList.add("dragover");
-    });
-
-    dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
-
-    dropZone.addEventListener("drop", (e) => {
-      e.preventDefault();
-      dropZone.classList.remove("dragover");
-      if (e.dataTransfer.files.length > 0) {
-        setSelectedFile(e.dataTransfer.files[0]);
-      }
-    });
-
-    function setSelectedFile(file) {
-      selectedFile = file;
-      dropZoneText.textContent = `Selected: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
-    }
-
-    uploadBtn.addEventListener("click", async () => {
-      if (!selectedFile) {
-        setStatus(managerUploadStatus, "Please select a file first.", true);
-        return;
+      function setSelectedFile(file) {
+        selectedFile = file;
+        dropZoneText.textContent = `Selected: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
       }
 
-      let route = normalizePath(managerRoute.value);
-      if (!route.endsWith("/")) route += "/";
-      const targetUrl = route + selectedFile.name;
-
-      setStatus(managerUploadStatus, "Uploading file...", false);
-
-      try {
-        const response = await fetch(targetUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": selectedFile.type || "application/octet-stream"
-          },
-          body: selectedFile
-        });
-
-        const text = await response.text().catch(() => "");
-        setStatus(
-          managerUploadStatus,
-          `POST ${targetUrl} → ${response.status} ${response.statusText}${text ? ' — ' + truncate(text) : ''}`,
-          !response.ok
-        );
-
-        if (response.ok) {
-          fetchFileList();
-        }
-      } catch (err) {
-        setStatus(managerUploadStatus, `Upload failed: ${err.message}`, true);
-      }
-    });
-
-    async function openInNewWindow(fileUrl) {
-      const newWin = window.open('about:blank', '_blank');
-      if (newWin) {
-        newWin.document.write("<p style='font-family:sans-serif; text-align:center; margin-top:50px;'>Loading file preview...</p>");
-      }
-
-      try {
-        const response = await fetch(fileUrl, { cache: "no-store" });
-        if (!response.ok) {
-          if (newWin) newWin.close();
-          alert(`Failed to load: ${response.status}`);
+      uploadBtn.addEventListener("click", async () => {
+        if (!selectedFile) {
+          setStatus(managerUploadStatus, "Please select a file first.", true);
           return;
         }
 
-        const blob = await response.blob();
-        const ext = fileUrl.split('.').pop().toLowerCase();
+        let route = normalizePath(managerRoute.value);
+        if (!route.endsWith("/")) route += "/";
+        const targetUrl = route + selectedFile.name;
 
-        let mimeType = blob.type;
-        if (ext === 'avif') mimeType = 'image/avif';
-        else if (ext === 'png') mimeType = 'image/png';
-        else if (ext === 'jpg' || ext === 'jpeg') mimeType = 'image/jpeg';
-        else if (ext === 'webp') mimeType = 'image/webp';
-        else if (ext === 'gif') mimeType = 'image/gif';
-        else if (ext === 'pdf') mimeType = 'application/pdf';
-        else if (ext === 'txt') mimeType = 'text/plain; charset=utf-8';
+        setStatus(managerUploadStatus, "Uploading file...", false);
 
-        const viewableBlob = new Blob([blob], { type: mimeType });
-        const blobUrl = URL.createObjectURL(viewableBlob);
+        try {
+          const response = await fetch(targetUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": selectedFile.type || "application/octet-stream"
+            },
+            body: selectedFile
+          });
 
+          const text = await response.text().catch(() => "");
+          setStatus(
+            managerUploadStatus,
+            `POST ${targetUrl} → ${response.status} ${response.statusText}${text ? ' — ' + truncate(text) : ''}`,
+            !response.ok
+          );
+
+          if (response.ok) {
+            fetchFileList();
+          }
+        } catch (err) {
+          setStatus(managerUploadStatus, `Upload failed: ${err.message}`, true);
+        }
+      });
+
+      async function openInNewWindow(fileUrl) {
+        const newWin = window.open('about:blank', '_blank');
         if (newWin) {
-          newWin.location.href = blobUrl;
-        } else {
-          window.open(blobUrl, '_blank');
+          newWin.document.write("<p style='font-family:sans-serif; text-align:center; margin-top:50px;'>Loading file preview...</p>");
         }
-      } catch (err) {
-        if (newWin) newWin.close();
-        alert("Preview error: " + err.message);
+
+        try {
+          const response = await fetch(fileUrl, { cache: "no-store" });
+          if (!response.ok) {
+            if (newWin) newWin.close();
+            alert(`Failed to load: ${response.status}`);
+            return;
+          }
+
+          const blob = await response.blob();
+          const ext = fileUrl.split('.').pop().toLowerCase();
+
+          let mimeType = blob.type;
+          if (ext === 'avif') mimeType = 'image/avif';
+          else if (ext === 'png') mimeType = 'image/png';
+          else if (ext === 'jpg' || ext === 'jpeg') mimeType = 'image/jpeg';
+          else if (ext === 'webp') mimeType = 'image/webp';
+          else if (ext === 'gif') mimeType = 'image/gif';
+          else if (ext === 'pdf') mimeType = 'application/pdf';
+          else if (ext === 'txt') mimeType = 'text/plain; charset=utf-8';
+
+          const viewableBlob = new Blob([blob], { type: mimeType });
+          const blobUrl = URL.createObjectURL(viewableBlob);
+
+          if (newWin) {
+            newWin.location.href = blobUrl;
+          } else {
+            window.open(blobUrl, '_blank');
+          }
+        } catch (err) {
+          if (newWin) newWin.close();
+          alert("Preview error: " + err.message);
+        }
       }
-    }
 
-    async function fetchFileList() {
-      let route = normalizePath(managerRoute.value);
-      if (!route.endsWith("/")) route += "/";
+      async function fetchFileList() {
+        let route = normalizePath(managerRoute.value);
+        if (!route.endsWith("/")) route += "/";
 
-      fileListContainer.innerHTML = "<p class='help' style='text-align:center;'>Loading...</p>";
+        fileListContainer.innerHTML = "<p class='help' style='text-align:center;'>Loading...</p>";
 
-      try {
-        const res = await fetch(route, { cache: "no-store" });
-        if (!res.ok) {
-          fileListContainer.innerHTML = `<p class="help err" style="text-align:center;">Failed to list directory (${res.status})</p>`;
-          return;
-        }
+        try {
+          const res = await fetch(route, { cache: "no-store" });
+          if (!res.ok) {
+            fileListContainer.innerHTML = `<p class="help err" style="text-align:center;">Failed to list directory (${res.status})</p>`;
+            return;
+          }
 
-        const htmlText = await res.text();
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(htmlText, "text/html");
-        const links = Array.from(doc.querySelectorAll("a"));
+          const htmlText = await res.text();
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(htmlText, "text/html");
+          const links = Array.from(doc.querySelectorAll("a"));
 
-        const validHrefList = links
-          .map(a => a.getAttribute("href"))
-          .filter(href => href && href !== "../" && href !== "./" && !href.endsWith("/"));
+          const validHrefList = links
+            .map(a => a.getAttribute("href"))
+            .filter(href => href && href !== "../" && href !== "./" && !href.endsWith("/"));
 
-        if (validHrefList.length === 0) {
-          fileListContainer.innerHTML = "<p class='help' style='text-align:center;'>No files found or Autoindex disabled.</p>";
-          return;
-        }
+          if (validHrefList.length === 0) {
+            fileListContainer.innerHTML = "<p class='help' style='text-align:center;'>No files found or Autoindex disabled.</p>";
+            return;
+          }
 
-        fileListContainer.innerHTML = "";
-        validHrefList.forEach(rawHref => {
-          const baseDirUrl = window.location.origin + (route.endsWith('/') ? route : route + '/');
-          const targetUrl = new URL(rawHref, baseDirUrl).pathname;
-          const cleanName = decodeURIComponent(rawHref).replace(/^.*[\\\/]/, '');
+          fileListContainer.innerHTML = "";
+          validHrefList.forEach(rawHref => {
+            const baseDirUrl = window.location.origin + (route.endsWith('/') ? route : route + '/');
+            const targetUrl = new URL(rawHref, baseDirUrl).pathname;
+            const cleanName = decodeURIComponent(rawHref).replace(/^.*[\\\/]/, '');
 
-          const item = document.createElement("div");
-          item.className = "file-item";
-          item.innerHTML = `
+            const item = document.createElement("div");
+            item.className = "file-item";
+            item.innerHTML = `
             <a class="file-name" href="javascript:void(0)" onclick="openInNewWindow('${targetUrl}')" title="Click to preview ${cleanName}">${cleanName}</a>
             <button class="btn-del" onclick="deleteFileFromList('${targetUrl}')">Delete</button>
           `;
-          fileListContainer.appendChild(item);
-        });
+            fileListContainer.appendChild(item);
+          });
 
-      } catch (err) {
-        fileListContainer.innerHTML = `<p class="help err" style="text-align:center;">Error parsing list: ${err.message}</p>`;
+        } catch (err) {
+          fileListContainer.innerHTML = `<p class="help err" style="text-align:center;">Error parsing list: ${err.message}</p>`;
+        }
       }
-    }
 
-    async function deleteFileFromList(fileUrl) {
-      setStatus(managerDeleteStatus, `Deleting ${fileUrl}...`, false);
-      try {
-        const response = await fetch(fileUrl, { method: "DELETE" });
-        const text = await response.text().catch(() => "");
-        setStatus(
-          managerDeleteStatus,
-          `DELETE ${fileUrl} → ${response.status} ${response.statusText}${text ? ' — ' + truncate(text) : ''}`,
-          !response.ok
-        );
-        fetchFileList();
-      } catch (err) {
-        setStatus(managerDeleteStatus, `Delete failed: ${err.message}`, true);
+      async function deleteFileFromList(fileUrl) {
+        setStatus(managerDeleteStatus, `Deleting ${fileUrl}...`, false);
+        try {
+          const response = await fetch(fileUrl, { method: "DELETE" });
+          const text = await response.text().catch(() => "");
+          setStatus(
+            managerDeleteStatus,
+            `DELETE ${fileUrl} → ${response.status} ${response.statusText}${text ? ' — ' + truncate(text) : ''}`,
+            !response.ok
+          );
+          fetchFileList();
+        } catch (err) {
+          setStatus(managerDeleteStatus, `Delete failed: ${err.message}`, true);
+        }
       }
-    }
 
-    fetchFilesBtn.addEventListener("click", fetchFileList);
-  </script>
+      fetchFilesBtn.addEventListener("click", fetchFileList);
+
+      /* --- Section 3: CGI Testing & Dashboard --- */
+      const cgiStatusBar = $("#cgi-status-bar");
+      const cgiStatusBadge = $("#cgi-status-badge");
+      const cgiTimeTag = $("#cgi-time-tag");
+      const cgiEndpointTag = $("#cgi-endpoint-tag");
+      const cgiStatus = $("#cgi-status");
+      const cgiResult = $("#cgi-result");
+      const cgiResponseWrapper = $("#cgi-response-wrapper");
+      const cgiIframe = $("#cgi-iframe");
+      const cgiContentType = $("#cgi-content-type");
+      const cgiMessage = $("#cgi-message");
+
+      const bodyTemplates = {
+        "application/x-www-form-urlencoded": "message=Hello+from+Webserv+CGI+TestPanel&user=student",
+        "text/plain": "Hello from Webserv CGI TestPanel!\nUser: student",
+        "application/json": JSON.stringify({
+          message: "Hello from Webserv CGI TestPanel",
+          user: "student"
+        }, null, 2)
+      };
+
+      cgiContentType.addEventListener("change", () => {
+        const selectedType = cgiContentType.value;
+        if (bodyTemplates[selectedType]) {
+          cgiMessage.value = bodyTemplates[selectedType];
+        }
+      });
+
+      async function testCgi(path, method = "GET", body = null, contentType = "application/x-www-form-urlencoded") {
+        cgiStatus.textContent = "Executing " + method + " " + path + "...";
+        cgiStatus.className = "status";
+        cgiStatusBar.style.display = "none";
+
+        cgiResult.textContent = "Loading raw output...";
+        cgiIframe.srcdoc = "<p style='font-family:sans-serif; color:#888; text-align:center; margin-top:50px;'>Executing CGI script...</p>";
+        cgiResponseWrapper.style.display = "block";
+
+        const start = performance.now();
+
+        try {
+          const options = { method: method, cache: "no-store" };
+          if (body !== null) {
+            options.headers = { "Content-Type": contentType };
+            options.body = body;
+          }
+
+          const response = await fetch(path, options);
+          const text = await response.text();
+          const seconds = ((performance.now() - start) / 1000).toFixed(3);
+
+          cgiStatusBar.style.display = "flex";
+          cgiStatusBadge.textContent = `${response.status} ${response.statusText || ''}`;
+
+          if (response.status >= 200 && response.status < 300) {
+            cgiStatusBadge.className = "status-badge badge-2xx";
+          } else if (response.status >= 400 && response.status < 500) {
+            cgiStatusBadge.className = "status-badge badge-4xx";
+          } else {
+            cgiStatusBadge.className = "status-badge badge-5xx";
+          }
+
+          cgiTimeTag.textContent = `${seconds}s`;
+          cgiEndpointTag.textContent = `${method} ${path}`;
+
+          let message = `Execution completed in ${seconds} seconds.`;
+
+          if (response.status === 404) {
+            message += " (404 Not Found: Check script path / location block configuration)";
+          } else if (response.status === 500 || response.status === 502) {
+            message += " (CGI Error: Script crashed or generated invalid/missing HTTP headers)";
+          } else if (response.status === 504) {
+            message += " (504 Gateway Timeout: Inactive for >= 10s without stdin/stdout progress)";
+          }
+
+          cgiStatus.textContent = message;
+          cgiStatus.className = "status " + (response.ok ? "ok" : "err");
+
+          const baseUrl = new URL(path, window.location.origin).href;
+          const htmlContent = text || "<p style='font-family:sans-serif; color:#888; text-align:center; margin-top:20px;'>(Empty Response Body)</p>";
+          cgiIframe.srcdoc = `<base href="${baseUrl}">${htmlContent}`;
+
+          cgiResult.textContent = text || "(Empty Response Body)";
+
+          cgiResponseWrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+        } catch (error) {
+          const seconds = ((performance.now() - start) / 1000).toFixed(3);
+          cgiStatusBar.style.display = "flex";
+          cgiStatusBadge.textContent = "FETCH ERROR";
+          cgiStatusBadge.className = "status-badge badge-5xx";
+          cgiTimeTag.textContent = `${seconds}s`;
+          cgiEndpointTag.textContent = `${method} ${path}`;
+
+          cgiStatus.textContent = "Network / Processing Error: " + error.message;
+          cgiStatus.className = "status err";
+
+          cgiIframe.srcdoc = `<div style="color: red; font-family: sans-serif; padding: 20px;">
+          <h3>Processing Error</h3>
+          <p>${error.message}</p>
+        </div>`;
+          cgiResult.textContent = `Error: ${error.message}`;
+
+          cgiResponseWrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      }
+
+      const cgiTarget = $("#cgi-target");
+      const cgiUrlPreview = $("#cgi-url-preview");
+
+      function updateCgiPreview() {
+        cgiUrlPreview.textContent = cgiTarget.value;
+      }
+
+      cgiTarget.addEventListener("change", updateCgiPreview);
+      updateCgiPreview();
+
+      $("#cgi-post-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const body = cgiMessage.value;
+        const contentType = cgiContentType.value;
+        testCgi(cgiTarget.value, "POST", body, contentType);
+      });
+
+      /* --- Section 4: Session & Cookie Management Script --- */
+      const sessionUserInput = $("#session-user-input");
+      const sessionRouteSelect = $("#session-route-select");
+      const sessionStatus = $("#session-status");
+      const sessionResult = $("#session-result");
+      const sessionResponseWrapper = $("#session-response-wrapper");
+      const sessionIframe = $("#session-iframe");
+      const sessionCookieVal = $("#session-cookie-val");
+
+      function syncSessionCookieNotice() {
+        const cookies = document.cookie;
+        if (cookies && cookies.trim() !== "") {
+          sessionCookieVal.textContent = cookies;
+        } else {
+          sessionCookieVal.textContent = "(Protected by HttpOnly or Expired - View Raw Response Headers below)";
+        }
+      }
+
+      async function runSessionStep(actionType) {
+        let route = "/session/counter";
+        let method = "GET";
+        let body = null;
+        let contentType = null;
+
+        const username = sessionUserInput.value.trim() || "student";
+
+        if (actionType === 'login') {
+          route = "/session/login";
+          method = "POST";
+          contentType = "application/x-www-form-urlencoded";
+          body = `user=${encodeURIComponent(username)}`;
+          sessionRouteSelect.value = "/session/login";
+        } else if (actionType === 'logout') {
+          route = "/session/logout";
+          method = "POST";
+          contentType = "application/x-www-form-urlencoded";
+          sessionRouteSelect.value = "/session/logout";
+        } else {
+          route = "/session/counter";
+          method = "GET";
+          sessionRouteSelect.value = "/session/counter";
+        }
+
+        sessionStatus.textContent = `Sending ${method} ${route}...`;
+        sessionStatus.className = "status";
+
+        // 骨架屏占位
+        sessionIframe.srcdoc = `<div style="color:#3b82f6; font-family:sans-serif; text-align:center; padding-top:120px; font-weight:600;">
+        ⏳ Requesting ${method} ${route}...
+      </div>`;
+        sessionResult.textContent = `Executing ${method} ${route}...\nWaiting for server response...`;
+
+        try {
+          const options = {
+            method: method,
+            cache: "no-store",
+            credentials: "same-origin"
+          };
+
+          if (body !== null) {
+            options.headers = { "Content-Type": contentType };
+            options.body = body;
+          }
+
+          const start = performance.now();
+          const response = await fetch(route, options);
+          const text = await response.text();
+          const duration = ((performance.now() - start)).toFixed(1);
+
+          // 拼接 Raw Response Header
+          let rawResponseText = `HTTP/1.1 ${response.status} ${response.statusText || 'OK'}\n`;
+          response.headers.forEach((val, key) => {
+            rawResponseText += `${key}: ${val}\n`;
+          });
+          rawResponseText += `\n${text || '(Empty Body)'}`;
+
+          setStatus(
+            sessionStatus,
+            `${method} ${route} → ${response.status} ${response.statusText || 'OK'} (${duration}ms)`,
+            !response.ok
+          );
+
+          const baseUrl = new URL(route, window.location.origin).href;
+          const htmlContent = text || "<p style='font-family:sans-serif; color:#888; text-align:center; margin-top:50px;'>(Empty Response Body)</p>";
+          sessionIframe.srcdoc = `<base href="${baseUrl}">${htmlContent}`;
+
+          sessionResult.textContent = rawResponseText;
+
+          syncSessionCookieNotice();
+
+          sessionResponseWrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+        } catch (err) {
+          setStatus(sessionStatus, `Request Failed: ${err.message}`, true);
+          sessionIframe.srcdoc = `<div style="color: #ef4444; font-family: sans-serif; padding: 20px;">
+          <h3>Network / Server Error</h3>
+          <p>${err.message}</p>
+        </div>`;
+          sessionResult.textContent = `HTTP/1.1 500 Network Error\n\nError: ${err.message}`;
+          sessionResponseWrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      }
+
+      sessionRouteSelect.addEventListener("change", () => {
+        const val = sessionRouteSelect.value;
+        if (val === "/session/login") runSessionStep('login');
+        else if (val === "/session/logout") runSessionStep('logout');
+        else runSessionStep('counter');
+      });
+
+      syncSessionCookieNotice();
+    </script>
 </body>
 
 </html>
