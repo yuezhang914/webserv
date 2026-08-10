@@ -89,7 +89,9 @@
             </div>
 
             <div id="file-list-container" class="file-list-container" style="margin-top: 8px;">
-              <p class="help" style="text-align: center; margin-top: 20px;">1. Upload a file &nbsp;→&nbsp; 2. Click "Refresh List" &nbsp;→&nbsp; 3. Click a filename to open it &nbsp;→&nbsp; 4. Click "Delete" to test HTTP DELETE.</p>
+              <p class="help" style="text-align: center; margin-top: 20px;">1. Upload a file &nbsp;→&nbsp; 2. Click
+                "Refresh List" &nbsp;→&nbsp; 3. Click a filename to open it &nbsp;→&nbsp; 4. Click "Delete" to test HTTP
+                DELETE.</p>
             </div>
             <div id="manager-delete-status" class="status"></div>
           </div>
@@ -189,7 +191,8 @@
         <div>
           <h2>Session & Cookie Management</h2>
           <p class="help">
-            Test HTTP Session storage, Cookie parsing (<span class="mono">Set-Cookie</span> / <span class="mono">Cookie</span>), 
+            Test HTTP Session storage, Cookie parsing (<span class="mono">Set-Cookie</span> / <span
+              class="mono">Cookie</span>),
             login state persistence, and logout flow.
           </p>
         </div>
@@ -213,7 +216,8 @@
         <button class="btn secondary" type="button" onclick="handleSessionAction('check')">
           2. Check Session Status (GET)
         </button>
-        <button class="btn secondary" type="button" onclick="handleSessionAction('logout')" style="border-color: #ef4444; color: #ef4444;">
+        <button class="btn secondary" type="button" onclick="handleSessionAction('logout')"
+          style="border-color: #ef4444; color: #ef4444;">
           3. Logout (Clear Session)
         </button>
       </div>
@@ -221,7 +225,8 @@
       <div class="divider"></div>
 
       <p class="help">
-        Session Cookie is HttpOnly. To inspect <span class="mono">session_id</span>, open DevTools → Application → Cookies.
+        Session Cookie is HttpOnly. To inspect <span class="mono">session_id</span>, open DevTools → Application →
+        Cookies.
       </p>
 
       <div id="session-status" class="status" style="margin-top:12px;"></div>
@@ -514,12 +519,16 @@
     });
 
     async function openInNewWindow(fileUrl) {
+      // 打印调试，确保 fileUrl 是 "/upload/papillon.avif"
+      console.log("[DEBUG] Opening File URL:", fileUrl);
+
       const newWin = window.open('about:blank', '_blank');
       if (newWin) {
         newWin.document.write("<p style='font-family:sans-serif; text-align:center; margin-top:50px;'>Loading file preview...</p>");
       }
 
       try {
+        // 这里向服务器请求正确的路径
         const response = await fetch(fileUrl, { cache: "no-store" });
         if (!response.ok) {
           if (newWin) newWin.close();
@@ -555,6 +564,7 @@
 
     async function fetchFileList() {
       let route = normalizePath(managerRoute.value);
+      // 💡 1. 确保向服务器请求目录列表时，路径一定以 / 结尾
       if (!route.endsWith("/")) route += "/";
 
       fileListContainer.innerHTML = "<p class='help' style='text-align:center;'>Loading...</p>";
@@ -571,6 +581,7 @@
         const doc = parser.parseFromString(htmlText, "text/html");
         const links = Array.from(doc.querySelectorAll("a"));
 
+        // 过滤掉 ../ 和 ./ 引用
         const validHrefList = links
           .map(a => a.getAttribute("href"))
           .filter(href => href && href !== "../" && href !== "./" && !href.endsWith("/"));
@@ -582,15 +593,25 @@
 
         fileListContainer.innerHTML = "";
         validHrefList.forEach(rawHref => {
-          const cleanName = rawHref.split("?")[0].split("#")[0].replace(/^.*[\\\/]/, '');
-          const fullUrl = rawHref.startsWith("/") ? rawHref : (route + cleanName);
+          // 1. 确保基础路径始终以 '/' 结尾，例如 'http://localhost:8080/upload/'
+          let currentRoute = managerRoute.value.trim();
+          if (!currentRoute.startsWith("/")) currentRoute = "/" + currentRoute;
+          if (!currentRoute.endsWith("/")) currentRoute += "/";
+
+          const baseDirUrl = window.location.origin + currentRoute;
+
+          // 2. 解析出精准的绝对路径（保证结果一定是 /upload/papillon.avif）
+          const targetUrl = new URL(rawHref, baseDirUrl).pathname;
+
+          // 3. 用户显示的文件名
+          const cleanName = decodeURIComponent(rawHref).replace(/^.*[\\\/]/, '');
 
           const item = document.createElement("div");
           item.className = "file-item";
           item.innerHTML = `
-            <a class="file-name" href="javascript:void(0)" onclick="openInNewWindow('${fullUrl}')" title="Click to preview ${cleanName}">${cleanName}</a>
-            <button class="btn-del" onclick="deleteFileFromList('${fullUrl}')">Delete</button>
-          `;
+    <a class="file-name" href="javascript:void(0)" onclick="openInNewWindow('${targetUrl}')" title="Click to preview ${cleanName}">${cleanName}</a>
+    <button class="btn-del" onclick="deleteFileFromList('${targetUrl}')">Delete</button>
+  `;
           fileListContainer.appendChild(item);
         });
 
