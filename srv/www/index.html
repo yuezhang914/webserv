@@ -8,6 +8,84 @@
   <link rel="icon"
     href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌐</text></svg>">
   <link rel="stylesheet" href="style.css" />
+  <style>
+    /* Iframe 容器基础样式 */
+    .iframe-preview-container {
+      width: 100%;
+      height: 380px;
+      border: 1px solid var(--border-color, #334155);
+      border-radius: 0 0 8px 8px;
+      overflow: hidden;
+      background: #ffffff;
+    }
+
+    .iframe-preview-container iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+    }
+
+    /* Response Response 视图切换 Tab 控件样式 */
+    .response-view-wrapper {
+      margin-top: 14px;
+      border: 1px solid var(--border-color, #334155);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--card-bg, #1e293b);
+    }
+
+    .response-tabs {
+      display: flex;
+      background: rgba(0, 0, 0, 0.25);
+      border-bottom: 1px solid var(--border-color, #334155);
+    }
+
+    .tab-btn {
+      padding: 10px 18px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #94a3b8;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .tab-btn:hover {
+      color: #f8fafc;
+    }
+
+    .tab-btn.active {
+      color: var(--primary-color, #3b82f6);
+      border-bottom-color: var(--primary-color, #3b82f6);
+      background: rgba(59, 130, 246, 0.08);
+    }
+
+    .tab-panel {
+      display: none;
+    }
+
+    .tab-panel.active {
+      display: block;
+    }
+
+    /* Raw Data 代码查看框样式 */
+    .raw-data-container {
+      padding: 14px;
+      margin: 0;
+      height: 380px;
+      overflow: auto;
+      background: #0f172a;
+      color: #38bdf8;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.85rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+      box-sizing: border-box;
+    }
+  </style>
 </head>
 
 <body>
@@ -89,9 +167,8 @@
             </div>
 
             <div id="file-list-container" class="file-list-container" style="margin-top: 8px;">
-              <p class="help" style="text-align: center; margin-top: 20px;">1. Upload a file &nbsp;→&nbsp; 2. Click
-                "Refresh List" &nbsp;→&nbsp; 3. Click a filename to open it &nbsp;→&nbsp; 4. Click "Delete" to test HTTP
-                DELETE.</p>
+              <p class="help" style="text-align: center; margin-top: 20px;">Click "Refresh List" to load files via
+                autoindex.</p>
             </div>
             <div id="manager-delete-status" class="status"></div>
           </div>
@@ -181,7 +258,28 @@
         <span id="cgi-endpoint-tag" class="mono text-muted">/cgi/echo.py</span>
       </div>
       <div id="cgi-status" class="status"></div>
-      <div id="cgi-result" class="cgi-result"></div>
+
+      <!-- CGI 响应交互区：HTML 网页与 RAW DATA 互相切换选项卡 -->
+      <div id="cgi-response-wrapper" class="response-view-wrapper" style="display: none;">
+        <div class="response-tabs">
+          <button id="cgi-tab-html" class="tab-btn active" onclick="switchResponseTab('cgi', 'html')">🌐 HTML Render
+            (Page)</button>
+          <button id="cgi-tab-raw" class="tab-btn" onclick="switchResponseTab('cgi', 'raw')">📄 Raw Response
+            Data</button>
+        </div>
+
+        <!-- HTML 页面渲染视窗 -->
+        <div id="cgi-panel-html" class="tab-panel active">
+          <div class="iframe-preview-container">
+            <iframe id="cgi-iframe" title="CGI response preview"></iframe>
+          </div>
+        </div>
+
+        <!-- Raw 源码数据视窗 -->
+        <div id="cgi-panel-raw" class="tab-panel">
+          <pre id="cgi-result" class="raw-data-container"></pre>
+        </div>
+      </div>
     </section>
 
     <!-- Section 4: Session & Cookie Management Test -->
@@ -204,8 +302,8 @@
           <input id="session-user-input" type="text" value="student" placeholder="Enter username..." />
         </div>
         <div class="grow">
-          <label for="session-route-input">Session Route Base</label>
-          <input id="session-route-input" type="text" value="/session" placeholder="/session" />
+          <label for="session-route-input">Session Endpoint Route</label>
+          <input id="session-route-input" type="text" value="/session-demo" placeholder="/session-demo" />
         </div>
       </div>
 
@@ -224,13 +322,39 @@
 
       <div class="divider"></div>
 
-      <p class="help">
-        Session Cookie is HttpOnly. To inspect <span class="mono">session_id</span>, open DevTools → Application →
-        Cookies.
-      </p>
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <label style="margin: 0;">Browser Cookie Store (<span class="mono">document.cookie</span>)</label>
+        <button class="btn secondary" type="button" onclick="refreshCookieDisplay()"
+          style="padding: 2px 8px; font-size:0.75rem;">Sync Browser Cookies</button>
+      </div>
+      <div id="browser-cookie-display" class="mono"
+        style="background: rgba(0,0,0,0.2); padding: 8px 12px; border-radius: 6px; font-size: 0.85rem; margin-top: 6px; word-break: break-all;">
+        (No cookies found in current browser context)
+      </div>
 
       <div id="session-status" class="status" style="margin-top:12px;"></div>
-      <div id="session-result" class="cgi-result" style="display:none; margin-top:8px;"></div>
+
+      <!-- Session 响应交互区：HTML 网页与 RAW DATA 互相切换选项卡 -->
+      <div id="session-response-wrapper" class="response-view-wrapper" style="display: none;">
+        <div class="response-tabs">
+          <button id="session-tab-html" class="tab-btn active" onclick="switchResponseTab('session', 'html')">🌐 HTML
+            Render (Page)</button>
+          <button id="session-tab-raw" class="tab-btn" onclick="switchResponseTab('session', 'raw')">📄 Raw Response
+            Data</button>
+        </div>
+
+        <!-- HTML 页面渲染视窗 -->
+        <div id="session-panel-html" class="tab-panel active">
+          <div class="iframe-preview-container">
+            <iframe id="session-iframe" title="Session response preview"></iframe>
+          </div>
+        </div>
+
+        <!-- Raw 源码数据视窗 -->
+        <div id="session-panel-raw" class="tab-panel">
+          <pre id="session-result" class="raw-data-container"></pre>
+        </div>
+      </div>
     </section>
 
     <p class="footer">Place this file in the Webserv static root and open it through the Webserv URL. Do not open it
@@ -252,6 +376,26 @@
 
     function truncate(text) {
       return text.length > 160 ? text.slice(0, 157) + "…" : text;
+    }
+
+    /* --- 通用：HTML 与 RAW DATA 选项卡切换控制 --- */
+    function switchResponseTab(prefix, tabType) {
+      const htmlBtn = $(`#${prefix}-tab-html`);
+      const rawBtn = $(`#${prefix}-tab-raw`);
+      const htmlPanel = $(`#${prefix}-panel-html`);
+      const rawPanel = $(`#${prefix}-panel-raw`);
+
+      if (tabType === 'html') {
+        htmlBtn.classList.add('active');
+        rawBtn.classList.remove('active');
+        htmlPanel.classList.add('active');
+        rawPanel.classList.remove('active');
+      } else {
+        rawBtn.classList.add('active');
+        htmlBtn.classList.remove('active');
+        rawPanel.classList.add('active');
+        htmlPanel.classList.remove('active');
+      }
     }
 
     /* --- Section 1: GET --- */
@@ -285,6 +429,8 @@
     const cgiEndpointTag = $("#cgi-endpoint-tag");
     const cgiStatus = $("#cgi-status");
     const cgiResult = $("#cgi-result");
+    const cgiResponseWrapper = $("#cgi-response-wrapper");
+    const cgiIframe = $("#cgi-iframe");
     const cgiContentType = $("#cgi-content-type");
     const cgiMessage = $("#cgi-message");
 
@@ -308,8 +454,11 @@
       cgiStatus.textContent = "Executing " + method + " " + path + "...";
       cgiStatus.className = "status";
       cgiStatusBar.style.display = "none";
-      cgiResult.style.display = "none";
-      cgiResult.textContent = "";
+
+      // 不再隐藏 cgiResponseWrapper
+      cgiResult.textContent = "Loading raw output...";
+      cgiIframe.srcdoc = "<p style='font-family:sans-serif; color:#888; text-align:center; margin-top:50px;'>Executing CGI script...</p>";
+      cgiResponseWrapper.style.display = "block";
 
       const start = performance.now();
 
@@ -351,8 +500,15 @@
         cgiStatus.textContent = message;
         cgiStatus.className = "status " + (response.ok ? "ok" : "err");
 
+        const baseUrl = new URL(path, window.location.origin).href;
+        const htmlContent = text || "<p style='font-family:sans-serif; color:#888; text-align:center; margin-top:20px;'>(Empty Response Body)</p>";
+        cgiIframe.srcdoc = `<base href="${baseUrl}">${htmlContent}`;
+
         cgiResult.textContent = text || "(Empty Response Body)";
-        cgiResult.style.display = "block";
+
+        // 平滑定位到 Response 视图
+        cgiResponseWrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
       } catch (error) {
         const seconds = ((performance.now() - start) / 1000).toFixed(3);
         cgiStatusBar.style.display = "flex";
@@ -363,6 +519,14 @@
 
         cgiStatus.textContent = "Network / Processing Error: " + error.message;
         cgiStatus.className = "status err";
+
+        cgiIframe.srcdoc = `<div style="color: red; font-family: sans-serif; padding: 20px;">
+      <h3>Processing Error</h3>
+      <p>${error.message}</p>
+    </div>`;
+        cgiResult.textContent = `Error: ${error.message}`;
+
+        cgiResponseWrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
     }
 
@@ -388,25 +552,31 @@
     const sessionRouteInput = $("#session-route-input");
     const sessionStatus = $("#session-status");
     const sessionResult = $("#session-result");
+    const sessionResponseWrapper = $("#session-response-wrapper");
+    const sessionIframe = $("#session-iframe");
+    const browserCookieDisplay = $("#browser-cookie-display");
+
+    function refreshCookieDisplay() {
+      const cookies = document.cookie;
+      browserCookieDisplay.textContent = cookies && cookies.trim() !== ""
+        ? cookies
+        : "(No cookies found in current browser context)";
+    }
+
     async function handleSessionAction(actionType) {
-      let routeBase = normalizePath(sessionRouteInput.value);
-      if (routeBase.endsWith("/") && routeBase.length > 1)
-        routeBase = routeBase.slice(0, -1);
-
-      let route;
-      if (actionType === 'login')
-        route = routeBase + "/login";
-      else if (actionType === 'logout')
-        route = routeBase + "/logout";
-      else
-        route = routeBase + "/counter";
-
+      const route = normalizePath(sessionRouteInput.value);
       const username = sessionUserInput.value.trim();
 
       sessionStatus.textContent = `Executing session action [${actionType}]...`;
       sessionStatus.className = "status";
-      sessionResult.style.display = "none";
-      sessionResult.textContent = "";
+
+      // 💡 关键改动：不再隐藏 sessionResponseWrapper，避免页面布局塌陷跳动
+      // 仅在发起请求前清空旧内容
+      sessionResult.textContent = "Loading raw output...";
+      sessionIframe.srcdoc = "<p style='font-family:sans-serif; color:#888; text-align:center; margin-top:50px;'>Executing request...</p>";
+
+      // 确保 Response 容器处于显示状态
+      sessionResponseWrapper.style.display = "block";
 
       try {
         let response;
@@ -415,7 +585,7 @@
         if (actionType === 'login') {
           options.method = "POST";
           options.headers = { "Content-Type": "application/x-www-form-urlencoded" };
-          options.body = `user=${encodeURIComponent(username)}`;
+          options.body = `action=login&user=${encodeURIComponent(username)}`;
         } else if (actionType === 'logout') {
           options.method = "POST";
           options.headers = { "Content-Type": "application/x-www-form-urlencoded" };
@@ -433,13 +603,31 @@
           !response.ok
         );
 
+        const baseUrl = new URL(route, window.location.origin).href;
+        const htmlContent = text || "<p style='font-family:sans-serif; color:#888; text-align:center; margin-top:20px;'>(Empty Response Body)</p>";
+        sessionIframe.srcdoc = `<base href="${baseUrl}">${htmlContent}`;
+
         sessionResult.textContent = text || "(Empty Body)";
-        sessionResult.style.display = "block";
+
+        refreshCookieDisplay();
+
+        // 💡 关键改动：平滑将页面视口定位到 Response 区域
+        sessionResponseWrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
       } catch (err) {
         setStatus(sessionStatus, `Session Request Failed: ${err.message}`, true);
+
+        sessionIframe.srcdoc = `<div style="color: red; font-family: sans-serif; padding: 20px;">
+      <h3>Session Request Error</h3>
+      <p>${err.message}</p>
+    </div>`;
+        sessionResult.textContent = `Error: ${err.message}`;
+
+        sessionResponseWrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
     }
+
+    refreshCookieDisplay();
 
     /* --- Section 2: File Manager & Drag Upload Script --- */
     const dropZone = $("#drop-zone");
@@ -519,16 +707,12 @@
     });
 
     async function openInNewWindow(fileUrl) {
-      // 打印调试，确保 fileUrl 是 "/upload/papillon.avif"
-      console.log("[DEBUG] Opening File URL:", fileUrl);
-
       const newWin = window.open('about:blank', '_blank');
       if (newWin) {
         newWin.document.write("<p style='font-family:sans-serif; text-align:center; margin-top:50px;'>Loading file preview...</p>");
       }
 
       try {
-        // 这里向服务器请求正确的路径
         const response = await fetch(fileUrl, { cache: "no-store" });
         if (!response.ok) {
           if (newWin) newWin.close();
@@ -564,7 +748,6 @@
 
     async function fetchFileList() {
       let route = normalizePath(managerRoute.value);
-      // 💡 1. 确保向服务器请求目录列表时，路径一定以 / 结尾
       if (!route.endsWith("/")) route += "/";
 
       fileListContainer.innerHTML = "<p class='help' style='text-align:center;'>Loading...</p>";
@@ -581,7 +764,6 @@
         const doc = parser.parseFromString(htmlText, "text/html");
         const links = Array.from(doc.querySelectorAll("a"));
 
-        // 过滤掉 ../ 和 ./ 引用
         const validHrefList = links
           .map(a => a.getAttribute("href"))
           .filter(href => href && href !== "../" && href !== "./" && !href.endsWith("/"));
@@ -593,25 +775,16 @@
 
         fileListContainer.innerHTML = "";
         validHrefList.forEach(rawHref => {
-          // 1. 确保基础路径始终以 '/' 结尾，例如 'http://localhost:8080/upload/'
-          let currentRoute = managerRoute.value.trim();
-          if (!currentRoute.startsWith("/")) currentRoute = "/" + currentRoute;
-          if (!currentRoute.endsWith("/")) currentRoute += "/";
-
-          const baseDirUrl = window.location.origin + currentRoute;
-
-          // 2. 解析出精准的绝对路径（保证结果一定是 /upload/papillon.avif）
+          const baseDirUrl = window.location.origin + (route.endsWith('/') ? route : route + '/');
           const targetUrl = new URL(rawHref, baseDirUrl).pathname;
-
-          // 3. 用户显示的文件名
           const cleanName = decodeURIComponent(rawHref).replace(/^.*[\\\/]/, '');
 
           const item = document.createElement("div");
           item.className = "file-item";
           item.innerHTML = `
-    <a class="file-name" href="javascript:void(0)" onclick="openInNewWindow('${targetUrl}')" title="Click to preview ${cleanName}">${cleanName}</a>
-    <button class="btn-del" onclick="deleteFileFromList('${targetUrl}')">Delete</button>
-  `;
+            <a class="file-name" href="javascript:void(0)" onclick="openInNewWindow('${targetUrl}')" title="Click to preview ${cleanName}">${cleanName}</a>
+            <button class="btn-del" onclick="deleteFileFromList('${targetUrl}')">Delete</button>
+          `;
           fileListContainer.appendChild(item);
         });
 
