@@ -23,7 +23,7 @@ This will generate the file executable :
 ```
 Launch the program  with:
 ```bash
-    ./minish./webserv [path_to_config.conf]
+    ./webserv [path_to_config.conf]
 ```
 Example usage:
 ```bash
