@@ -1131,14 +1131,14 @@ void ServerManager::run()
         }
 
         // 4. 巡检 CGI 超时任务，统一渲染 504 Gateway Timeout 报错
-        std::vector<CgiEventResult> timeouts = this->_cgiManager.checkTimeouts();
+        std::vector<CgiEventResult> timeouts = this->_cgiManager.checkTimeout();
         for (size_t i = 0; i < timeouts.size(); ++i)
         {
             int clientFd = timeouts[i].clientFd;
             int statusCode = timeouts[i].statusCode; // 504
 
             // 从 CgiManager 侧与 Reactor 侧注销关联的管道 FD
-            // （管道 FD 已在 checkTimeouts 内部被 close 和 erase，这里清洗 ServerManager 侧的反查雷达）
+            // （管道 FD 已在 checkTimeout 内部被 close 和 erase，这里清洗 ServerManager 侧的反查雷达）
             std::map<int, int>::iterator it = this->_cgi_read_fd_to_client_map.begin();
             while (it != this->_cgi_read_fd_to_client_map.end())
             {

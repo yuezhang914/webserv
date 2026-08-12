@@ -377,7 +377,7 @@ void CgiManager::reapChildren()
 }
 
 /*
-函数：CgiManager::checkTimeouts
+函数：CgiManager::checkTimeout
 用途：看门狗巡检函数。全量检测连续无管道进展的 CGI 进程，物理强杀并向 ServerManager 返回 504 错误指令。
 参数：
     - 无。
@@ -391,7 +391,7 @@ void CgiManager::reapChildren()
        - 调用 forceKillAndClean 强杀超时 PID 并关闭管道与清除账本。
     4. 结果交付：将 timeoutResults 集合回传给 Reactor 主循环统一给客户端渲染 504 Gateway Timeout 页面。
 */
-std::vector<CgiEventResult> CgiManager::checkTimeouts()
+std::vector<CgiEventResult> CgiManager::checkTimeout()
 {
     std::time_t now = std::time(NULL);
     std::vector<CgiEventResult> timeoutResults;
