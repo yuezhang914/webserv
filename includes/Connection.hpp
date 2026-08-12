@@ -40,6 +40,7 @@ public:
 
     void clear();
     void clearRequest();
+    void closeFd(); // 👈 添加此公有成员函数声明
 
 private:
 

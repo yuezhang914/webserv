@@ -32,6 +32,12 @@ Connection::Connection(int clientFd, const ServerConfig &srv_cfg)
 {
 }
 
+void Connection::closeFd()
+{
+    // 调用 ClientSocket 的 closeFd() 关掉套接字并置 -1
+    this->socket->closeFd();
+}
+
 /**
  * @brief 析构函数：践行严格的 RAII 规范，物理终结并释放连接资源
  */

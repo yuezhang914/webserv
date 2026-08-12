@@ -1070,13 +1070,23 @@ void ServerManager::stop()
     // 1. 回收所有运行中的 CGI 子进程
     this->_cgiManager.stopAllTasks();
 
-    // 2. 关闭所有的监听 Socket 和客户端 Socket
-    for (size_t i = 0; i < _poll_fds.size(); ++i)
-    {
-        if (_poll_fds[i].fd >= 0)
-            close(_poll_fds[i].fd);
+    // 2. 清空 pollfd 监听大阵列（不再在数组循环里直接 close）
+    this->_poll_fds.clear();
+
+    // 3. 安全关闭所有 Listen Sockets（指针调用 closeFd()，内部会将 _fd 置为 -1）
+    for (size_t i = 0; i < this->_listen_sockets.size(); ++i) {
+        if (this->_listen_sockets[i] != NULL) {
+            this->_listen_sockets[i]->closeFd();
+        }
     }
-    _poll_fds.clear();
+
+    // 4. 安全关闭所有 Client Connections（map 的 second 是 Connection*）
+    for (std::map<int, Connection*>::iterator it = this->_connections.begin(); 
+         it != this->_connections.end(); ++it) {
+        if (it->second != NULL) {
+            it->second->closeFd(); // 👈 Connection 内部会自动安全关闭 ClientSocket 描述符
+        }
+    }
 
     std::cout << "[Server] Cleaned up all sockets and CGI processes. Bye!" << std::endl;
 }
