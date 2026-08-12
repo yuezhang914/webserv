@@ -127,10 +127,23 @@ static std::string encodePathSegment(const std::string &name)
     5. 全部失败且 autoindex 开启时生成目录列表；关闭时按学校 tester 返回 404。
 */
 Response handleIndex(const EffectiveRoute &route,
-                            const std::string &requestPath,
-                            bool closeConnection)
+                    const std::string &requestPath,
+                    bool closeConnection)
 {
     Response response(closeConnection);
+
+    // =========================================================================
+    // 💡 1. 优先检查 Trailing Slash：如果访问的是目录但 URI 结尾没有 '/'
+    // 自动重定向 (301 Moved Permanently) 到 requestPath + "/"
+    // 这能彻底解决 autoindex 下文件链接丢失目录前缀（如 /upload 变成 /file.txt）的问题！
+    // =========================================================================
+    if (requestPath.empty() || requestPath[requestPath.size() - 1] != '/')
+    {
+        response.setStatus(301);
+        response.setHeader("Location", requestPath + "/");
+        return response;
+    }
+
     size_t i = 0;
     while (i < route.index.size())
     {
