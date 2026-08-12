@@ -140,43 +140,38 @@ void ServerManager::eraseFdFromPoll(int targetFd)
 */
 void ServerManager::closeConnection(int clientFd, size_t pollIndex)
 {
-    // 连接无论处于活动槽还是等待队列，都先归还大型 CGI 准入状态。
+    // 1. 连接无论处于活动槽还是等待队列，都先归还大型 CGI 准入状态
     this->releaseLargeCgiSlot(clientFd);
-    // 清理该 clientFd 对应的 CGI 任务（CgiManager 内部自动完成 kill + close + erase）
+
+    // 2. 清理该 clientFd 对应的 CGI 任务（CgiManager 内部自动 close 管道并 kill 子进程）
     this->_cgiManager.removeTaskByClientFd(clientFd);
-    // 擦除 ServerManager 侧的反查雷达映射（读端 & 写端）
+
+    // 3. 从 poll 数组中抹去此 clientFd 的所有相关管道 FD
     std::map<int, int>::iterator readIt = this->_cgi_read_fd_to_client_map.begin();
     while (readIt != this->_cgi_read_fd_to_client_map.end())
     {
         if (readIt->second == clientFd)
         {
-            this->eraseFdFromPoll(readIt->first); // 顺便把读管道 FD 从 _poll_fds 中擦除
+            this->eraseFdFromPoll(readIt->first); // 仅从 _poll_fds 移除/置-1
             this->_cgi_read_fd_to_client_map.erase(readIt++);
         }
         else
             ++readIt;
     }
+
     std::map<int, int>::iterator writeIt = this->_cgi_write_fd_to_client_map.begin();
     while (writeIt != this->_cgi_write_fd_to_client_map.end())
     {
         if (writeIt->second == clientFd)
         {
-            this->eraseFdFromPoll(writeIt->first); // 顺便把写管道 FD 从 _poll_fds 中擦除
+            this->eraseFdFromPoll(writeIt->first); // 仅从 _poll_fds 移除/置-1
             this->_cgi_write_fd_to_client_map.erase(writeIt++);
         }
         else
             ++writeIt;
     }
-    //销毁 Connection 实体（RAII 析构触发 ::close(clientFd)）
-    std::map<int, Connection *>::iterator it = this->_connections.find(clientFd);
-    if (it != this->_connections.end())
-    {
-        Connection *connection = it->second;
-        delete connection;
-        this->_connections.erase(it);
-    }
 
-    // 抹去 poll 雷达网槽位（软置 -1 防索引抖动）
+    // 4. 先抹去 poll 阵列中客户端本身的槽位（避免野 FD 遗留在 poll_fds 中）
     if (pollIndex < this->_poll_fds.size() && this->_poll_fds[pollIndex].fd == clientFd)
     {
         this->_poll_fds[pollIndex].fd = -1;
@@ -185,8 +180,18 @@ void ServerManager::closeConnection(int clientFd, size_t pollIndex)
     }
     else
     {
-        this->eraseFdFromPoll(clientFd);
+        this->eraseFdFromPoll(clientFd); // 确保在销毁 Connection 之前从 poll_fds 中擦除
     }
+
+    // 5. 最后销毁 Connection 实体（RAII 析构触发唯一一次安全的 ::close(clientFd) 并置 -1）
+    std::map<int, Connection *>::iterator it = this->_connections.find(clientFd);
+    if (it != this->_connections.end())
+    {
+        Connection *connection = it->second;
+        delete connection; // 👈 此时做最后的物理关闭
+        this->_connections.erase(it);
+    }
+
     std::cout << "[ServerManager] Client FD " << clientFd << " successfully closed and cleaned up." << std::endl;
 }
 

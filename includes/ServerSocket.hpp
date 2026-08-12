@@ -20,7 +20,7 @@ public:
 
     // 核心动作：一键拉起监听物理大网
     void setup();
-
+    void closeFd(); // 👈 新增：安全关闭 FD 并重置为 -1
     int getFd() const;
     const std::string &getHost() const;
     int getPort() const;

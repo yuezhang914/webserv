@@ -188,3 +188,15 @@ int ServerSocket::getPort() const
 { 
     return this->_port; 
 }
+
+// 安全关闭函数：将 _fd 重置为 -1 防范 double close
+void ServerSocket::closeFd()
+{
+    if (this->_fd >= 0)
+    {
+        std::cout << "[ServerSocket] Closing listen FD: " << this->_fd 
+                  << " for " << this->_host << ":" << this->_port << std::endl;
+        ::close(this->_fd);
+        this->_fd = -1; // 👈 置为 -1 确保不会二次 close
+    }
+}
