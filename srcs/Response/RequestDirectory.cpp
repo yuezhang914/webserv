@@ -173,7 +173,7 @@ Response handleIndex(const EffectiveRoute &route,
     if (route.autoindex)
         return handleAutoIndex(route, requestPath, closeConnection);
 
-    response.createResponse(403, "", route.server->error_pages);
+    response.createResponse(404, "", route.server->error_pages);
     return response;
 }
 
