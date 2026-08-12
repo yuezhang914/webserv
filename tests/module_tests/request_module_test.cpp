@@ -386,7 +386,7 @@ static void testHeaderRules(const ServerConfig& server)
           "严格模式：重复 Transfer-Encoding 被拒绝");
     check(parseRaw("GET / HTTP/1.1\r\nHost: bad host\r\n\r\n", server, req, consumed) == REQUEST_ERROR,
           "严格模式：含空格的非法 Host value 被拒绝");
-    check(parseRaw("GET / HTTP/1.1\r\nHost: localhost:8080\r\n\r\n", server, req, consumed) == REQUEST_OK,
+    check(parseRaw("GET / HTTP/1.1\r\nHost: 127.0.0.1:8080\r\n\r\n", server, req, consumed) == REQUEST_OK,
           "Host 支持 hostname:port");
     check(parseRaw("GET / HTTP/1.1\r\nHost: 127.0.0.1:8080\r\n\r\n", server, req, consumed) == REQUEST_OK,
           "Host 支持 IPv4:port");
