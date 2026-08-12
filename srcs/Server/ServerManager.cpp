@@ -387,13 +387,15 @@ void ServerManager::processParsedRequest(Connection *conn, int clientFd)
     if (res.getHeader("X-Internal-CGI-Path", script_path))
     {
         std::cout << "[DEBUG CGI Task] Dispatching CGI -> scriptPath = " << script_path << std::endl;
-        std::cout << "=================================================\n" << std::endl;
+        std::cout << "=================================================\n"
+                  << std::endl;
         this->dispatchCgiTask(conn, clientFd, res);
     }
     else
     {
         std::cout << "[DEBUG Normal Task] No CGI header, sending direct response." << std::endl;
-        std::cout << "=================================================\n" << std::endl;
+        std::cout << "=================================================\n"
+                  << std::endl;
 
         conn->write_buffer = res.responseToString();
 
@@ -421,12 +423,10 @@ static bool requestUsesChunkedBody(const Request &request)
     if (!request.getHeader("transfer-encoding", value))
         return false;
     size_t start = 0;
-    while (start < value.size()
-        && (value[start] == ' ' || value[start] == '\t'))
+    while (start < value.size() && (value[start] == ' ' || value[start] == '\t'))
         ++start;
     size_t end = value.size();
-    while (end > start
-        && (value[end - 1] == ' ' || value[end - 1] == '\t'))
+    while (end > start && (value[end - 1] == ' ' || value[end - 1] == '\t'))
         --end;
     std::string normalized = value.substr(start, end - start);
     size_t i = 0;
@@ -459,8 +459,8 @@ static int advanceConnectionChunkScan(Connection *conn, size_t &consumed)
             &conn->config, conn->request.getPath());
     }
     return RequestParser::advanceChunkedScan(conn->read_buffer,
-        conn->chunk_scan_pos, conn->chunk_body_limit,
-        conn->chunk_decoded_size, consumed);
+                                             conn->chunk_scan_pos, conn->chunk_body_limit,
+                                             conn->chunk_decoded_size, consumed);
 }
 
 /*
@@ -482,9 +482,7 @@ static bool requestTargetsConfiguredCgi(const Connection *conn)
     {
         const std::string &extension = it->first;
         const std::string &path = conn->request.getPath();
-        if (!extension.empty() && path.size() >= extension.size()
-            && path.compare(path.size() - extension.size(),
-                extension.size(), extension) == 0)
+        if (!extension.empty() && path.size() >= extension.size() && path.compare(path.size() - extension.size(), extension.size(), extension) == 0)
             return true;
         ++it;
     }
@@ -525,14 +523,12 @@ bool ServerManager::ensureLargeCgiSlot(Connection *conn, int clientFd)
 */
 void ServerManager::resumeWaitingLargeCgiClients()
 {
-    while (this->_active_buffered_large_cgi < MAX_BUFFERED_LARGE_CGI_TASKS
-        && !this->_waiting_buffered_large_cgi_clients.empty())
+    while (this->_active_buffered_large_cgi < MAX_BUFFERED_LARGE_CGI_TASKS && !this->_waiting_buffered_large_cgi_clients.empty())
     {
         int clientFd = this->_waiting_buffered_large_cgi_clients.front();
         this->_waiting_buffered_large_cgi_clients.pop_front();
         std::map<int, Connection *>::iterator it = this->_connections.find(clientFd);
-        if (it == this->_connections.end() || it->second == NULL
-            || !it->second->large_cgi_waiting)
+        if (it == this->_connections.end() || it->second == NULL || !it->second->large_cgi_waiting)
             continue;
         Connection *conn = it->second;
         conn->large_cgi_waiting = false;
@@ -625,9 +621,7 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
 
     if (conn->chunk_scan_active)
     {
-        if (requestTargetsConfiguredCgi(conn)
-            && conn->read_buffer.size() >= LARGE_CGI_BUFFER_THRESHOLD
-            && !this->ensureLargeCgiSlot(conn, clientFd))
+        if (requestTargetsConfiguredCgi(conn) && conn->read_buffer.size() >= LARGE_CGI_BUFFER_THRESHOLD && !this->ensureLargeCgiSlot(conn, clientFd))
             return;
         // 大 chunked 请求只推进新到达的边界，不重复运行完整 parser。
         status = advanceConnectionChunkScan(conn, consumed);
@@ -635,26 +629,23 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
         {
             conn->chunk_scan_active = false;
             status = RequestParser::parseBuffer(conn->read_buffer,
-                conn->request, &conn->config, consumed);
+                                                conn->request, &conn->config, consumed);
         }
     }
     else
     {
         status = RequestParser::parseBuffer(conn->read_buffer,
-            conn->request, &conn->config, consumed);
-        if (status == REQUEST_INCOMPLETE
-            && requestUsesChunkedBody(conn->request))
+                                            conn->request, &conn->config, consumed);
+        if (status == REQUEST_INCOMPLETE && requestUsesChunkedBody(conn->request))
         {
-            if (requestTargetsConfiguredCgi(conn)
-                && conn->read_buffer.size() >= LARGE_CGI_BUFFER_THRESHOLD
-                && !this->ensureLargeCgiSlot(conn, clientFd))
+            if (requestTargetsConfiguredCgi(conn) && conn->read_buffer.size() >= LARGE_CGI_BUFFER_THRESHOLD && !this->ensureLargeCgiSlot(conn, clientFd))
                 return;
             status = advanceConnectionChunkScan(conn, consumed);
             if (status == REQUEST_OK)
             {
                 conn->chunk_scan_active = false;
                 status = RequestParser::parseBuffer(conn->read_buffer,
-                    conn->request, &conn->config, consumed);
+                                                    conn->request, &conn->config, consumed);
             }
         }
     }
@@ -685,12 +676,6 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
                   << ". Sending 413, then draining remaining input before close."
                   << std::endl;
 
-        /*
-        body 超限经常在 chunk-size 行刚到达时就能确定，此时客户端可能仍在 write()。
-        先发送 Content-Length: 0 的 413，但暂不主动 close；发送完成后切回 POLLIN，
-        丢弃后续输入，直到带 Connection: close 的客户端读取响应并主动关闭。
-        已经进入用户态的原始 body 无需继续保留，立即释放以避免超大非法请求占内存。
-        */
         conn->close_after_write = false;
         conn->drain_input_before_close = true;
         conn->chunk_scan_active = false;
@@ -698,8 +683,15 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
         conn->chunk_decoded_size = 0;
         conn->chunk_body_limit = 0;
         std::string().swap(conn->read_buffer);
-        conn->write_buffer = "HTTP/1.1 413 Payload Too Large\r\n"
-            "Content-Length: 0\r\nConnection: close\r\n\r\n";
+
+        // 1. 实例化 Response 对象并传入 413 状态码及 Server 配置的 errorPages
+        Response res;
+        // 假设你能从 conn 或 server_config 中拿到当前 server 的 error_page 映射表
+        res.createResponse(413, "", conn->config.error_pages);
+
+        // 2. 将生成的标准 HTTP Response（包含 HTML Error Page 和正确的 Content-Length）写入 buffer
+        conn->write_buffer = res.responseToString(); // 或你的 Response 导出字符串函数，如 res.toFullString()
+
         this->setClientEvents(clientFd, POLLOUT);
     }
     else
@@ -709,7 +701,7 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
                   << ". Pre-writing 400 response." << std::endl;
         conn->close_after_write = true;
         conn->write_buffer = "HTTP/1.1 400 Bad Request\r\n"
-            "Content-Length: 0\r\nConnection: close\r\n\r\n";
+                             "Content-Length: 0\r\nConnection: close\r\n\r\n";
         this->setClientEvents(clientFd, POLLOUT);
     }
 }
@@ -962,12 +954,12 @@ void ServerManager::dispatchEvents()
             // POLLHUP 必须走 handleCgiRead：管道里可能还有最后一批未读完的数据！
             if (revents & (POLLIN | POLLHUP))
             {
-                //std::cout << "[Radar] -> Routing CGI Read FD " << activeFd << " to handleCgiRead (POLLIN/POLLHUP)" << std::endl;
+                // std::cout << "[Radar] -> Routing CGI Read FD " << activeFd << " to handleCgiRead (POLLIN/POLLHUP)" << std::endl;
                 this->handleCgiRead(activeFd);
             }
             else if (revents & (POLLERR | POLLNVAL))
             {
-                //std::cout << "[Radar] -> CGI Read FD " << activeFd << " hardware broken (ERR/NVAL). Forcing cleanup." << std::endl;
+                // std::cout << "[Radar] -> CGI Read FD " << activeFd << " hardware broken (ERR/NVAL). Forcing cleanup." << std::endl;
 
                 int clientFd = this->_cgi_read_fd_to_client_map[activeFd];
                 this->_cgi_read_fd_to_client_map.erase(activeFd);
@@ -990,12 +982,12 @@ void ServerManager::dispatchEvents()
         {
             if (revents & POLLOUT)
             {
-                //std::cout << "[Radar] -> Routing CGI Write FD " << activeFd << " to handleCgiWrite (POLLOUT)" << std::endl;
+                // std::cout << "[Radar] -> Routing CGI Write FD " << activeFd << " to handleCgiWrite (POLLOUT)" << std::endl;
                 this->handleCgiWrite(activeFd);
             }
             else if (revents & (POLLERR | POLLHUP | POLLNVAL))
             {
-               // std::cout << "[Radar] -> CGI Write FD " << activeFd << " write end broken (ERR/HUP/NVAL). Forcing cleanup." << std::endl;
+                // std::cout << "[Radar] -> CGI Write FD " << activeFd << " write end broken (ERR/HUP/NVAL). Forcing cleanup." << std::endl;
 
                 int clientFd = this->_cgi_write_fd_to_client_map[activeFd];
                 this->_cgi_write_fd_to_client_map.erase(activeFd);
@@ -1024,7 +1016,7 @@ void ServerManager::dispatchEvents()
             }
             else
             {
-                //std::cout << "[Radar] -> Routing Client Socket FD " << activeFd << " to closeConnection (ERR/HUP)" << std::endl;
+                // std::cout << "[Radar] -> Routing Client Socket FD " << activeFd << " to closeConnection (ERR/HUP)" << std::endl;
                 this->closeConnection(activeFd, idx);
             }
             continue;
@@ -1035,12 +1027,12 @@ void ServerManager::dispatchEvents()
         {
             if (this->isListenFd(activeFd))
             {
-               // std::cout << "[Radar] -> Routing Listen FD " << activeFd << " to acceptNewConnection (POLLIN)" << std::endl;
+                // std::cout << "[Radar] -> Routing Listen FD " << activeFd << " to acceptNewConnection (POLLIN)" << std::endl;
                 this->acceptNewConnection(activeFd);
             }
             else
             {
-                //std::cout << "[Radar] -> Routing Client FD " << activeFd << " to handleClientRead (POLLIN)" << std::endl;
+                // std::cout << "[Radar] -> Routing Client FD " << activeFd << " to handleClientRead (POLLIN)" << std::endl;
                 this->handleClientRead(activeFd, idx);
             }
         }
@@ -1050,16 +1042,16 @@ void ServerManager::dispatchEvents()
         {
             if (idx >= this->_poll_fds.size() || this->_poll_fds[idx].fd != activeFd)
             {
-                //std::cout << "[Radar] Notice: FD " << activeFd << " vanished or swapped during POLLIN processing. Safe break." << std::endl;
+                // std::cout << "[Radar] Notice: FD " << activeFd << " vanished or swapped during POLLIN processing. Safe break." << std::endl;
                 continue;
             }
 
-            //std::cout << "[Radar] -> Routing Client FD " << activeFd << " to handleClientWrite (POLLOUT)" << std::endl;
+            // std::cout << "[Radar] -> Routing Client FD " << activeFd << " to handleClientWrite (POLLOUT)" << std::endl;
             this->handleClientWrite(activeFd, idx);
         }
 
-        //std::cout << "[Radar] --- TICK END for FD " << activeFd << " ---" << std::endl
-                  //<< std::endl;
+        // std::cout << "[Radar] --- TICK END for FD " << activeFd << " ---" << std::endl
+        //<< std::endl;
     }
 }
 
@@ -1074,16 +1066,20 @@ void ServerManager::stop()
     this->_poll_fds.clear();
 
     // 3. 安全关闭所有 Listen Sockets（指针调用 closeFd()，内部会将 _fd 置为 -1）
-    for (size_t i = 0; i < this->_listen_sockets.size(); ++i) {
-        if (this->_listen_sockets[i] != NULL) {
+    for (size_t i = 0; i < this->_listen_sockets.size(); ++i)
+    {
+        if (this->_listen_sockets[i] != NULL)
+        {
             this->_listen_sockets[i]->closeFd();
         }
     }
 
     // 4. 安全关闭所有 Client Connections（map 的 second 是 Connection*）
-    for (std::map<int, Connection*>::iterator it = this->_connections.begin(); 
-         it != this->_connections.end(); ++it) {
-        if (it->second != NULL) {
+    for (std::map<int, Connection *>::iterator it = this->_connections.begin();
+         it != this->_connections.end(); ++it)
+    {
+        if (it->second != NULL)
+        {
             it->second->closeFd(); // 👈 Connection 内部会自动安全关闭 ClientSocket 描述符
         }
     }
