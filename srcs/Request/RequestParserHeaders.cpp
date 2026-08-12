@@ -27,7 +27,7 @@ std::string RequestParser::trim_ows(const std::string& value) {
 /*
 函数：is_valid_decimal_port
 用途：严格检查 Host header 冒号后的端口。
-参数来源：is_valid_host_value() 从 localhost:8080 或 [::1]:8080 中切出的 port。
+参数来源：is_valid_host_value() 从 127.0.0.1:8080 或 [::1]:8080 中切出的 port。
 返回值：端口由纯数字组成并且范围为 1 到 65535 时返回 true。
 实现逻辑：
     1. 空端口非法。

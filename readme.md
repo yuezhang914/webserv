@@ -120,7 +120,7 @@ We can thoroughly test Webserv features through Browser Front-end Panel, cURL CL
 #### 1. Interactive Front-end Test Panel
 Webserv includes a built-in single-page interactive test panel. Once the server is running, open your browser and navigate to:
 ```
-    http://localhost:8080/index.html
+    http://127.0.0.1:8080/index.html
 
 ```
 The panel is split into 4 testing sections:
@@ -137,36 +137,36 @@ The panel is split into 4 testing sections:
 ##### Static Files & Headers:
 ```
 # Basic GET request
-curl -i http://localhost:8080/
+curl -i http://127.0.0.1:8080/
 
 # Test Chunked Transfer
-``curl -i -X POST -H "Transfer-Encoding: chunked" -H "Content-Length:" -H "Connection: close" -H "Content-Type: text/plain" --data-binary $'5\r\nHello\r\n0\r\n\r\n' http://localhost:8080/upload
+``curl -i -X POST -H "Transfer-Encoding: chunked" -H "Content-Length:" -H "Connection: close" -H "Content-Type: text/plain" --data-binary $'5\r\nHello\r\n0\r\n\r\n' http://127.0.0.1:8080/upload
 ```
 ##### File Upload & Delete:
 ```
 # Upload a file
 ```
-printf "5\r\nHello\r\n0\r\n\r\n" | curl -i -X POST -H "Transfer-Encoding: chunked" -H "Content-Length:" -H "Connection: close" -H "Content-Type: text/plain" --data-binary @- http://localhost:8080/upload/sample.txt
+printf "5\r\nHello\r\n0\r\n\r\n" | curl -i -X POST -H "Transfer-Encoding: chunked" -H "Content-Length:" -H "Connection: close" -H "Content-Type: text/plain" --data-binary @- http://127.0.0.1:8080/upload/sample.txt
 ```
 # Delete a file
-curl -i -X DELETE http://localhost:8080/upload/sample.txt
+curl -i -X DELETE http://127.0.0.1:8080/upload/sample.txt
 ```
 
 ##### CGI Execution:
 ```
 # POST payload to CGI script
-curl -i -X POST -d "user=student&msg=hello" http://localhost:8080/cgi/echo.py
+curl -i -X POST -d "user=student&msg=hello" http://127.0.0.1:8080/cgi/echo.py
 ```
 ##### Session & Cookie Workflow:
 ```
 # 1. Login and save cookie
-curl -i -c cookies.txt -X POST http://localhost:8080/session/login -d "user=student"
+curl -i -c cookies.txt -X POST http://127.0.0.1:8080/session/login -d "user=student"
 
 # 2. Visit counter with cookie
-curl -i -b cookies.txt -c cookies.txt http://localhost:8080/session/counter
+curl -i -b cookies.txt -c cookies.txt http://127.0.0.1:8080/session/counter
 
 # 3. Logout (returns Max-Age=0)
-curl -i -b cookies.txt -c cookies.txt -X POST http://localhost:8080/session/logout
+curl -i -b cookies.txt -c cookies.txt -X POST http://127.0.0.1:8080/session/logout
 ```
 #### 3. Load & Stress Testing (siege)
 o evaluate high concurrency, memory stability, non-blocking I/O multiplexing, and availability under heavy load, use siege:
@@ -174,7 +174,7 @@ o evaluate high concurrency, memory stability, non-blocking I/O multiplexing, an
 
 Run 250 concurrent users sending requests for 10 seconds:
 ```
-siege -c250 -t10S http://localhost:8080/index.html
+siege -c250 -t10S http://127.0.0.1:8080/index.html
 ```
 ##### HTTP Keep-Alive & High Concurrency:
 Verify persistent connection handling with heavy throughput:
@@ -204,7 +204,7 @@ PID=$(pgrep webserv)
 lsof -p $PID
 
 # 3. Run high-concurrency requests or multiple CGI calls in another terminal
-siege -c50 -t5S http://localhost:8080/cgi/echo.py
+siege -c50 -t5S http://127.0.0.1:8080/cgi/echo.py
 
 # 4. Check open File Descriptors again to ensure count returns to baseline
 lsof -p $PID | wc -l

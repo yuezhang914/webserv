@@ -64,7 +64,7 @@ public:
     CgiEventResult handlePipeRead(int cgiReadFd);
     CgiEventResult handlePipeWrite(int cgiWriteFd);
 
-    std::vector<CgiEventResult> checkTimeouts(); // 巡检超时
+    std::vector<CgiEventResult> checkTimeout(); // 巡检超时
     void reapChildren();                         // 非阻塞回收 PID
     void removeTaskByClientFd(int clientFd);     // 当客户端异常断开时调用，物理销毁任务与杀掉 PID
     bool hasWriteTask(int cgiWriteFd) const;
