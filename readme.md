@@ -184,7 +184,7 @@ siege -b -c100 -t15S http://127.0.0.1:8080/
 ##### POST Load Testing:
 Benchmark file uploads/POST handling under stress:
 ```
-siege -c50 -t10S 'http://localhost:8080/upload/test.txt POST payload_data'
+siege -c50 -t10S 'http://127.0.0.1:8080/upload/test.txt POST payload_data'
 ```
 
 #### 4. Memory & File Descriptor (FD) Leak Prevention Testing
