@@ -1,10 +1,6 @@
 #ifndef CLIENTSOCKET_HPP
 #define CLIENTSOCKET_HPP
 
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/socket.h>
-#include <iostream>
 
 class ClientSocket
 {

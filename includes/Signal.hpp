@@ -2,8 +2,6 @@
 #define SIGNAL_HPP
 
 #include <csignal>
-#include "Webserv.hpp"
-
 
 /*
 函数：signalHandler

@@ -4,6 +4,7 @@
 #include "ClientSocket.hpp"
 #include "Request.hpp"
 #include "Response.hpp"
+
 class Connection
 {
 public:

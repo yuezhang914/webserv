@@ -7,24 +7,6 @@
 #define EFFECTIVE_ROUTE_HPP
 
 /*
-包含：<set>
-用途：使用 std::set 保存最终允许的 HTTP 方法集合。
-*/
-#include <set>
-
-/*
-包含：<string>
-用途：保存 root、alias、redirect、upload_path 和最终 targetPath。
-*/
-#include <string>
-
-/*
-包含：<vector>
-用途：保存按配置顺序尝试的 index 文件名列表。
-*/
-#include <vector>
-
-/*
 包含：LocationConfig.hpp
 用途：读取最长匹配 location 的 root、alias、methods、index、autoindex、upload 和 redirect 覆盖项。
 */
