@@ -140,13 +140,14 @@ The panel is split into 4 testing sections:
 curl -i http://localhost:8080/
 
 # Test Chunked Transfer
-curl -i -H "Transfer-Encoding: chunked" -d "5\r\nHello\r\n0\r\n\r\n" http://localhost:8080/
+``curl -i -X POST -H "Transfer-Encoding: chunked" -H "Content-Length:" -H "Connection: close" -H "Content-Type: text/plain" --data-binary $'5\r\nHello\r\n0\r\n\r\n' http://localhost:8080/upload
 ```
 ##### File Upload & Delete:
 ```
 # Upload a file
-curl -i -X POST -H "Content-Type: text/plain" --data-binary @sample.txt http://localhost:8080/upload/sample.txt
-
+```
+printf "5\r\nHello\r\n0\r\n\r\n" | curl -i -X POST -H "Transfer-Encoding: chunked" -H "Content-Length:" -H "Connection: close" -H "Content-Type: text/plain" --data-binary @- http://localhost:8080/upload/sample.txt
+```
 # Delete a file
 curl -i -X DELETE http://localhost:8080/upload/sample.txt
 ```
@@ -178,7 +179,7 @@ siege -c250 -t10S http://localhost:8080/index.html
 ##### HTTP Keep-Alive & High Concurrency:
 Verify persistent connection handling with heavy throughput:
 ```
-siege -b -c100 -t15S http://localhost:8080/
+siege -b -c100 -t15S http://127.0.0.1:8080/
 ```
 ##### POST Load Testing:
 Benchmark file uploads/POST handling under stress:
