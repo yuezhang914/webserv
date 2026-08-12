@@ -251,6 +251,11 @@ bool SessionDemo::buildCounterExample(const std::string &cookieHeader,
         if (!resolveOrCreateSession(cookieHeader, store, now,
             result.sessionId, created))
             return false;
+
+        // 💡【新增 1】：从后端 SessionStore 中查出 username
+        std::string username;
+        bool isLoggedIn = store.getValue(result.sessionId, "user", username, now);
+
         std::string storedVisits;
         unsigned long visits = 0;
         if (store.getValue(result.sessionId, "visits", storedVisits, now)
@@ -266,10 +271,23 @@ bool SessionDemo::buildCounterExample(const std::string &cookieHeader,
                 unsignedLongToString(visits), now))
             return cleanupFailedExample(store, result.sessionId,
                 created, result);
+
         result.statusCode = 200;
         result.body = "<!DOCTYPE html><html><head><title>Session Counter"
-            "</title></head><body><h1>Cookie and Session Demo</h1>"
-            "<p>Visits: ";
+            "</title></head><body><h1>Cookie and Session Demo</h1>";
+
+        // 💡【新增 2】：在页面上渲染当前 Session 对应的 User 信息
+        if (isLoggedIn && !username.empty())
+        {
+            result.body += "<p style=\"color:green;\"><strong>Current User: </strong>"
+                        + escapeHtml(username) + "</p>";
+        }
+        else
+        {
+            result.body += "<p style=\"color:gray;\"><strong>Current User: </strong><em>Guest (Not Logged In)</em></p>";
+        }
+
+        result.body += "<p>Visits: ";
         result.body += unsignedLongToString(visits);
         result.body += "</p><form method=\"post\" action=\"/session/login\">"
             "<label>User <input name=\"user\" maxlength=\"64\"></label>"
