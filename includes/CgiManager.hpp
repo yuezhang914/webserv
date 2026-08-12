@@ -2,12 +2,6 @@
 #ifndef CGIMANAGER_HPP
 #define CGIMANAGER_HPP
 
-#include <map>
-#include <string>
-#include <vector>
-#include <ctime>
-#include <sys/types.h>
-
 // 纯粹的数据任务
 struct CgiTask
 {

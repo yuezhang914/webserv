@@ -4,9 +4,6 @@
 #include "ServerConfig.hpp"
 #include "LocationConfig.hpp"
 
-#include <string>
-#include <vector>
-
 /*
 函数：findMatchingLocation
 用途：在 locations 中查找与 normalized path 最长匹配的 location。

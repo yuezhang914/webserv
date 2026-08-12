@@ -26,6 +26,7 @@
 #include <sys/wait.h> // 物理引入 waitpid
 #include <ctime>
 #include <csignal>   // 物理引入 signal, sigaction 等信号处理相关系统调用
+#include <deque>
 
 // 3. 业务平坦化组装
 #include "Config.hpp"
@@ -43,12 +44,16 @@
 #include "CgiHandler.hpp"
 #include "CgiManager.hpp"
 
+#include "SessionCookie.hpp"
 
+#include "Request.hpp"
+#include "RequestParser.hpp"
 #include "Response.hpp"
 
 #include "Signal.hpp"
 
 #include <limits.h>
+#include <sstream>
 
 // 全局/静态原子标志位
 extern volatile sig_atomic_t g_loop_running;

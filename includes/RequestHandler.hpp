@@ -7,18 +7,6 @@
 #define REQUEST_HANDLER_HPP
 
 /*
-包含：<set>
-用途：读取 EffectiveRoute 最终允许的方法集合。
-*/
-#include <set>
-
-/*
-包含：<string>
-用途：接收 Request method 和文件路径文本。
-*/
-#include <string>
-
-/*
 包含：EffectiveRoute.hpp
 用途：使用 RequestAction 和已经合并完成的 EffectiveRoute。
 */
