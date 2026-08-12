@@ -4,9 +4,8 @@
 修改说明：保留原消息边界和 body-limit 逻辑，并补充 extension 的 token/quoted-string 语法校验。
 */
 #include "RequestParser.hpp"
+#include "Defines.hpp"
 
-static const size_t MAX_CHUNK_SIZE_LINE = 1024;
-static const size_t MAX_TRAILER_SIZE = 8192;
 
 /*
 函数：skip_chunk_ows

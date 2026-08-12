@@ -7,8 +7,6 @@
 #include "RequestParser.hpp"
 #include "ConfigRouteUtils.hpp"
 
-static const size_t MAX_HEADER_SIZE = 8192;
-
 /*
 函数：RequestParser::parseBuffer
 用途：实现 Request 模块唯一公开入口的完整解析流程。
