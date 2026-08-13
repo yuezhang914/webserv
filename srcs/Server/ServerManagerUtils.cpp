@@ -240,21 +240,26 @@ int ServerManager::executePoll(int &retries)
 
     if (ret < 0)
     {
-        // 🚀 不看 errno！无论是因为信号打断还是系统调用异常，统统走统一的弹性重试逻辑
-        if (retries < 5) // 可适当将重试上限调至 3~5 次，给信号打断留足弹性缓冲空间
-        {
-            std::cerr << "[executePoll] Warning: poll() returned negative value, retrying ("
-                      << retries + 1 << "/5)..." << std::endl;
-            retries++;
-            return 0; // 安全跳过当前轮次，下一轮继续 poll
-        }
+        // 🚀 出现负数时（可能是信号中断），打印日志并递增重试
+        retries++;
+        std::cerr << "[executePoll] Warning: poll() returned " << ret 
+                  << ", retrying (" << retries << "/5)..." << std::endl;
 
-        std::cerr << "[executePoll] Fatal: poll() failed consecutively over limit! Terminating main loop." << std::endl;
-        return -1; // 连续多次失败，彻底熔断退出主循环
+        if (retries >= 5)
+        {
+            std::cerr << "[executePoll] Fatal: poll() failed consecutively over limit! Terminating main loop." << std::endl;
+            return -1; // 真正失败熔断
+        }
+        return 0; // 暂时忽略该轮次
     }
 
-    // 成功捕获事件 (ret > 0) 或超时 (ret == 0)，说明 poll 工作正常，复位重试计数器
-    retries = 0;
+    // 只有当 ret > 0 (真的有事件发生) 时才复位 retries
+    // 如果 ret == 0 (超时空闲)，不要频繁复位，避免信号交错时的重试计数失效
+    if (ret > 0)
+    {
+        retries = 0;
+    }
+
     return ret;
 }
 
