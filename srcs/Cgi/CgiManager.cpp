@@ -81,8 +81,8 @@ bool CgiManager::launchTask(
 
     if (clientFd < 0 || scriptPath.empty())
         return false;
-    CgiHandler cgi(scriptPath, interpreterPath, method, query, path, headers,  host,
-    port, root);
+    CgiHandler cgi(scriptPath, interpreterPath, method, query, path, headers, host,
+                   port, root);
     CgiFds fds = cgi.async_launch();
     if (fds.pid < 0 || fds.read_fd < 0)
     {
@@ -182,7 +182,7 @@ CgiEventResult CgiManager::handlePipeRead(int cgiReadFd)
             this->forceKillAndClean(task);
             return result;
         }
-        else 
+        else
         {
             // 🚀 不检查 errno！
             // bytesRead < 0 说明当前非阻塞缓冲区已被掏空 (EAGAIN)，或者收到信号打断。
@@ -312,12 +312,12 @@ void CgiManager::forceKillAndClean(CgiTask &task)
         int status = 0;
         // 先检查子进程是否已经自然退出
         pid_t waited = ::waitpid(pid, &status, WNOHANG);
-        
+
         if (waited == 0)
         {
             // 子进程仍在运行，直接发送 SIGKILL
             ::kill(pid, SIGKILL);
-            
+
             // 🚀 【不看 errno 的同步等待】：
             // SIGKILL 是强制杀进程，内核会立刻清理它。
             // 使用最多 10 次的有限循环等待，只要 waited == pid (即 > 0) 就成功退出。
@@ -325,7 +325,7 @@ void CgiManager::forceKillAndClean(CgiTask &task)
             while (retry < 10)
             {
                 waited = ::waitpid(pid, &status, 0);
-                if (waited == pid) 
+                if (waited == pid)
                 {
                     break; // 成功回收，直接退出
                 }
@@ -357,6 +357,12 @@ void CgiManager::reapChildren()
 {
     int status;
     pid_t pid;
+    // 💡 关键防御：如果没有活跃的 CGI 任务，直接返回！
+    // 彻底避免在主循环空闲时无脑调用 wait4(-1, ..., WNOHANG) 导致 CPU 狂飙到 50%+
+    if (this->_read_fd_to_task_map.empty())
+    {
+        return;
+    }
 
     while ((pid = ::waitpid(-1, &status, WNOHANG)) > 0)
     {
@@ -461,8 +467,7 @@ void CgiManager::removeTaskByClientFd(int clientFd)
 */
 bool CgiManager::hasWriteTask(int cgiWriteFd) const
 {
-    return this->_write_fd_to_read_fd_map.find(cgiWriteFd)
-        != this->_write_fd_to_read_fd_map.end();
+    return this->_write_fd_to_read_fd_map.find(cgiWriteFd) != this->_write_fd_to_read_fd_map.end();
 }
 
 void CgiManager::stopAllTasks()

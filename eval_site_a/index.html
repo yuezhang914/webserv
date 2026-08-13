@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Webserv Test Panel</title>
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌐</text></svg>">
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    /* Iframe 容器基础样式 */
+    .iframe-preview-container {
+      width: 100%;
+      height: 380px;
+      border: 1px solid var(--border-color, #334155);
+      border-radius: 0 0 8px 8px;
+      overflow: hidden;
+      background: #ffffff;
+    }
+
+    .iframe-preview-container iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+    }
+
+    /* Response 视图切换 Tab 控件样式 */
+    .response-view-wrapper {
+      margin-top: 14px;
+      border: 1px solid var(--border-color, #334155);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--card-bg, #1e293b);
+    }
+
+    .response-tabs {
+      display: flex;
+      background: rgba(0, 0, 0, 0.25);
+      border-bottom: 1px solid var(--border-color, #334155);
+    }
+
+    .tab-btn {
+      padding: 10px 18px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #94a3b8;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .tab-btn:hover {
+      color: #f8fafc;
+    }
+
+    .tab-btn.active {
+      color: var(--primary-color, #3b82f6);
+      border-bottom-color: var(--primary-color, #3b82f6);
+      background: rgba(59, 130, 246, 0.08);
+    }
+
+    .tab-panel {
+      display: none;
+    }
+
+    .tab-panel.active {
+      display: block;
+    }
+
+    /* Raw Data 代码查看框样式 */
+    .raw-data-container {
+      padding: 14px;
+      margin: 0;
+      height: 380px;
+      overflow: auto;
+      background: #0f172a;
+      color: #38bdf8;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.85rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+      box-sizing: border-box;
+    }
+  </style>
+</head>
+
+<body>
+  <main class="page">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Local HTTP Testing</p>
+        <h1>Webserv Test Panel</h1>
+        <p class="intro">
+          This page sends requests to the same-origin Webserv that serves it. Use it to test static files, autoindex,
+          uploads, deletion, CGI standard behavior, and Session/Cookie management.
+        </p>
+      </div>
+      <div class="badges">
+        <span class="badge">GET</span>
+        <span class="badge">POST</span>
+        <span class="badge">DELETE</span>
+        <span class="badge">CGI</span>
+        <span class="badge">SESSION</span>
+      </div>
+    </header>
+
+    <div class="layout">
+      <!-- Section 1: GET -->
+      <section class="card strong">
+        <div class="card-head">
+          <span class="num">1</span>
+          <div>
+            <h2>GET Files and Directories</h2>
+            <p class="help">Enter a file or directory path. When autoindex is enabled, the directory listing will appear
+              below.</p>
+          </div>
+        </div>
+
+        <form id="get-form" class="row" autocomplete="off">
+          <input id="get-path" class="grow" type="text" value="/" placeholder="/, /subdir/, or /file.txt" />
+          <button class="btn" type="submit">Send GET</button>
+        </form>
+
+        <div class="preview-label"><span>Response Preview</span><span class="mono">iframe</span></div>
+        <iframe id="get-frame" title="GET response preview"></iframe>
+        <div id="get-status" class="status"></div>
+      </section>
+
+      <div class="stack">
+        <!-- Section 2: File Manager & Drag Upload -->
+        <section class="card">
+          <div class="card-head">
+            <span class="num">2</span>
+            <div>
+              <h2>File Manager & Drag Upload & Delete</h2>
+              <p class="help">Upload binary or text files directly, or manage existing files inside your server
+                directory.</p>
+            </div>
+          </div>
+
+          <div>
+            <label for="manager-route">Upload Route Folder</label>
+            <input id="manager-route" type="text" value="/upload/" placeholder="/upload/" />
+
+            <label>Select or Drag File</label>
+            <div id="drop-zone" class="drop-zone">
+              <input type="file" id="file-input" style="display: none;" />
+              <p id="drop-zone-text">Drag and drop file here, or <span class="browse-link">browse</span></p>
+            </div>
+
+            <button id="upload-file-btn" class="btn" type="button" style="margin-top:14px; width: 100%;">Upload Selected
+              File</button>
+            <div id="manager-upload-status" class="status"></div>
+
+            <!-- Upload Response Iframe Preview Window -->
+            <div id="upload-response-wrapper" class="response-view-wrapper" style="display: none; margin-top: 12px;">
+              <div class="response-tabs">
+                <button id="upload-tab-html" class="tab-btn active" onclick="switchResponseTab('upload', 'html')">🌐 HTML Render (Page)</button>
+                <button id="upload-tab-raw" class="tab-btn" onclick="switchResponseTab('upload', 'raw')">📄 Raw Response Headers & Body</button>
+              </div>
+
+              <!-- HTML Render View -->
+              <div id="upload-panel-html" class="tab-panel active">
+                <div class="iframe-preview-container">
+                  <iframe id="upload-iframe" title="Upload response preview"></iframe>
+                </div>
+              </div>
+
+              <!-- Raw Data View -->
+              <div id="upload-panel-raw" class="tab-panel">
+                <pre id="upload-result" class="raw-data-container">HTTP/1.1 (No upload request sent yet)</pre>
+              </div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <label style="margin: 0;">Server File List</label>
+              <button id="fetch-files-btn" class="btn secondary" type="button"
+                style="padding: 4px 10px; min-width: auto; font-size: 0.8rem;">Refresh List</button>
+            </div>
+
+            <div id="file-list-container" class="file-list-container" style="margin-top: 8px;">
+              <p class="help" style="text-align: center; margin-top: 20px;">Click "Refresh List" to load files via
+                autoindex.</p>
+            </div>
+            <div id="manager-delete-status" class="status"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- Section 3: Professional CGI Test Suite -->
+    <section class="card" style="margin-top:18px">
+      <div class="card-head">
+        <span class="num">3</span>
+        <div>
+          <h2>CGI Execution & Spec Testing</h2>
+          <p class="help">
+            Test RFC 3875 CGI implementation, environment variables, multi-language support,
+            and error conditions (404 missing, 500/502 crash, 504 no-progress timeout).
+          </p>
+        </div>
+      </div>
+
+      <!-- Quick Test Scenario Presets -->
+      <label>Preset Test Scenarios (GET & Edge Cases)</label>
+      <div class="button-group">
+        <button class="btn secondary" type="button" onclick="testCgi('/cgi/echo.py?user=student&role=student','GET')">
+          Python CGI · GET
+        </button>
+        <button class="btn secondary" type="button" onclick="testCgi('/cgi/echo.sh?shell=bash&test=true','GET')">
+          Shell CGI · GET
+        </button>
+        <button class="btn secondary" type="button" onclick="testCgi('/cgi/bad.py','GET')">
+          Broken CGI · 500/502
+        </button>
+        <button class="btn secondary" type="button" onclick="testCgi('/cgi/slow_timeout.py','GET')">
+          No Activity (11s) · 504
+        </button>
+        <button class="btn secondary" type="button" onclick="testCgi('/cgi/slow_streaming.py','GET')">
+          Streaming (15s total, 2s step) · 200
+        </button>
+        <button class="btn secondary" type="button" onclick="testCgi('/cgi/nonexistent.py','GET')">
+          Missing CGI · 404
+        </button>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Interactive CGI POST Form -->
+      <h3>Custom CGI Request (POST & Body)</h3>
+      <p class="help">
+        Send request bodies to test <span class="mono">STDIN</span> processing, <span
+          class="mono">CONTENT_LENGTH</span>, and <span class="mono">CONTENT_TYPE</span> headers.
+      </p>
+
+      <form id="cgi-post-form" autocomplete="off">
+        <div class="row">
+          <div class="grow">
+            <label for="cgi-target">Target CGI Script</label>
+            <select id="cgi-target">
+              <option value="/cgi/echo.py?source=custom_form">Python Script (/cgi/echo.py)</option>
+              <option value="/cgi/echo.sh?source=custom_form">Shell Script (/cgi/echo.sh)</option>
+              <option value="/cgi/slow_timeout.py">11s Inactive Timeout (/cgi/slow_timeout.py)</option>
+              <option value="/cgi/slow_streaming.py">15s Active Stream (/cgi/slow_streaming.py)</option>
+            </select>
+          </div>
+          <div class="grow">
+            <label for="cgi-content-type">Content-Type Header</label>
+            <select id="cgi-content-type">
+              <option value="application/x-www-form-urlencoded">application/x-www-form-urlencoded</option>
+              <option value="text/plain">text/plain</option>
+              <option value="application/json">application/json</option>
+            </select>
+          </div>
+        </div>
+
+        <label for="cgi-message">Request Body Content</label>
+        <textarea id="cgi-message" style="min-height:90px"
+          placeholder="Enter test payload for STDIN...">message=Hello+from+Webserv+CGI+TestPanel&user=student</textarea>
+
+        <div class="url-preview">Request Target → <span id="cgi-url-preview"
+            class="mono">/cgi/echo.py?source=custom_form</span></div>
+        <button class="btn" type="submit" style="margin-top:12px">Execute Custom CGI POST</button>
+      </form>
+
+      <!-- CGI Response Dashboard -->
+      <div id="cgi-status-bar" class="cgi-status-bar" style="display: none;">
+        <span id="cgi-status-badge" class="status-badge">200 OK</span>
+        <span id="cgi-time-tag" class="time-tag">0.000s</span>
+        <span id="cgi-endpoint-tag" class="mono text-muted">/cgi/echo.py</span>
+      </div>
+      <div id="cgi-status" class="status"></div>
+
+      <!-- CGI Response Tab Container -->
+      <div id="cgi-response-wrapper" class="response-view-wrapper" style="display: none;">
+        <div class="response-tabs">
+          <button id="cgi-tab-html" class="tab-btn active" onclick="switchResponseTab('cgi', 'html')">🌐 HTML Render
+            (Page)</button>
+          <button id="cgi-tab-raw" class="tab-btn" onclick="switchResponseTab('cgi', 'raw')">📄 Raw Response
+            Data</button>
+        </div>
+
+        <!-- HTML View -->
+        <div id="cgi-panel-html" class="tab-panel active">
+          <div class="iframe-preview-container">
+            <iframe id="cgi-iframe" title="CGI response preview"></iframe>
+          </div>
+        </div>
+
+        <!-- Raw Data View -->
+        <div id="cgi-panel-raw" class="tab-panel">
+          <pre id="cgi-result" class="raw-data-container"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 4: Session & Cookie Management Test -->
+    <section id="session-section" class="card" style="margin-top:18px">
+      <div class="card-head">
+        <span class="num">4</span>
+        <div>
+          <h2>Session & Cookie Management</h2>
+          <p class="help">
+            Test HTTP Session storage, <span class="mono">Set-Cookie</span> headers, login rotation, sliding expiration,
+            and logout destruction.
+          </p>
+        </div>
+      </div>
+
+      <!-- Controls -->
+      <div class="row">
+        <div class="grow">
+          <label for="session-user-input">Username Payload (for Login)</label>
+          <input id="session-user-input" type="text" value="student" placeholder="Enter username..." />
+        </div>
+        <div class="grow">
+          <label for="session-route-select">Session Preset Endpoints</label>
+          <select id="session-route-select">
+            <option value="/session/login">1. POST /session/login (Login & Regenerate ID)</option>
+            <option value="/session/counter">2. GET /session/counter (Visits Increment & Sliding Renewal)</option>
+            <option value="/session/logout">3. POST /session/logout (Destroy Session & Max-Age=0)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="button-group" style="margin-top:14px;">
+        <button class="btn" type="button" onclick="runSessionStep('login')">
+          🔑 1. Login (/session/login)
+        </button>
+        <button class="btn secondary" type="button" onclick="runSessionStep('counter')">
+          🔄 2. Visit Counter (/session/counter)
+        </button>
+        <button class="btn secondary" type="button" onclick="runSessionStep('logout')"
+          style="border-color: #ef4444; color: #f87171;">
+          🚪 3. Logout (/session/logout)
+        </button>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Live Session State Indicators -->
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+        <label style="margin: 0;">Client-Side Session State & Headers</label>
+        <button class="btn secondary" type="button" onclick="syncSessionCookieNotice()"
+          style="padding: 2px 8px; font-size:0.75rem;">Sync Browser Context</button>
+      </div>
+      <div id="session-state-bar" class="mono"
+        style="background: #0f172a; padding: 10px 14px; border-radius: 6px; font-size: 0.82rem; border: 1px solid #334155; color: #94a3b8;">
+        <span>Current Active Cookie: </span><span id="session-cookie-val" style="color: #38bdf8; font-weight: 600;">(No
+          HttpOnly cookie visible to JS, check Live Response Headers below)</span>
+      </div>
+
+      <div id="session-status" class="status" style="margin-top:12px;"></div>
+
+      <div class="mono"
+        style="margin-top: 12px; padding: 10px 12px; background: rgba(59, 130, 246, 0.08); border-left: 3px solid #3b82f6; border-radius: 4px; font-size: 0.8rem; color: #93c5fd; line-height: 1.4;">
+        ℹ️ <strong>Note:</strong> <span class="mono">Set-Cookie</span> headers are stripped by browser security policy
+        in JavaScript <span class="mono">fetch()</span>. Check F12 Network tab or <span
+          class="mono">document.cookie</span> / Server logs for actual cookie headers.
+      </div>
+
+      <!-- Response Interactive Container -->
+      <div id="session-response-wrapper" class="response-view-wrapper" style="margin-top: 12px;">
+        <div class="response-tabs">
+          <button id="session-tab-html" class="tab-btn active" onclick="switchResponseTab('session', 'html')">🌐 HTML
+            Render (Page)</button>
+          <button id="session-tab-raw" class="tab-btn" onclick="switchResponseTab('session', 'raw')">📄 Full HTTP
+            Response & Headers</button>
+        </div>
+
+        <!-- HTML Render Window -->
+        <div id="session-panel-html" class="tab-panel active">
+          <div class="iframe-preview-container">
+            <iframe id="session-iframe" title="Session response preview"
+              srcdoc="<div style='color:#64748b; font-family:sans-serif; text-align:center; padding-top:120px;'>Ready to test. Click Login, Counter or Logout above.</div>"></iframe>
+          </div>
+        </div>
+
+        <!-- Raw Headers & Body Window -->
+        <div id="session-panel-raw" class="tab-panel">
+          <pre id="session-result" class="raw-data-container">HTTP/1.1 (No request sent yet)</pre>
+        </div>
+      </div>
+    </section>
+
+    <script>
+      const $ = (selector) => document.querySelector(selector);
+
+      function normalizePath(path) {
+        if (!path) return "/";
+        return path.startsWith("/") ? path : "/" + path;
+      }
+
+      function setStatus(node, message, isError) {
+        node.className = "status " + (isError ? "err" : "ok");
+        node.textContent = message;
+      }
+
+      function truncate(text) {
+        return text.length > 160 ? text.slice(0, 157) + "…" : text;
+      }
+
+      /* --- 通用：HTML 与 RAW DATA 选项卡切换控制 --- */
+      function switchResponseTab(prefix, tabType) {
+        const htmlBtn = $(`#${prefix}-tab-html`);
+        const rawBtn = $(`#${prefix}-tab-raw`);
+        const htmlPanel = $(`#${prefix}-panel-html`);
+        const rawPanel = $(`#${prefix}-panel-raw`);
+
+        if (tabType === 'html') {
+          htmlBtn.classList.add('active');
+          rawBtn.classList.remove('active');
+          htmlPanel.classList.add('active');
+          rawPanel.classList.remove('active');
+        } else {
+          rawBtn.classList.add('active');
+          htmlBtn.classList.remove('active');
+          rawPanel.classList.add('active');
+          htmlPanel.classList.remove('active');
+        }
+      }
+
+      /* --- Section 1: GET --- */
+      const getForm = $("#get-form");
+      const getPath = $("#get-path");
+      const getFrame = $("#get-frame");
+      const getStatus = $("#get-status");
+
+      getForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const path = normalizePath(getPath.value);
+        getFrame.src = path;
+        getStatus.className = "status";
+        getStatus.textContent = "Requesting " + path + "...";
+
+        fetch(path, { method: "GET", cache: "no-store" })
+          .then((response) => {
+            getStatus.textContent = "GET " + path + " → " + response.status + " " + response.statusText;
+            getStatus.classList.add(response.ok ? "ok" : "err");
+          })
+          .catch((error) => {
+            getStatus.textContent = "GET " + path + " failed: " + error.message;
+            getStatus.classList.add("err");
+          });
+      });
+
+      /* --- Section 2: File Manager & Drag Upload Script --- */
+      const dropZone = $("#drop-zone");
+      const fileInput = $("#file-input");
+      const dropZoneText = $("#drop-zone-text");
+      const uploadBtn = $("#upload-file-btn");
+      const managerRoute = $("#manager-route");
+      const managerUploadStatus = $("#manager-upload-status");
+      const managerDeleteStatus = $("#manager-delete-status");
+      const fileListContainer = $("#file-list-container");
+      const fetchFilesBtn = $("#fetch-files-btn");
+
+      // 新增 Upload Iframe Preview DOM 元素
+      const uploadResponseWrapper = $("#upload-response-wrapper");
+      const uploadIframe = $("#upload-iframe");
+      const uploadResult = $("#upload-result");
+
+      let selectedFile = null;
+
+      dropZone.addEventListener("click", () => fileInput.click());
+
+      fileInput.addEventListener("change", (e) => {
+        if (e.target.files.length > 0) {
+          setSelectedFile(e.target.files[0]);
+        }
+      });
+
+      dropZone.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        dropZone.classList.add("dragover");
+      });
+
+      dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
+
+      dropZone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        dropZone.classList.remove("dragover");
+        if (e.dataTransfer.files.length > 0) {
+          setSelectedFile(e.dataTransfer.files[0]);
+        }
+      });
+
+      function setSelectedFile(file) {
+        selectedFile = file;
+        dropZoneText.textContent = `Selected: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+      }
+
+      uploadBtn.addEventListener("click", async () => {
+        if (!selectedFile) {
+          setStatus(managerUploadStatus, "Please select a file first.", true);
+          return;
+        }
+
+        let route = normalizePath(managerRoute.value);
+        if (!route.endsWith("/")) route += "/";
+        const targetUrl = route + selectedFile.name;
+
+        setStatus(managerUploadStatus, "Uploading file...", false);
+        
+        // 显示 Response Preview Wrapper 骨架屏
+        uploadIframe.srcdoc = `<div style="color:#3b82f6; font-family:sans-serif; text-align:center; padding-top:120px; font-weight:600;">
+          ⏳ Uploading ${selectedFile.name} to ${targetUrl}...
+        </div>`;
+        uploadResult.textContent = `Executing POST ${targetUrl}...\nUploading file payload...`;
+        uploadResponseWrapper.style.display = "block";
+
+        try {
+          const start = performance.now();
+          const response = await fetch(targetUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": selectedFile.type || "application/octet-stream"
+            },
+            body: selectedFile
+          });
+
+          const text = await response.text().catch(() => "");
+          const duration = ((performance.now() - start)).toFixed(1);
+
+          // 拼接 Raw Response Headers
+          let rawResponseText = `HTTP/1.1 ${response.status} ${response.statusText || 'OK'}\n`;
+          response.headers.forEach((val, key) => {
+            rawResponseText += `${key}: ${val}\n`;
+          });
+          rawResponseText += `\n${text || '(Empty Response Body)'}`;
+
+          setStatus(
+            managerUploadStatus,
+            `POST ${targetUrl} → ${response.status} ${response.statusText || 'OK'} (${duration}ms)`,
+            !response.ok
+          );
+
+          // 渲染 iframe HTML View 与 Raw Data
+          const baseUrl = new URL(targetUrl, window.location.origin).href;
+          const htmlContent = text || "<p style='font-family:sans-serif; color:#888; text-align:center; margin-top:50px;'>(Empty Response Body)</p>";
+          uploadIframe.srcdoc = `<base href="${baseUrl}">${htmlContent}`;
+          uploadResult.textContent = rawResponseText;
+
+          if (response.ok) {
+            fetchFileList();
+          }
+
+          uploadResponseWrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+        } catch (err) {
+          setStatus(managerUploadStatus, `Upload failed: ${err.message}`, true);
+          uploadIframe.srcdoc = `<div style="color: #ef4444; font-family: sans-serif; padding: 20px;">
+            <h3>Upload Error</h3>
+            <p>${err.message}</p>
+          </div>`;
+          uploadResult.textContent = `HTTP/1.1 500 Upload Error\n\nError: ${err.message}`;
+          uploadResponseWrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      });
+
+      async function openInNewWindow(fileUrl) {
+        const newWin = window.open('about:blank', '_blank');
+        if (newWin) {
+          newWin.document.write("<p style='font-family:sans-serif; text-align:center; margin-top:50px;'>Loading file preview...</p>");
+        }
+
+        try {
+          const response = await fetch(fileUrl, { cache: "no-store" });
+          if (!response.ok) {
+            if (newWin) newWin.close();
+            alert(`Failed to load: ${response.status}`);
+            return;
+          }
+
+          const blob = await response.blob();
+          const ext = fileUrl.split('.').pop().toLowerCase();
+
+          let mimeType = blob.type;
+          if (ext === 'avif') mimeType = 'image/avif';
+          else if (ext === 'png') mimeType = 'image/png';
+          else if (ext === 'jpg' || ext === 'jpeg') mimeType = 'image/jpeg';
+          else if (ext === 'webp') mimeType = 'image/webp';
+          else if (ext === 'gif') mimeType = 'image/gif';
+          else if (ext === 'pdf') mimeType = 'application/pdf';
+          else if (ext === 'txt') mimeType = 'text/plain; charset=utf-8';
+
+          const viewableBlob = new Blob([blob], { type: mimeType });
+          const blobUrl = URL.createObjectURL(viewableBlob);
+
+          if (newWin) {
+            newWin.location.href = blobUrl;
+          } else {
+            window.open(blobUrl, '_blank');
+          }
+        } catch (err) {
+          if (newWin) newWin.close();
+          alert("Preview error: " + err.message);
+        }
+      }
+
+      async function fetchFileList() {
+        let route = normalizePath(managerRoute.value);
+        if (!route.endsWith("/")) route += "/";
+
+        fileListContainer.innerHTML = "<p class='help' style='text-align:center;'>Loading...</p>";
+
+        try {
+          const res = await fetch(route, { cache: "no-store" });
+          if (!res.ok) {
+            fileListContainer.innerHTML = `<p class="help err" style="text-align:center;">Failed to list directory (${res.status})</p>`;
+            return;
+          }
+
+          const htmlText = await res.text();
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(htmlText, "text/html");
+          const links = Array.from(doc.querySelectorAll("a"));
+
+          const validHrefList = links
+            .map(a => a.getAttribute("href"))
+            .filter(href => href && href !== "../" && href !== "./" && !href.endsWith("/"));
+
+          if (validHrefList.length === 0) {
+            fileListContainer.innerHTML = "<p class='help' style='text-align:center;'>No files found or Autoindex disabled.</p>";
+            return;
+          }
+
+          fileListContainer.innerHTML = "";
+          validHrefList.forEach(rawHref => {
+            const baseDirUrl = window.location.origin + (route.endsWith('/') ? route : route + '/');
+            const targetUrl = new URL(rawHref, baseDirUrl).pathname;
+            const cleanName = decodeURIComponent(rawHref).replace(/^.*[\\\/]/, '');
+
+            const item = document.createElement("div");
+            item.className = "file-item";
+            item.innerHTML = `
+            <a class="file-name" href="javascript:void(0)" onclick="openInNewWindow('${targetUrl}')" title="Click to preview ${cleanName}">${cleanName}</a>
+            <button class="btn-del" onclick="deleteFileFromList('${targetUrl}')">Delete</button>
+          `;
+            fileListContainer.appendChild(item);
+          });
+
+        } catch (err) {
+          fileListContainer.innerHTML = `<p class="help err" style="text-align:center;">Error parsing list: ${err.message}</p>`;
+        }
+      }
+
+      async function deleteFileFromList(fileUrl) {
+        setStatus(managerDeleteStatus, `Deleting ${fileUrl}...`, false);
+        try {
+          const response = await fetch(fileUrl, { method: "DELETE" });
+          const text = await response.text().catch(() => "");
+          setStatus(
+            managerDeleteStatus,
+            `DELETE ${fileUrl} → ${response.status} ${response.statusText}${text ? ' — ' + truncate(text) : ''}`,
+            !response.ok
+          );
+          fetchFileList();
+        } catch (err) {
+          setStatus(managerDeleteStatus, `Delete failed: ${err.message}`, true);
+        }
+      }
+
+      fetchFilesBtn.addEventListener("click", fetchFileList);
+
+      /* --- Section 3: CGI Testing & Dashboard --- */
+      const cgiStatusBar = $("#cgi-status-bar");
+      const cgiStatusBadge = $("#cgi-status-badge");
+      const cgiTimeTag = $("#cgi-time-tag");
+      const cgiEndpointTag = $("#cgi-endpoint-tag");
+      const cgiStatus = $("#cgi-status");
+      const cgiResult = $("#cgi-result");
+      const cgiResponseWrapper = $("#cgi-response-wrapper");
+      const cgiIframe = $("#cgi-iframe");
+      const cgiContentType = $("#cgi-content-type");
+      const cgiMessage = $("#cgi-message");
+
+      const bodyTemplates = {
+        "application/x-www-form-urlencoded": "message=Hello+from+Webserv+CGI+TestPanel&user=student",
+        "text/plain": "Hello from Webserv CGI TestPanel!\nUser: student",
+        "application/json": JSON.stringify({
+          message: "Hello from Webserv CGI TestPanel",
+          user: "student"
+        }, null, 2)
+      };
+
+      cgiContentType.addEventListener("change", () => {
+        const selectedType = cgiContentType.value;
+        if (bodyTemplates[selectedType]) {
+          cgiMessage.value = bodyTemplates[selectedType];
+        }
+      });
+
+      async function testCgi(path, method = "GET", body = null, contentType = "application/x-www-form-urlencoded") {
+        cgiStatus.textContent = "Executing " + method + " " + path + "...";
+        cgiStatus.className = "status";
+        cgiStatusBar.style.display = "none";
+
+        cgiResult.textContent = "Loading raw output...";
+        cgiIframe.srcdoc = "<p style='font-family:sans-serif; color:#888; text-align:center; margin-top:50px;'>Executing CGI script...</p>";
+        cgiResponseWrapper.style.display = "block";
+
+        const start = performance.now();
+
+        try {
+          const options = { method: method, cache: "no-store" };
+          if (body !== null) {
+            options.headers = { "Content-Type": contentType };
+            options.body = body;
+          }
+
+          const response = await fetch(path, options);
+          const text = await response.text();
+          const seconds = ((performance.now() - start) / 1000).toFixed(3);
+
+          cgiStatusBar.style.display = "flex";
+          cgiStatusBadge.textContent = `${response.status} ${response.statusText || ''}`;
+
+          if (response.status >= 200 && response.status < 300) {
+            cgiStatusBadge.className = "status-badge badge-2xx";
+          } else if (response.status >= 400 && response.status < 500) {
+            cgiStatusBadge.className = "status-badge badge-4xx";
+          } else {
+            cgiStatusBadge.className = "status-badge badge-5xx";
+          }
+
+          cgiTimeTag.textContent = `${seconds}s`;
+          cgiEndpointTag.textContent = `${method} ${path}`;
+
+          let message = `Execution completed in ${seconds} seconds.`;
+
+          if (response.status === 404) {
+            message += " (404 Not Found: Check script path / location block configuration)";
+          } else if (response.status === 500 || response.status === 502) {
+            message += " (CGI Error: Script crashed or generated invalid/missing HTTP headers)";
+          } else if (response.status === 504) {
+            message += " (504 Gateway Timeout: Inactive for >= 10s without stdin/stdout progress)";
+          }
+
+          cgiStatus.textContent = message;
+          cgiStatus.className = "status " + (response.ok ? "ok" : "err");
+
+          const baseUrl = new URL(path, window.location.origin).href;
+          const htmlContent = text || "<p style='font-family:sans-serif; color:#888; text-align:center; margin-top:20px;'>(Empty Response Body)</p>";
+          cgiIframe.srcdoc = `<base href="${baseUrl}">${htmlContent}`;
+
+          cgiResult.textContent = text || "(Empty Response Body)";
+
+          cgiResponseWrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+        } catch (error) {
+          const seconds = ((performance.now() - start) / 1000).toFixed(3);
+          cgiStatusBar.style.display = "flex";
+          cgiStatusBadge.textContent = "FETCH ERROR";
+          cgiStatusBadge.className = "status-badge badge-5xx";
+          cgiTimeTag.textContent = `${seconds}s`;
+          cgiEndpointTag.textContent = `${method} ${path}`;
+
+          cgiStatus.textContent = "Network / Processing Error: " + error.message;
+          cgiStatus.className = "status err";
+
+          cgiIframe.srcdoc = `<div style="color: red; font-family: sans-serif; padding: 20px;">
+          <h3>Processing Error</h3>
+          <p>${error.message}</p>
+        </div>`;
+          cgiResult.textContent = `Error: ${error.message}`;
+
+          cgiResponseWrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      }
+
+      const cgiTarget = $("#cgi-target");
+      const cgiUrlPreview = $("#cgi-url-preview");
+
+      function updateCgiPreview() {
+        cgiUrlPreview.textContent = cgiTarget.value;
+      }
+
+      cgiTarget.addEventListener("change", updateCgiPreview);
+      updateCgiPreview();
+
+      $("#cgi-post-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const body = cgiMessage.value;
+        const contentType = cgiContentType.value;
+        testCgi(cgiTarget.value, "POST", body, contentType);
+      });
+
+      /* --- Section 4: Session & Cookie Management Script --- */
+      const sessionUserInput = $("#session-user-input");
+      const sessionRouteSelect = $("#session-route-select");
+      const sessionStatus = $("#session-status");
+      const sessionResult = $("#session-result");
+      const sessionResponseWrapper = $("#session-response-wrapper");
+      const sessionIframe = $("#session-iframe");
+      const sessionCookieVal = $("#session-cookie-val");
+
+      function syncSessionCookieNotice() {
+        const cookies = document.cookie;
+        if (cookies && cookies.trim() !== "") {
+          sessionCookieVal.textContent = cookies;
+        } else {
+          sessionCookieVal.textContent = "(Protected by HttpOnly or Expired - View Raw Response Headers below)";
+        }
+      }
+
+      async function runSessionStep(actionType) {
+        let route = "/session/counter";
+        let method = "GET";
+        let body = null;
+        let contentType = null;
+
+        const username = sessionUserInput.value.trim() || "student";
+
+        if (actionType === 'login') {
+          route = "/session/login";
+          method = "POST";
+          contentType = "application/x-www-form-urlencoded";
+          body = `user=${encodeURIComponent(username)}`;
+          sessionRouteSelect.value = "/session/login";
+        } else if (actionType === 'logout') {
+          route = "/session/logout";
+          method = "POST";
+          contentType = "application/x-www-form-urlencoded";
+          sessionRouteSelect.value = "/session/logout";
+        } else {
+          route = "/session/counter";
+          method = "GET";
+          sessionRouteSelect.value = "/session/counter";
+        }
+
+        sessionStatus.textContent = `Sending ${method} ${route}...`;
+        sessionStatus.className = "status";
+
+        sessionIframe.srcdoc = `<div style="color:#3b82f6; font-family:sans-serif; text-align:center; padding-top:120px; font-weight:600;">
+        ⏳ Requesting ${method} ${route}...
+      </div>`;
+        sessionResult.textContent = `Executing ${method} ${route}...\nWaiting for server response...`;
+
+        try {
+          const options = {
+            method: method,
+            cache: "no-store",
+            credentials: "same-origin"
+          };
+
+          if (body !== null) {
+            options.headers = { "Content-Type": contentType };
+            options.body = body;
+          }
+
+          const start = performance.now();
+          const response = await fetch(route, options);
+          const text = await response.text();
+          const duration = ((performance.now() - start)).toFixed(1);
+
+          let rawResponseText = `HTTP/1.1 ${response.status} ${response.statusText || 'OK'}\n`;
+          response.headers.forEach((val, key) => {
+            rawResponseText += `${key}: ${val}\n`;
+          });
+          rawResponseText += `\n${text || '(Empty Body)'}`;
+
+          setStatus(
+            sessionStatus,
+            `${method} ${route} → ${response.status} ${response.statusText || 'OK'} (${duration}ms)`,
+            !response.ok
+          );
+
+          const baseUrl = new URL(route, window.location.origin).href;
+          const htmlContent = text || "<p style='font-family:sans-serif; color:#888; text-align:center; margin-top:50px;'>(Empty Response Body)</p>";
+          sessionIframe.srcdoc = `<base href="${baseUrl}">${htmlContent}`;
+
+          sessionResult.textContent = rawResponseText;
+
+          syncSessionCookieNotice();
+
+          sessionResponseWrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+        } catch (err) {
+          setStatus(sessionStatus, `Request Failed: ${err.message}`, true);
+          sessionIframe.srcdoc = `<div style="color: #ef4444; font-family: sans-serif; padding: 20px;">
+          <h3>Network / Server Error</h3>
+          <p>${err.message}</p>
+        </div>`;
+          sessionResult.textContent = `HTTP/1.1 500 Network Error\n\nError: ${err.message}`;
+          sessionResponseWrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      }
+
+      sessionRouteSelect.addEventListener("change", () => {
+        const val = sessionRouteSelect.value;
+        if (val === "/session/login") runSessionStep('login');
+        else if (val === "/session/logout") runSessionStep('logout');
+        else runSessionStep('counter');
+      });
+
+      syncSessionCookieNotice();
+    </script>
+</body>
+
+</html>
