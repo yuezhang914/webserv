@@ -346,25 +346,28 @@
 
       <div class="divider"></div>
 
-      <!-- Live Session State Indicators -->
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
-        <label style="margin: 0;">Client-Side Session State & Headers</label>
-        <button class="btn secondary" type="button" onclick="syncSessionCookieNotice()"
-          style="padding: 2px 8px; font-size:0.75rem;">Sync Browser Context</button>
-      </div>
+      <!-- Session Cookie inspection guidance -->
+      <label style="margin: 0 0 8px;">Session Cookie Inspection</label>
       <div id="session-state-bar" class="mono"
-        style="background: #0f172a; padding: 10px 14px; border-radius: 6px; font-size: 0.82rem; border: 1px solid #334155; color: #94a3b8;">
-        <span>Current Active Cookie: </span><span id="session-cookie-val" style="color: #38bdf8; font-weight: 600;">(No
-          HttpOnly cookie visible to JS, check Live Response Headers below)</span>
+        style="background: #0f172a; padding: 10px 14px; border-radius: 6px; font-size: 0.82rem; border: 1px solid #334155; color: #94a3b8; line-height: 1.5;">
+        <strong style="color:#38bdf8;">session_id is HttpOnly</strong>, so JavaScript cannot read it with
+        <span class="mono">document.cookie</span>.<br>
+        Inspect the stored cookie in <strong>DevTools → Application/Storage → Cookies</strong>.<br>
+        Use <strong>DevTools → Network</strong> to verify
+        <span class="mono">Set-Cookie</span> on responses and
+        <span class="mono">Cookie: session_id=...</span> on later requests.
       </div>
 
       <div id="session-status" class="status" style="margin-top:12px;"></div>
 
       <div class="mono"
         style="margin-top: 12px; padding: 10px 12px; background: rgba(59, 130, 246, 0.08); border-left: 3px solid #3b82f6; border-radius: 4px; font-size: 0.8rem; color: #93c5fd; line-height: 1.4;">
-        ℹ️ <strong>Note:</strong> <span class="mono">Set-Cookie</span> headers are stripped by browser security policy
-        in JavaScript <span class="mono">fetch()</span>. Check F12 Network tab or <span
-          class="mono">document.cookie</span> / Server logs for actual cookie headers.
+        ℹ️ <strong>Cookie verification:</strong> JavaScript <span class="mono">fetch()</span> does not expose the
+        <span class="mono">Set-Cookie</span> response header, and an <span class="mono">HttpOnly</span>
+        <span class="mono">session_id</span> is intentionally hidden from <span class="mono">document.cookie</span>.
+        Verify the cookie in <strong>DevTools → Application/Storage → Cookies</strong>, and use
+        <strong>DevTools → Network</strong> to inspect the real <span class="mono">Set-Cookie</span> /
+        <span class="mono">Cookie</span> headers.
       </div>
 
       <!-- Response Interactive Container -->
@@ -372,8 +375,8 @@
         <div class="response-tabs">
           <button id="session-tab-html" class="tab-btn active" onclick="switchResponseTab('session', 'html')">🌐 HTML
             Render (Page)</button>
-          <button id="session-tab-raw" class="tab-btn" onclick="switchResponseTab('session', 'raw')">📄 Full HTTP
-            Response & Headers</button>
+          <button id="session-tab-raw" class="tab-btn" onclick="switchResponseTab('session', 'raw')">📄 Visible Response
+            Headers & Body</button>
         </div>
 
         <!-- HTML Render Window -->
@@ -384,7 +387,7 @@
           </div>
         </div>
 
-        <!-- Raw Headers & Body Window -->
+        <!-- JavaScript-visible response headers & body window -->
         <div id="session-panel-raw" class="tab-panel">
           <pre id="session-result" class="raw-data-container">HTTP/1.1 (No request sent yet)</pre>
         </div>
@@ -434,22 +437,55 @@
       const getFrame = $("#get-frame");
       const getStatus = $("#get-status");
 
-      getForm.addEventListener("submit", (event) => {
+      getForm.addEventListener("submit", async (event) => {
         event.preventDefault();
+
         const path = normalizePath(getPath.value);
-        getFrame.src = path;
         getStatus.className = "status";
         getStatus.textContent = "Requesting " + path + "...";
 
-        fetch(path, { method: "GET", cache: "no-store" })
-          .then((response) => {
-            getStatus.textContent = "GET " + path + " → " + response.status + " " + response.statusText;
-            getStatus.classList.add(response.ok ? "ok" : "err");
-          })
-          .catch((error) => {
-            getStatus.textContent = "GET " + path + " failed: " + error.message;
-            getStatus.classList.add("err");
+        try {
+          const response = await fetch(path, {
+            method: "GET",
+            cache: "no-store"
           });
+
+          const contentType = (response.headers.get("content-type") || "").toLowerCase();
+          const baseUrl = new URL(path, window.location.origin).href;
+
+          getStatus.textContent =
+            "GET " + path + " → " + response.status + " " + response.statusText;
+          getStatus.classList.add(response.ok ? "ok" : "err");
+
+          if (contentType.includes("text/html") ||
+              contentType.includes("application/xhtml+xml")) {
+            const text = await response.text();
+            getFrame.srcdoc =
+              `<base href="${baseUrl}">` +
+              (text || "<p style='font-family:sans-serif'>(Empty Response Body)</p>");
+          } else if (contentType.includes("text/") ||
+                     contentType.includes("application/json") ||
+                     contentType.includes("application/javascript") ||
+                     contentType.includes("application/xml")) {
+            const text = await response.text();
+            const escaped = text
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;");
+            getFrame.srcdoc =
+              `<pre style="white-space:pre-wrap;word-break:break-word;font-family:monospace;padding:16px;">${escaped || "(Empty Response Body)"}</pre>`;
+          } else {
+            const blob = await response.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            getFrame.removeAttribute("srcdoc");
+            getFrame.src = blobUrl;
+          }
+        } catch (error) {
+          getStatus.textContent = "GET " + path + " failed: " + error.message;
+          getStatus.classList.add("err");
+          getFrame.srcdoc =
+            `<p style="color:red;font-family:sans-serif;padding:16px;">GET failed: ${error.message}</p>`;
+        }
       });
 
       /* --- Section 2: File Manager & Drag Upload Script --- */
@@ -801,16 +837,6 @@
       const sessionResult = $("#session-result");
       const sessionResponseWrapper = $("#session-response-wrapper");
       const sessionIframe = $("#session-iframe");
-      const sessionCookieVal = $("#session-cookie-val");
-
-      function syncSessionCookieNotice() {
-        const cookies = document.cookie;
-        if (cookies && cookies.trim() !== "") {
-          sessionCookieVal.textContent = cookies;
-        } else {
-          sessionCookieVal.textContent = "(Protected by HttpOnly or Expired - View Raw Response Headers below)";
-        }
-      }
 
       async function runSessionStep(actionType) {
         let route = "/session/counter";
@@ -880,8 +906,6 @@
 
           sessionResult.textContent = rawResponseText;
 
-          syncSessionCookieNotice();
-
           sessionResponseWrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
         } catch (err) {
@@ -902,7 +926,6 @@
         else runSessionStep('counter');
       });
 
-      syncSessionCookieNotice();
     </script>
 </body>
 
