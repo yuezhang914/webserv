@@ -22,11 +22,10 @@
 #include <sys/stat.h>
 
 /*
-包含：<unistd.h>
-用途：使用 unlink() 删除经过验证的普通文件。
-*/
-#include <unistd.h>
 
+用途：使用 remove() 删除经过验证的普通文件。
+*/
+#include <cstdio>
 /*
 函数：badFileName
 用途：拒绝不能安全作为单个上传/删除文件名的字符串。
@@ -36,9 +35,7 @@
 */
 static bool badFileName(const std::string &name)
 {
-    if (name.empty() || name == "." || name == ".."
-        || name.find('/') != std::string::npos
-        || name.find('\\') != std::string::npos)
+    if (name.empty() || name == "." || name == ".." || name.find('/') != std::string::npos || name.find('\\') != std::string::npos)
         return true;
     size_t i = 0;
     while (i < name.size())
@@ -61,7 +58,7 @@ static bool badFileName(const std::string &name)
     2. stat 失败时立即保存 errno，并映射为对应响应。
     3. 目标存在但不是普通文件时返回 403，禁止删除目录等对象。
     4. 对普通文件提取并验证最后一个 path segment。
-    5. unlink 失败时保存 errno 并映射；成功返回无 body 的 204。
+    5. std::remove 失败时保存 errno 并映射；成功返回无 body 的 204。
 */
 Response handleDelete(const Request &request, const EffectiveRoute &route)
 {
@@ -89,7 +86,7 @@ Response handleDelete(const Request &request, const EffectiveRoute &route)
     if (file.getFileName(route) == FILE_OPERATION_ERROR)
         return file.response;
 
-    if (unlink(file.filePath.c_str()) != 0)
+    if (std::remove(file.filePath.c_str()) != 0)
     {
         int errorNumber = errno;
         file.createDeleteResponse(errorNumber,
@@ -110,19 +107,37 @@ Response handleDelete(const Request &request, const EffectiveRoute &route)
 实现逻辑：分别处理不存在、权限、路径、只读文件系统、目录、过长、占用；未知错误返回 500。
 */
 void FileOperation::createDeleteResponse(int errorNumber,
-    const Response::ErrorPageMap &errorPages)
+                                         const Response::ErrorPageMap &errorPages)
 {
     switch (errorNumber)
     {
-        case ENOENT: response.createResponse(404, "Resource was not found", errorPages); break;
-        case EACCES: response.createResponse(403, "Operation is not allowed", errorPages); break;
-        case ENOTDIR: response.createResponse(404, "Path invalid", errorPages); break;
-        case EROFS: response.createResponse(403, "Server cannot modify resource", errorPages); break;
-        case EPERM: response.createResponse(403, "Operation not permitted", errorPages); break;
-        case EISDIR: response.createResponse(403, "Delete not allowed on directory", errorPages); break;
-        case ENAMETOOLONG: response.createResponse(414, "", errorPages); break;
-        case EBUSY: response.createResponse(423, "Resource is locked or in use", errorPages); break;
-        default: response.createResponse(500, "Unexpected failure", errorPages); break;
+    case ENOENT:
+        response.createResponse(404, "Resource was not found", errorPages);
+        break;
+    case EACCES:
+        response.createResponse(403, "Operation is not allowed", errorPages);
+        break;
+    case ENOTDIR:
+        response.createResponse(404, "Path invalid", errorPages);
+        break;
+    case EROFS:
+        response.createResponse(403, "Server cannot modify resource", errorPages);
+        break;
+    case EPERM:
+        response.createResponse(403, "Operation not permitted", errorPages);
+        break;
+    case EISDIR:
+        response.createResponse(403, "Delete not allowed on directory", errorPages);
+        break;
+    case ENAMETOOLONG:
+        response.createResponse(414, "", errorPages);
+        break;
+    case EBUSY:
+        response.createResponse(423, "Resource is locked or in use", errorPages);
+        break;
+    default:
+        response.createResponse(500, "Unexpected failure", errorPages);
+        break;
     }
 }
 
@@ -137,15 +152,15 @@ int FileOperation::getFileName(const EffectiveRoute &route)
 {
     size_t slash = route.targetPath.find_last_of('/');
     std::string name = slash == std::string::npos
-        ? route.targetPath : route.targetPath.substr(slash + 1);
+                           ? route.targetPath
+                           : route.targetPath.substr(slash + 1);
     if (badFileName(name))
     {
         response.createResponse(400,
-            "A valid filename must be provided in the URI",
-            route.server->error_pages);
+                                "A valid filename must be provided in the URI",
+                                route.server->error_pages);
         return FILE_OPERATION_ERROR;
     }
     fileName = name;
     return FILE_OPERATION_OK;
 }
-
