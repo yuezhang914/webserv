@@ -322,19 +322,7 @@ int RequestParser::advanceChunkedScan(const std::string& buffer,
     }
 }
 
-/*
-函数：scan_chunked_buffer
-用途：供最终完整解析使用，从 body_start 建立一次局部增量状态并扫描到结尾。
-说明：ServerManager 的跨事件扫描使用 advanceChunkedScan 保存进度；本函数不保存状态。
-*/
-int RequestParser::scan_chunked_buffer(const std::string& buffer,
-        size_t body_start, unsigned long body_limit,
-        size_t& decoded_size, size_t& consumed) {
-    size_t scan_pos = body_start;
-    decoded_size = 0;
-    return advanceChunkedScan(buffer, scan_pos, body_limit,
-        decoded_size, consumed);
-}
+
 
 /*
 函数：decode_complete_chunked_body
@@ -384,14 +372,30 @@ int RequestParser::decode_complete_chunked_body(const std::string& buffer,
 为什么修改：学校 tester 会上传 100MB；旧实现每次收到一部分数据都会从头复制全部已收 body，
 导致 O(n²) 拷贝和数百 MB 峰值内存，服务器可能被 bad_alloc/OOM 杀死并让客户端看到 connection reset。
 */
-int RequestParser::parse_chunked_buffer(const std::string& buffer,
-        size_t body_start, unsigned long body_limit,
-        Request& req, size_t& consumed) {
+
+int RequestParser::parse_chunked_buffer(const std::string &buffer,
+                                        size_t body_start,
+                                        unsigned long body_limit,
+                                        Request &req,
+                                        size_t &consumed)
+{
+    size_t scan_pos = body_start;
     size_t decoded_size = 0;
-    int status = scan_chunked_buffer(buffer, body_start, body_limit,
-        decoded_size, consumed);
+
+    // 阶段一：从 body 起点完整扫描并校验 chunked framing，
+    // 同时计算解码后的真实 body 大小。
+    int status = advanceChunkedScan(buffer,
+                                    scan_pos,
+                                    body_limit,
+                                    decoded_size,
+                                    consumed);
     if (status != REQUEST_OK)
         return status;
-    return decode_complete_chunked_body(buffer, body_start,
-        decoded_size, req);
+
+    // 阶段二：确认整个 chunked body 合法后，
+    // 一次性拼接真正的 body 数据。
+    return decode_complete_chunked_body(buffer,
+                                        body_start,
+                                        decoded_size,
+                                        req);
 }

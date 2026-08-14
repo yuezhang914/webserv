@@ -58,9 +58,7 @@ private:
     static int validate_trailer_line(const std::string &line);
     static int find_chunked_trailer_end(const std::string &buffer,
         size_t pos, size_t &consumed);
-    static int scan_chunked_buffer(const std::string &buffer,
-        size_t body_start, unsigned long body_limit,
-        size_t &decoded_size, size_t &consumed);
+    
     static int decode_complete_chunked_body(const std::string &buffer,
         size_t body_start, size_t decoded_size, Request &req);
     static int parse_chunked_buffer(const std::string &buffer,
