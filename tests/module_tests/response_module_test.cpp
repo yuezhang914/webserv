@@ -797,7 +797,7 @@ static void testPost(const ServerConfig &server)
 函数：testDelete
 用途：验证 DELETE 普通文件、query 去除、缺失资源和目录拒绝。
 参数来源：server 来自真实 Config；请求由 parseRequest() 构造。
-变量说明：request/response 复用；pathExists 检查 unlink 结果。
+变量说明：request/response 复用；pathExists 检查 std::remove 结果。
 实现逻辑：依次调用 buildResponse() 并检查状态码、body 边界和磁盘状态。
 */
 static void testDelete(const ServerConfig &server)

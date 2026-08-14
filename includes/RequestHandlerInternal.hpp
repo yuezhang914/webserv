@@ -115,7 +115,7 @@ struct FileOperation
 
     /*
     函数：createDeleteResponse
-    用途：把 unlink 前后的 errno 映射为 DELETE HTTP Response。
+    用途：把 std::remove 前后的 errno 映射为 DELETE HTTP Response。
     参数：errorNumber 是保存的 errno；errorPages 来自 server 配置。
     实现逻辑：成功生成 204，权限/不存在/目录等错误生成对应状态。
     */
