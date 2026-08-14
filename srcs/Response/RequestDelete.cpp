@@ -1,6 +1,6 @@
 /*
 文件：srcs/Response/RequestDelete.cpp
-用途：验证 DELETE 目标文件名、执行普通文件删除，并把 stat/unlink errno 映射成稳定 HTTP 响应。
+用途：验证 DELETE 目标文件名、执行普通文件删除，并把 stat/std::remove errno 映射成稳定 HTTP 响应。
 拆分说明：删除相关函数从原 RequestHandler.cpp 原样移动，不允许删除目录或非普通文件。
 */
 /*
@@ -11,7 +11,7 @@
 
 /*
 包含：<cerrno>
-用途：保存 stat()/unlink() 失败原因并映射 DELETE 状态码。
+用途：保存 stat()/std::remove() 失败原因并映射 DELETE 状态码。
 */
 #include <cerrno>
 
@@ -101,7 +101,7 @@ Response handleDelete(const Request &request, const EffectiveRoute &route)
 
 /*
 函数：FileOperation::createDeleteResponse
-用途：把 stat/unlink 保存的 errno 映射为稳定 HTTP Response。
+用途：把 stat/std::remove 保存的 errno 映射为稳定 HTTP Response。
 参数来源：errorNumber 在失败后立即复制 errno；errorPages 来自 route.server。
 变量说明：无额外局部变量；switch 直接写成员 response。
 实现逻辑：分别处理不存在、权限、路径、只读文件系统、目录、过长、占用；未知错误返回 500。
