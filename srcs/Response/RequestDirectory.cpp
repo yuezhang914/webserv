@@ -53,8 +53,7 @@
 
 static Response createIndexResponse(int fd, const std::string &indexPath,
     bool closeConnection, const Response::ErrorPageMap &errorPages);
-static Response handleAutoIndex(const EffectiveRoute &route,
-    const std::string &requestPath, bool closeConnection);
+
 static Response createAutoIndexResponse(const EffectiveRoute &route,
     const std::string &requestPath, bool closeConnection);
 
@@ -181,10 +180,8 @@ Response handleIndex(const EffectiveRoute &route,
             route.server->error_pages);
     }
 
-    /* 没有可用 index 时，只有显式开启 autoindex 才生成列表。
-       autoindex 关闭按学校 tester 隐藏目录存在性并返回 404。 */
-    if (route.autoindex)
-        return handleAutoIndex(route, requestPath, closeConnection);
+   if (route.autoindex)
+    return createAutoIndexResponse(route, requestPath, closeConnection);
 
     response.createResponse(404, "", route.server->error_pages);
     return response;
@@ -225,19 +222,6 @@ static Response createIndexResponse(int fd,
     return response;
 }
 
-/*
-函数：handleAutoIndex
-用途：为已经确认开启 autoindex 的目录生成安全目录列表。
-参数来源：route/requestPath/closeConnection 来自 handleIndex() 的 route.autoindex=true 分支。
-变量说明：无局部状态；真实目录读取和 HTML 生成交给 createAutoIndexResponse()。
-实现逻辑：直接调用 createAutoIndexResponse()；关闭状态已在 handleIndex() 中统一映射为 404。
-*/
-static Response handleAutoIndex(const EffectiveRoute &route,
-                                const std::string &requestPath,
-                                bool closeConnection)
-{
-    return createAutoIndexResponse(route, requestPath, closeConnection);
-}
 
 /*
 函数：createAutoIndexResponse
