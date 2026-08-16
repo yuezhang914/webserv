@@ -8,11 +8,11 @@
 函数：isWildcardHost
 用途：判断配置中的 host 是否代表所有 IPv4 接口。
 参数来源：serversHaveUniqueListenPairs() 传入 ServerConfig.host。
-实现逻辑：listen 只写端口时保存为 INADDR_ANY；显式 0.0.0.0 也表示通配监听，二者都返回 true。
+实现逻辑：Config 统一用字符串 0.0.0.0 表示 IPv4 通配监听，因此只检查这个标准表示。
 */
 static bool isWildcardHost(const std::string &host)
 {
-    return host == "INADDR_ANY" || host == "0.0.0.0";
+    return host == "0.0.0.0";
 }
 /*
 函数：Config::Config
@@ -26,9 +26,10 @@ static bool isWildcardHost(const std::string &host)
     1. 先把 error 设为 0，表示暂时没有错误。
     2. 调用 parseFile(path)，读取并解析配置文件，把结果放进 servers。
     3. 如果 parseFile 返回 ERROR，说明文件打不开、语法错误或指令非法，打印错误并设置 error=1。
-    4. 如果解析成功，调用 serversHaveRoot() 确认每个 server 都有 root。
+    4. 解析成功后不再强制每个 server 都有 server-level root；location 可以独立提供 root/alias。
     5. 调用 serversHaveUniqueListenPairs()，拒绝重复或会实际冲突的 interface:port。
-    6. 任一整体校验失败都设置 error=1，main 不会创建监听 socket。
+    6. 请求真正需要文件路径时，由 EffectiveRoute 检查 location root、server root 是否可用。
+    7. 任一整体校验失败都设置 error=1，main 不会创建监听 socket。
 后续影响：main() 会检查 config.error；只有没有错误才会继续 setupSockets() 和 serverLoop()。
 */
 Config::Config(const std::string &path)
@@ -43,13 +44,9 @@ Config::Config(const std::string &path)
         return;
     }
 
-    // 第三步：
-    // 对已经生成的所有 ServerConfig 做整体校验。
-    if (serversHaveRoot() == ERROR)
-    {
-        std::cerr << "Error: A server is missing the root directive" << std::endl;
-        this->error = 1;
-    }
+    // 不在 Config 阶段强制 server-level root。
+    // location 可以独立提供 root/alias；真正处理请求时再由 EffectiveRoute
+    // 判断当前请求是否能得到有效的文件系统基础路径。
 
     // 本项目不实现 virtual host。
     // 因此不同 server 不能共享同一个实际监听端点，
@@ -79,29 +76,6 @@ std::vector<ServerConfig> &Config::getServers()
 const std::vector<ServerConfig> &Config::getServers() const
 {
     return servers;
-}
-
-/*
-函数：Config::serversHaveRoot
-用途：检查每个 server 是否有 root 指令。
-变量解释：
-    - servers：Config 的成员变量，保存所有已经解析出的 ServerConfig。
-    - it：遍历 servers 的 const_iterator。
-    - it->has_root：每个 server 是否显式配置过 root 的标志。
-实现逻辑：
-    1. 遍历 servers。
-    2. 如果某个 ServerConfig.has_root 是 false，说明没有配置 root，返回 ERROR。
-    3. 所有 server 都有 root，返回 SUCCESS。
-为什么重要：没有 root 时，Webserv 无法把 /ping.html 映射成 srv/www/ping.html 这种真实文件路径。
-*/
-bool Config::serversHaveRoot() const
-{
-    for (std::vector<ServerConfig>::const_iterator it = servers.begin(); it != servers.end(); ++it)
-    {
-        if (it->has_root == false)
-            return ERROR;
-    }
-    return SUCCESS;
 }
 
 /*
