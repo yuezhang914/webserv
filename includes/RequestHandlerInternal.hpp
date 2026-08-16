@@ -121,14 +121,6 @@ struct FileOperation
     */
     void createDeleteResponse(int errorNumber,
                               const Response::ErrorPageMap &errorPages);
-
-    /*
-    函数：checkContentType
-    用途：判断 POST Content-Type 是否属于当前原始 body 上传支持范围。
-    参数：contentType 来自 Request header。
-    返回：支持返回 FILE_OPERATION_OK；multipart 等未实现类型返回失败。
-    */
-    int checkContentType(const std::string &contentType) const;
 };
 
 #endif
