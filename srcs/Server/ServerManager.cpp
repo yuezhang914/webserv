@@ -832,9 +832,11 @@ void ServerManager::handleCgiRead(int cgiReadFd)
         this->eraseFdFromPoll(cgiReadFd);
         this->cleanupClientWritePipe(res.clientFd);
 
-        Connection *conn = this->_connections[res.clientFd];
-        if (conn)
+        // 🚀 使用 find() 进行安全的只读查询
+        std::map<int, Connection*>::iterator it = this->_connections.find(res.clientFd);
+        if (it != this->_connections.end() && it->second != NULL)
         {
+            Connection *conn = it->second;
             Response cgiResponse = buildCgiResponse(conn->request, res.rawOutput);
             conn->response = cgiResponse;
             conn->write_buffer = cgiResponse.responseToString();
@@ -848,16 +850,17 @@ void ServerManager::handleCgiRead(int cgiReadFd)
         this->eraseFdFromPoll(cgiReadFd);
         this->cleanupClientWritePipe(res.clientFd);
 
-        Connection *conn = this->_connections[res.clientFd];
-        if (conn)
+        // 🚀 使用 find() 进行安全的只读查询
+        std::map<int, Connection*>::iterator it = this->_connections.find(res.clientFd);
+        if (it != this->_connections.end() && it->second != NULL)
         {
+            Connection *conn = it->second;
             conn->response.createResponse(res.statusCode, "CGI Output Error", conn->config.error_pages);
             conn->write_buffer = conn->response.responseToString();
 
             this->setClientEvents(res.clientFd, POLLOUT);
         }
     }
-
 }
 
 /*
@@ -887,9 +890,10 @@ void ServerManager::handleCgiWrite(int cgiWriteFd)
         this->_cgi_write_fd_to_client_map.erase(cgiWriteFd);
         this->eraseFdFromPoll(cgiWriteFd);
 
-        Connection *conn = this->_connections[res.clientFd];
-        if (conn)
+        std::map<int, Connection*>::iterator it = this->_connections.find(res.clientFd);
+        if (it != this->_connections.end() && it->second != NULL)
         {
+            Connection *conn = it->second;
             conn->response.createResponse(res.statusCode, "CGI Input Write Error", conn->config.error_pages);
             conn->write_buffer = conn->response.responseToString();
             conn->close_after_write = true;

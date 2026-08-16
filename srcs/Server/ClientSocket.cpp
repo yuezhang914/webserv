@@ -57,28 +57,17 @@ void ClientSocket::setNonBlocking()
     if (this->_fd < 0)
         return;
 
-    int flags = fcntl(this->_fd, F_GETFL, 0);
-    if (flags < 0)
-    {
-        std::cerr << "Error: fcntl F_GETFL failed for client fd " << this->_fd << std::endl;
-        return;
-    }
-    if (fcntl(this->_fd, F_SETFL, flags | O_NONBLOCK) < 0)
+    // 🚀 唯一合规写法：直接覆写标志位为 O_NONBLOCK，剔除 F_GETFL
+    if (fcntl(this->_fd, F_SETFL, O_NONBLOCK) < 0)
     {
         std::cerr << "Error: fcntl F_SETFL O_NONBLOCK failed for client fd " << this->_fd << std::endl;
+        // 视你的架构而定，这里也许需要 throw 异常或 close 掉 FD
         return;
     }
 
-    int fd_flags = fcntl(this->_fd, F_GETFD, 0);
-    if (fd_flags < 0)
-    {
-        std::cerr << "Error: fcntl F_GETFD failed for client fd " << this->_fd << std::endl;
-        return;
-    }
-    if (fcntl(this->_fd, F_SETFD, fd_flags | FD_CLOEXEC) < 0)
-    {
-        std::cerr << "Error: fcntl F_SETFD FD_CLOEXEC failed for client fd " << this->_fd << std::endl;
-    }
+    // ⛔️ 彻底删除 F_GETFD, F_SETFD 和 FD_CLOEXEC
+    // 因为你在执行 CGI (fork) 时，已经写了 for (i = 3; i < max_fd; ++i) close(i); 
+    // 那个盲关循环会自动把这些 Client FD 全部从子进程里清理掉，完全不需要 FD_CLOEXEC！
 }
 
 /**
@@ -109,7 +98,7 @@ ssize_t ClientSocket::write(const std::string &data) const
 {
     if (data.empty())
         return 0;
-    return ::send(this->_fd, data.data(), data.size(), MSG_NOSIGNAL);
+    return ::send(this->_fd, data.data(), data.size(), 0);
 }
 
 /**
