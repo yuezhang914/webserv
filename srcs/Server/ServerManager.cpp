@@ -80,7 +80,7 @@ void ServerManager::init()
 */
 void ServerManager::setupSockets()
 {
-    std::vector<std::pair<std::string, int>> handled_endpoints;
+    std::vector<std::pair<std::string, int> > handled_endpoints;
 
     for (size_t i = 0; i < _server_configs.size(); ++i)
     {
@@ -357,17 +357,16 @@ void ServerManager::processParsedRequest(Connection *conn, int clientFd)
 static bool requestUsesChunkedBody(const Request &request)
 {
     std::string value;
-    size_t start = 0;
-    std::string normalized = value.substr(start, end - start);
-    size_t i = 0;
-
     if (!request.getHeader("transfer-encoding", value))
         return false;
+    size_t start = 0;
     while (start < value.size() && (value[start] == ' ' || value[start] == '\t'))
         ++start;
     size_t end = value.size();
     while (end > start && (value[end - 1] == ' ' || value[end - 1] == '\t'))
         --end;
+    std::string normalized = value.substr(start, end - start);
+    size_t i = 0;
     while (i < normalized.size())
     {
         if (normalized[i] >= 'A' && normalized[i] <= 'Z')
