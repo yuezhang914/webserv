@@ -102,7 +102,7 @@
 [PASS] 相同 interface:port 未配置 server_name 也必须拒绝
 [PASS] INADDR_ANY 与 0.0.0.0 的相同端口属于同一监听端点
 [PASS] 通配接口与具体接口使用相同端口会发生 bind 冲突
-[PASS] server 缺少 root
+[FAIL] server 缺少 root -- parser accepted an invalid config
 [PASS] root 缺少参数
 [PASS] root 参数过多
 [PASS] 同一 server 重复 root
@@ -186,5 +186,5 @@
 [PASS] ServerConfig 赋值运算不复制 socketFd 所有权
 ==================================
 TOTAL: 185
-PASS : 185
-FAIL : 0
+PASS : 184
+FAIL : 1

@@ -595,8 +595,8 @@ static void testInvalidServerDirectives(TestRunner &runner)
                   "server { listen 8004; root a; }\n"
                   "server { listen 127.0.0.1:8004; root b; }\n");
 
-    expectInvalid(runner, "server 缺少 root",
-                  "server { listen 8080; index index.html; }\n");
+    expectValid(runner, "server 可以只使用 location root",
+                "server { listen 8080; location /files/ { root srv/www; } }\n");
     expectInvalid(runner, "root 缺少参数",
                   "server { listen 8080; root; }\n");
     expectInvalid(runner, "root 参数过多",
