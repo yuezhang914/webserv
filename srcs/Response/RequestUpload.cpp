@@ -229,33 +229,3 @@ std::string FileOperation::generateUniqueFilename(
     }
     return fullPath;
 }
-
-/*
-函数：FileOperation::checkContentType
-用途：判断原始 body 上传当前支持的 media type，并明确拒绝尚未实现的 multipart/form-data。
-参数来源：contentType 来自 Request.getHeader("content-type")。
-变量说明：value 是小写副本；semicolon 去参数；begin/end 用于清除两端 OWS。
-实现逻辑：去掉 ; 后参数和两端 OWS，只允许 octet-stream、urlencoded、json 和 text/plain。
-*/
-int FileOperation::checkContentType(const std::string &contentType) const
-{
-    std::string value = requestHandlerToLowerAscii(contentType);
-    size_t semicolon = value.find(';');
-    if (semicolon != std::string::npos)
-        value = value.substr(0, semicolon);
-    size_t begin = 0;
-    while (begin < value.size()
-        && (value[begin] == ' ' || value[begin] == '\t'))
-        ++begin;
-    size_t end = value.size();
-    while (end > begin
-        && (value[end - 1] == ' ' || value[end - 1] == '\t'))
-        --end;
-    value = value.substr(begin, end - begin);
-    if (value == "application/octet-stream"
-        || value == "application/x-www-form-urlencoded"
-        || value == "application/json"
-        || value == "text/plain")
-        return FILE_OPERATION_OK;
-    return FILE_OPERATION_ERROR;
-}
