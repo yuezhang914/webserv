@@ -258,21 +258,21 @@ private:
     函数：generateUniqueId
     用途：生成当前 store 中不存在的新 Session ID。
     参数：sessionId 是输出变量。
-    逻辑：有限次数读取随机字节并编码为十六进制，找到未占用 ID 后返回 true。
+    逻辑：有限次数生成伪随机字节并编码为十六进制，找到未占用 ID 后返回 true。
     */
     bool generateUniqueId(std::string &sessionId) const;
 
     /*
     函数：fillRandomBytes
-    用途：从系统随机源填满指定缓冲区。
-    参数：buffer 指向调用方数组；length 是需要读取的字节数。
-    逻辑：打开 /dev/urandom，循环 read 直到填满，并在所有分支关闭 fd。
+    用途：不用文件描述符，为 Session ID 填满指定长度的伪随机字节。
+    参数：buffer 指向调用方数组；length 是需要生成的字节数。
+    逻辑：用时间、CPU 时钟、进程内计数器和无符号整数状态生成字节，不执行 open/read/write。
     */
     static bool fillRandomBytes(unsigned char *buffer, size_t length);
 
     /*
     函数：bytesToHex
-    用途：把随机二进制字节转换成 Cookie 安全的小写十六进制字符串。
+    用途：把生成的二进制字节转换成 Cookie 安全的小写十六进制字符串。
     参数：buffer/length 来自 fillRandomBytes() 的结果。
     逻辑：每个字节追加两个十六进制字符。
     */

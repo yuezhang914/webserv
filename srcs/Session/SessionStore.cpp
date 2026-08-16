@@ -1,9 +1,9 @@
 /*
 文件：srcs/Session/SessionStore.cpp
-用途：实现内存 SessionStore，包括随机 ID、生命周期、滑动过期、容量限制、键值操作、ID 轮换和过期回收。
+用途：实现内存 SessionStore，包括 Session ID、生命周期、滑动过期、容量限制、键值操作、ID 轮换和过期回收。
 设计原则：外部不能取得内部记录指针；每次操作都经过 ID 格式和过期检查；失败时尽量保持原数据与输出状态明确。
-随机来源：读取 /dev/urandom 的 32 字节并编码成 64 位小写十六进制；随机源失败时拒绝创建，不退化为时间戳 ID。
-标准限制：实现保持 C++98，只使用标准库以及 Subject 允许的 open、read 和 close。
+ID 来源：使用 std::time、std::clock、进程内计数器和简单算术伪随机状态生成 32 字节，再编码成 64 位小写十六进制；最终由 _sessions 检查唯一性。
+标准限制：实现保持 C++98；Session ID 生成不打开设备文件，也不执行额外的 fd read/write。
 */
 
 /*
@@ -13,22 +13,10 @@
 #include "SessionStore.hpp"
 
 /*
-包含：<fcntl.h>
-用途：使用 O_RDONLY 和 open() 打开系统随机源。
-*/
-#include <fcntl.h>
-
-/*
 包含：<limits>
 用途：使用 std::numeric_limits<std::time_t>::max() 防止过期时间加法溢出。
 */
 #include <limits>
-
-/*
-包含：<unistd.h>
-用途：使用 read() 填充随机缓冲区，并使用 close() 释放文件描述符。
-*/
-#include <unistd.h>
 
 /*
 包含：<utility>
@@ -145,37 +133,44 @@ void SessionStore::refresh(SessionRecord &record, std::time_t now) const
 
 /*
 函数：SessionStore::fillRandomBytes
-用途：从系统随机源读取指定长度字节，用于生成不可预测 Session ID。
+用途：不用任何文件描述符，为 Session ID 填充指定长度的伪随机字节。
 参数：buffer 是调用方传入的可写数组；length 是需要填充的字节数。
-变量：fd 是随机源文件描述符；offset 是已读取长度；bytesRead 是单次 read 结果。
-实现逻辑：打开 /dev/urandom，循环读取直到填满；0、负值或打开失败都返回 false，并保证 fd 被关闭。
+变量：state 保存进程内伪随机状态；generationCounter 区分连续调用；i 是当前写入位置。
+实现逻辑：首次调用用当前时间和 CPU 时钟建立状态；每次调用混入递增计数器，再用 C++98 可用的无符号整数运算逐字节更新状态并写入 buffer。
 */
 bool SessionStore::fillRandomBytes(unsigned char *buffer, size_t length)
 {
     if (buffer == NULL || length == 0)
         return false;
-    int fd = open("/dev/urandom", O_RDONLY | O_NONBLOCK);
-    if (fd < 0)
-        return false;
-    size_t offset = 0;
-    while (offset < length)
+    static unsigned long state = 0;
+    static unsigned long generationCounter = 0;
+    if (state == 0)
     {
-        ssize_t bytesRead = read(fd, buffer + offset, length - offset);
-        if (bytesRead <= 0)
-        {
-            close(fd);
-            return false;
-        }
-        offset += static_cast<size_t>(bytesRead);
+        state = static_cast<unsigned long>(std::time(NULL));
+        state ^= static_cast<unsigned long>(std::clock());
+        state ^= 0x9E3779B9UL;
+        if (state == 0)
+            state = 0xA5A5A5A5UL;
     }
-    close(fd);
+    ++generationCounter;
+    state ^= generationCounter * 2654435761UL;
+    size_t i = 0;
+    while (i < length)
+    {
+        state = state * 1664525UL + 1013904223UL;
+        state ^= state >> 13;
+        state *= 2246822519UL;
+        state ^= state >> 16;
+        buffer[i] = static_cast<unsigned char>(state & 0xFFUL);
+        ++i;
+    }
     return true;
 }
 
 /*
 函数：SessionStore::bytesToHex
-用途：把随机字节转换成 Cookie 安全的小写十六进制文本。
-参数：buffer 是随机字节数组；length 是数组有效长度。
+用途：把生成的伪随机字节转换成 Cookie 安全的小写十六进制文本。
+参数：buffer 是生成的字节数组；length 是数组有效长度。
 变量：hex 是字符表；result 是输出字符串；i 是字节下标。
 实现逻辑：每个字节拆为高四位和低四位，各追加一个字符。
 */
@@ -221,8 +216,8 @@ bool SessionStore::isValidSessionId(const std::string &sessionId)
 函数：SessionStore::generateUniqueId
 用途：生成当前 store 中尚未使用的合法 Session ID。
 参数：sessionId 是调用方提供的输出变量。
-变量：randomBytes 保存 32 字节随机数；attempt 限制碰撞重试；candidate 是编码后的候选值。
-实现逻辑：最多尝试 32 次；读取、编码并查 map，不冲突时输出；任何异常或随机源失败都清空输出并返回 false。
+变量：randomBytes 保存 32 字节伪随机数据；attempt 限制碰撞重试；candidate 是编码后的候选值。
+实现逻辑：最多尝试 32 次；生成字节、编码并查 map，不冲突时输出；任何异常或生成失败都清空输出并返回 false。
 */
 bool SessionStore::generateUniqueId(std::string &sessionId) const
 {
