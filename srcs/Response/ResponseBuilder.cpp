@@ -114,11 +114,8 @@ static std::string buildAllowHeader(const std::set<std::string> &allowMethods)
     - path：RequestParser 已解码、规范化并去掉 query 的 request.getPath()。
     - interpreter：输出引用；成功时写入 cgi_extensions value，空值表示脚本自身可直接执行。
 变量说明：it 遍历后缀到解释器的映射；extension 是当前后缀。
-实现逻辑：没有 CGI 配置时返回 false；逐个比较完整文件后缀；命中后写出解释器并返回 true。
+实现逻辑：没有 CGI 配置时返回 false；逐个比较完整文件后缀；命中后原样保存配置的解释器路径并返回 true。路径存在性和执行权限由 validateCgiScript() 统一检查。
 */
-
-#include <limits.h>
-#include <stdlib.h>
 
 static bool findConfiguredCgiInterpreter(const LocationConfig *location,
                                          const std::string &path,
@@ -137,19 +134,8 @@ static bool findConfiguredCgiInterpreter(const LocationConfig *location,
             path.size() >= extension.size() &&
             path.compare(path.size() - extension.size(), extension.size(), extension) == 0)
         {
-            std::string rawInterpreter = it->second;
-
-            // 💡 将配置的解释器路径直接转为系统绝对路径
-            char absPath[PATH_MAX];
-            if (realpath(rawInterpreter.c_str(), absPath) != NULL)
-            {
-                interpreter = std::string(absPath);
-            }
-            else
-            {
-                // 如果 realpath 转换失败（说明物理文件确实不存在），退回原始路径
-                interpreter = rawInterpreter;
-            }
+            // 直接保留配置中的解释器路径；存在性和执行权限由 validateCgiScript() 统一检查。
+            interpreter = it->second;
             return true;
         }
         ++it;
@@ -331,10 +317,7 @@ Response buildResponse(const Request &request,
 
     if (action == ACTION_UNSUPPORTED)
     {
-        response.createResponse(
-            501,
-            "",
-            route.server->error_pages);
+        response.createResponse(501, "", route.server->error_pages);
         return response;
     }
 
@@ -497,9 +480,61 @@ Response buildResponse(const Request &request,
 
         if (!cgiInterpreter.empty())
         {
+            std::string executableInterpreter = cgiInterpreter;
+
+            /*
+             * CgiHandler 会先 chdir() 到脚本目录再 execve()。
+             * 绝对解释器路径可直接使用；当脚本路径和解释器路径都为相对路径时，
+             * 先退回启动 webserv 时的工作目录，保持配置文件原本的含义。
+             */
+            if (cgiInterpreter[0] != '/' && !route.targetPath.empty() &&
+                route.targetPath[0] != '/')
+            {
+                size_t slashPos = route.targetPath.find_last_of('/');
+                std::string scriptDirectory =
+                    slashPos == std::string::npos
+                        ? "."
+                        : route.targetPath.substr(0, slashPos);
+                size_t depth = 0;
+                size_t pos = 0;
+                while (pos < scriptDirectory.size())
+                {
+                    while (pos < scriptDirectory.size() &&
+                           scriptDirectory[pos] == '/')
+                        ++pos;
+                    size_t end = scriptDirectory.find('/', pos);
+                    if (end == std::string::npos)
+                        end = scriptDirectory.size();
+                    std::string part = scriptDirectory.substr(pos, end - pos);
+                    if (!part.empty() && part != ".")
+                    {
+                        if (part == "..")
+                        {
+                            if (depth > 0)
+                                --depth;
+                        }
+                        else
+                            ++depth;
+                    }
+                    pos = end;
+                }
+
+                executableInterpreter.clear();
+                size_t i = 0;
+                while (i < depth)
+                {
+                    executableInterpreter += "../";
+                    ++i;
+                }
+                if (cgiInterpreter.compare(0, 2, "./") == 0)
+                    executableInterpreter += cgiInterpreter.substr(2);
+                else
+                    executableInterpreter += cgiInterpreter;
+            }
+
             response.setHeader(
                 "X-Internal-CGI-Interpreter",
-                cgiInterpreter);
+                executableInterpreter);
         }
 
         response.setHeader(

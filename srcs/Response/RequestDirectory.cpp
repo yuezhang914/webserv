@@ -35,7 +35,7 @@
 
 /*
 包含：<sys/stat.h>
-用途：使用 stat() 和 S_ISDIR 判断目录项类型。
+用途：使用 stat()、S_ISDIR 和 S_ISREG 检查目录项与 index 文件类型。
 */
 #include <sys/stat.h>
 
@@ -166,7 +166,7 @@ Response handleIndex(const EffectiveRoute &route,
         }
 
         struct stat fileInfo;
-        if (fstat(fd, &fileInfo) != 0)
+        if (stat(indexPath.c_str(), &fileInfo) != 0)
         {
             close(fd);
             response.createResponse(500, "", route.server->error_pages);
