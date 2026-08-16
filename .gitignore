@@ -7,6 +7,6 @@
 obj/
 tests/evaluation/.runtime/
 tester_data/
-
+tests/module_tests/.build/
 
 webserv

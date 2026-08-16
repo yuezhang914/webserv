@@ -52,10 +52,10 @@
 #include <vector>
 
 static Response createIndexResponse(int fd, const std::string &indexPath,
-    bool closeConnection, const Response::ErrorPageMap &errorPages);
+                                    bool closeConnection, const Response::ErrorPageMap &errorPages);
 
 static Response createAutoIndexResponse(const EffectiveRoute &route,
-    const std::string &requestPath, bool closeConnection);
+                                        const std::string &requestPath, bool closeConnection);
 
 /*
 函数：escapeHtml
@@ -70,12 +70,18 @@ static std::string escapeHtml(const std::string &text)
     size_t i = 0;
     while (i < text.size())
     {
-        if (text[i] == '&') output += "&amp;";
-        else if (text[i] == '<') output += "&lt;";
-        else if (text[i] == '>') output += "&gt;";
-        else if (text[i] == '"') output += "&quot;";
-        else if (text[i] == '\'') output += "&#39;";
-        else output += text[i];
+        if (text[i] == '&')
+            output += "&amp;";
+        else if (text[i] == '<')
+            output += "&lt;";
+        else if (text[i] == '>')
+            output += "&gt;";
+        else if (text[i] == '"')
+            output += "&quot;";
+        else if (text[i] == '\'')
+            output += "&#39;";
+        else
+            output += text[i];
         ++i;
     }
     return output;
@@ -96,9 +102,7 @@ static std::string encodePathSegment(const std::string &name)
     while (i < name.size())
     {
         unsigned char c = static_cast<unsigned char>(name[i]);
-        bool unreserved = (c >= 'A' && c <= 'Z')
-            || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
-            || c == '-' || c == '.' || c == '_' || c == '~';
+        bool unreserved = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '_' || c == '~';
         if (unreserved)
             output += static_cast<char>(c);
         else
@@ -111,7 +115,6 @@ static std::string encodePathSegment(const std::string &name)
     }
     return output;
 }
-
 
 /*
 函数：handleIndex
@@ -126,8 +129,8 @@ static std::string encodePathSegment(const std::string &name)
     5. 全部失败且 autoindex 开启时生成目录列表；关闭时按学校 tester 返回 404。
 */
 Response handleIndex(const EffectiveRoute &route,
-                    const std::string &requestPath,
-                    bool closeConnection)
+                     const std::string &requestPath,
+                     bool closeConnection)
 {
     Response response(closeConnection);
 
@@ -155,8 +158,7 @@ Response handleIndex(const EffectiveRoute &route,
                 ++i;
                 continue;
             }
-            if (errno == EACCES || errno == EPERM || errno == ELOOP
-                || errno == ENAMETOOLONG)
+            if (errno == EACCES || errno == EPERM || errno == ELOOP || errno == ENAMETOOLONG)
                 response.createResponse(403, "", route.server->error_pages);
             else
                 response.createResponse(500, "", route.server->error_pages);
@@ -177,11 +179,11 @@ Response handleIndex(const EffectiveRoute &route,
             continue;
         }
         return createIndexResponse(fd, indexPath, closeConnection,
-            route.server->error_pages);
+                                   route.server->error_pages);
     }
 
-   if (route.autoindex)
-    return createAutoIndexResponse(route, requestPath, closeConnection);
+    if (route.autoindex)
+        return createAutoIndexResponse(route, requestPath, closeConnection);
 
     response.createResponse(404, "", route.server->error_pages);
     return response;
@@ -221,7 +223,6 @@ static Response createIndexResponse(int fd,
     }
     return response;
 }
-
 
 /*
 函数：createAutoIndexResponse
