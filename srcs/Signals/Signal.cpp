@@ -1,11 +1,16 @@
 /*
-文件：srcs/Utils/Signal.cpp
-信号处理实现。用于 Ctrl+C 时通知 serverLoop 退出。
+文件：srcs/Signals/Signal.cpp
+信号处理实现。用于 Ctrl+C、SIGTERM 或 Ctrl+\\ 时通知 serverLoop 退出，
+并忽略 SIGPIPE，防止向已经断开的 socket 写入时导致程序退出。
 */
 #include "Webserv.hpp"
 
 volatile sig_atomic_t g_loop_running;
 
+/*
+函数：handleSignal
+用途：处理需要结束服务器主循环的信号，只修改全局运行标志，不做其他复杂操作。
+*/
 static void handleSignal(int sig)
 {
     // 捕获 SIGINT (Ctrl+C)、SIGTERM (kill pid) 以及 SIGQUIT (Ctrl+\)
@@ -16,26 +21,17 @@ static void handleSignal(int sig)
     }
 }
 
+/*
+函数：setupSignalHandlers
+用途：使用 subject 允许的 signal() 注册退出信号，并忽略 SIGPIPE。
+*/
 void setupSignalHandlers()
 {
-    struct sigaction sa;
-    std::memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = handleSignal;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
+    // 捕获 Ctrl+C、kill 命令以及 Ctrl+\，统一交给 handleSignal 处理
+    signal(SIGINT, handleSignal);
+    signal(SIGTERM, handleSignal);
+    signal(SIGQUIT, handleSignal);
 
-    /*
-        捕获 Ctrl+C、kill 命令以及 Ctrl+\
-    */ 
-    sigaction(SIGINT, &sa, NULL);
-    sigaction(SIGTERM, &sa, NULL);
-    sigaction(SIGQUIT, &sa, NULL); 
-
-    // 2. 忽略 SIGPIPE（防止向断开的 socket 写入时崩溃）
-    struct sigaction sa_pipe;
-    std::memset(&sa_pipe, 0, sizeof(sa_pipe));
-    sa_pipe.sa_handler = SIG_IGN;
-    sigemptyset(&sa_pipe.sa_mask);
-    sa_pipe.sa_flags = 0;
-    sigaction(SIGPIPE, &sa_pipe, NULL);
+    // 忽略 SIGPIPE，防止向已经断开的 socket 写入时导致服务器异常退出
+    signal(SIGPIPE, SIG_IGN);
 }
