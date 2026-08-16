@@ -458,14 +458,15 @@ void CgiManager::removeTaskByClientFd(int clientFd)
         CgiTask &task = current->second;
         if (task.clientFd == clientFd)
         {
-            std::cout << "[CgiManager] Client FD " << clientFd
-                      << " disconnected early. Force killing CGI PID " << task.pid << std::endl;
+            // 🚀 替换为 DEBUG_LOG：压测断开时保持终端清净
+            DEBUG_LOG("[CgiManager] Client FD " << clientFd 
+                      << " disconnected early. Force killing CGI PID " << task.pid);
+            
             this->forceKillAndClean(task);
             return;
         }
     }
 }
-
 /*
 函数：CgiManager::hasWriteTask
 用途：查询指定的 CGI 管道写端文件描述符（cgiWriteFd）是否仍处于活跃的 POST Body 写入任务队列中。

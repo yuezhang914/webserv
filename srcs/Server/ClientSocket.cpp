@@ -39,7 +39,7 @@ void ClientSocket::closeFd()
 {
     if (this->_fd >= 0)
     {
-        std::cout << "[ClientSocket] RAII Closing FD: " << this->_fd << std::endl;
+        DEBUG_LOG("[ClientSocket] RAII Closing FD: " << this->_fd);
         close(this->_fd);
         this->_fd = -1;
     }
