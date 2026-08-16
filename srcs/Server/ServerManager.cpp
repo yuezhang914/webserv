@@ -81,37 +81,47 @@ void ServerManager::init()
 3. 账本入籍与反查绑定：将生成的 ListenFD 塞进资产舱，同时在 _listen_socket_map 账本里留下因果烙印，确保新进线客户端能精准识别自己归属于哪台虚拟主机。
 4. 挂载元老级哨兵：实例化 struct pollfd，注入 POLLIN 读雷达方向，物理清空回执层，将其作为地基骨架 push_back 灌入核心名册，正式拉开帝国防御网序幕！
 */
+#include <utility> // 必须引入，为了使用 std::pair 和 std::make_pair
+
 void ServerManager::setupSockets()
 {
-    std::vector<int> handled_ports;
+    // 将去重容器改为 std::pair，记录 (host, port)
+    std::vector< std::pair<std::string, int> > handled_endpoints;
 
     for (size_t i = 0; i < _server_configs.size(); ++i)
     {
         int port = _server_configs[i].port;
         std::string host = _server_configs[i].host;
 
-        bool port_duplicate = false;
-        for (size_t p = 0; p < handled_ports.size(); ++p)
+        bool is_duplicate = false;
+        // 按照 (host, port) 进行遍历查重
+        for (size_t p = 0; p < handled_endpoints.size(); ++p)
         {
-            if (handled_ports[p] == port)
+            if (handled_endpoints[p].first == host && handled_endpoints[p].second == port)
             {
-                port_duplicate = true;
+                is_duplicate = true;
                 break;
             }
         }
-        if (port_duplicate)
+
+        if (is_duplicate)
         {
-            std::cout << "[ServerManager] Multi-server configuration detected for port " << port << " (Skipping duplicate bind)" << std::endl;
+            std::cout << "[ServerManager] Multi-server configuration detected for " 
+                      << host << ":" << port << " (Skipping duplicate bind)" << std::endl;
             continue;
         }
 
         ServerSocket *srv_sock = new ServerSocket(host, port);
         srv_sock->setup();
         int listenFd = srv_sock->getFd();
-        std::cout << "[ServerManager] Successfully listening on " << host << ":" << port << " (FD: " << listenFd << ")" << std::endl;
+        std::cout << "[ServerManager] Successfully listening on " 
+                  << host << ":" << port << " (FD: " << listenFd << ")" << std::endl;
 
         this->_listen_sockets.push_back(srv_sock);
-        handled_ports.push_back(port);
+        
+        // 🚀 将新的 (host, port) 组合推入已处理列表
+        handled_endpoints.push_back(std::make_pair(host, port));
+        
         _listen_socket_map[listenFd] = _server_configs[i];
 
         struct pollfd pfd;

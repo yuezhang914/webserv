@@ -120,95 +120,92 @@ bool CgiManager::launchTask(
 
 /*
 函数：CgiManager::handlePipeRead
-用途：非阻塞地读取 CGI 子进程吐出的 stdout 数据流，并维护缓冲与防爆流控制。
+用途：非阻塞地读取 CGI 子进程吐出的 stdout 数据流。每次事件仅进行单次读取以保障 Reactor 主线程并发公平性，并维护缓冲与防爆流控制。
 参数：
     - int cgiReadFd: 监听到的就绪 CGI 管道读端文件描述符。
 返回值：
     - CgiEventResult: 状态结果对象。
-      - CGI_CONTINUE: 数据未完结或已非阻塞读空，指示 Reactor 继续监听。
+      - CGI_CONTINUE: 成功读取数据块或遇到非阻塞中断，指示 Reactor 将控制权收回并继续监听下一次事件。
       - CGI_FINISHED: 收到 EOF (0 字节)，CGI 执行完工，返回打包好输出的 200 结果。
       - CGI_ERROR   : CGI 输出超过 16MB 天花板，触发防爆流熔断，强杀并返回 502 错误。
 实现逻辑或说明：
     1. 查账与防卫：若在 _read_fd_to_task_map 中未找到任务，安全 ::close(cgiReadFd) 并返回 CGI_CONTINUE 兜底。
-    2. 循环非阻塞读取：使用 4000 字节缓冲区在 while 循环中调用 ::read(cgiReadFd)。
+    2. 单次非阻塞读取：剔除 while(true) 循环，契合 Level-Triggered (水平触发) 模型，每次仅用缓冲区调用一次 ::read(cgiReadFd)。避免大文件读取霸占 CPU，拖垮其他连接。
     3. 防爆流熔断：检测 outputBuffer 尺寸，若超过 CGI_MAX_OUTPUT_SIZE (16MB)，调用 forceKillAndClean 强杀进程并返回 CGI_ERROR (502)。
     4. 正常 EOF 完工（bytesRead == 0）：
        - 构建 CGI_FINISHED 状态的 CgiEventResult 对象；
        - 利用 std::string::swap 进行 O(1) 零拷贝指针转移（result.rawOutput.swap(task.outputBuffer)）；
        - 调用 forceKillAndClean 回收资源并返回结果。
-    5. 缓冲区读空（bytesRead < 0）：跳出循环，返回 CGI_CONTINUE，等待下一个 poll 。
+    5. 读取异常妥协（bytesRead < 0）：严格遵守 42 sujet 不可使用 errno 的限制，对于 -1 不作区分，直接当作虚假唤醒或中断返回 CGI_CONTINUE。真正的致命故障交由外层 Timeout Manager 通过超时机制兜底清理。
 */
-
 CgiEventResult CgiManager::handlePipeRead(int cgiReadFd)
 {
     std::map<int, CgiTask>::iterator it = this->_read_fd_to_task_map.find(cgiReadFd);
     if (it == this->_read_fd_to_task_map.end())
     {
-        // 找不到说明该管道已被清理，直接关闭防泄漏
         ::close(cgiReadFd);
         return CgiEventResult(CGI_CONTINUE);
     }
 
     CgiTask &task = it->second;
-    int clientFd = task.clientFd; // 提前提取基本类型，防止被 erase 后引用失效
+    int clientFd = task.clientFd;
     char buffer[4096];
 
-    while (true)
+    // 🚀 去掉 while(true)，每次事件只发起一次 read
+    ssize_t bytesRead = ::read(cgiReadFd, buffer, sizeof(buffer));
+
+    if (bytesRead > 0)
     {
-        ssize_t bytesRead = ::read(cgiReadFd, buffer, sizeof(buffer));
-
-        if (bytesRead > 0)
+        // 读到数据，更新活跃时间并存入 buffer
+        task.lastActivity = std::time(NULL);
+        
+        if (task.outputBuffer.size() + static_cast<size_t>(bytesRead) > CGI_MAX_OUTPUT_SIZE)
         {
-            // 只有真正读到数据才刷新活跃时间
-            task.lastActivity = std::time(NULL);
-
-            if (task.outputBuffer.size() + static_cast<size_t>(bytesRead) > CGI_MAX_OUTPUT_SIZE)
-            {
-                std::cerr << "[CgiManager] Error: CGI output size exceeded max limit! 502." << std::endl;
-                this->forceKillAndClean(task);
-                return CgiEventResult(CGI_ERROR, clientFd, 502);
-            }
-
-            task.outputBuffer.append(buffer, static_cast<size_t>(bytesRead));
-            continue;
-        }
-        else if (bytesRead == 0)
-        {
-            // 正常读取完毕 (EOF：CGI 子进程关闭了 stdout 管道)
-            CgiEventResult result(CGI_FINISHED, clientFd, 200);
-            result.rawOutput.swap(task.outputBuffer);
-
-            // 彻底清理此 Task（回收 pid、close fd、erase map）
+            std::cerr << "[CgiManager] Error: CGI output size exceeded max limit! 502." << std::endl;
             this->forceKillAndClean(task);
-            return result;
+            return CgiEventResult(CGI_ERROR, clientFd, 502);
         }
-        else
-        {
-            // 🚀 不检查 errno！
-            // bytesRead < 0 说明当前非阻塞缓冲区已被掏空 (EAGAIN)，或者收到信号打断。
-            // 直接退出内层循环，保留连接并等待下次 EPOLLIN 事件即可。
-            break;
-        }
-    }
 
-    return CgiEventResult(CGI_CONTINUE);
+        task.outputBuffer.append(buffer, static_cast<size_t>(bytesRead));
+        
+        // 把控制权交还给主事件循环。如果管道里还有数据，下一次 select 依然会触发这个 fd 的 POLLIN
+        return CgiEventResult(CGI_CONTINUE);
+    }
+    else if (bytesRead == 0)
+    {
+        // CGI 子进程输出结束，关闭了管道
+        CgiEventResult result(CGI_FINISHED, clientFd, 200);
+        result.rawOutput.swap(task.outputBuffer);
+        
+        this->forceKillAndClean(task);
+        return result;
+    }
+    else 
+    {
+        // bytesRead < 0
+        // 在不查 errno 且仅读一次的架构下，-1 可能是偶发的虚假唤醒(Spurious Wakeup)或系统中断。
+        // 直接安全返回，什么也不做，让超时管理器(Timeout Manager)兜底即可。
+        return CgiEventResult(CGI_CONTINUE);
+    }
 }
 
 /*
 函数：CgiManager::handlePipeWrite
-用途：非阻塞地向 CGI 子进程的 stdin 管道写入 POST Request Body 数据。
+用途：非阻塞地向 CGI 子进程的 stdin 管道写入 POST Request Body 数据。每次事件仅进行单次限定大小的写入，以保证 Reactor 整体并发的公平性。
 参数：
     - int cgiWriteFd: 监听到的可写 CGI 管道文件描述符（pipe_to_child[1]）。
 返回值：
     - CgiEventResult: 状态结果对象。
-      - CGI_CONTINUE: 表示 Body 正在传输、Body 传输完毕触发 EOF、或短暂等候，主事件循环应继续。
-      - CGI_ERROR   : 表示管道写入遇到物理破裂（如 EPIPE/子进程挂掉），通知 Server 发送 500 错误。
+      - CGI_CONTINUE: 表示 Body 正在正常传输、Body 传输完毕已关闭写端引发 EOF、或写缓冲区暂满（返回值 < 0），指示主事件循环继续。
+      - CGI_ERROR   : 表示遇到致命物理故障（如 write 返回 0 或引用失效），强杀任务并通知 Server 发送 500 错误。
 实现逻辑或说明：
-    1. 先用轻量写端表找到 readFd，再从唯一任务主表取得 CgiTask，避免状态副本分叉。
-    2. inputBody 只读引用 Connection::Request 的 body，不产生 100MB 深拷贝。
-    3. 每轮最多写 64KB，保证公平性；EAGAIN/EWOULDBLOCK/EINTR 都视为正常暂态。
-    4. Body 发完后关闭写端产生 EOF，并只删除 writeFd -> readFd 反查；读端继续等待 CGI stdout。
-    5. 真正的 EPIPE/EBADF 等错误才清理整个任务并返回 500。
+    1. 查账与防卫：先用轻量写端表找到 readFd，再从唯一任务主表取得 CgiTask，避免状态副本分叉。
+    2. 零拷贝引用：inputBody 只读引用 Connection::Request 的 body，不产生大文件深拷贝。
+    3. 公平性控制：每轮最多写 64KB（单次 write），绝不写死循环，保障主进程不被大文件 IO 阻塞。
+    4. 严格区分返回值（应对 Eval sheet 检查）：
+       - [> 0] 正常写入：刷新活跃时间。Body 发完后关闭写端向 CGI 传入 EOF，仅擦除写端映射，保留读端继续监听 CGI stdout。
+       - [== 0] 致命异常：尝试写入却返回 0，意味着对端异常或通道损坏。作为致命错误立即 forceKillAndClean 并返回 500。
+       - [< 0]  无 errno 妥协：受限于 sujet 禁用 errno，不作 EPIPE/EAGAIN 区分，统一视为管道满（暂态），返回 CGI_CONTINUE。真正的管道破裂交由主 Loop 的 EPOLLERR 异常事件或 Timeout Manager 兜底清理。
 */
 CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
 {
@@ -230,9 +227,10 @@ CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
     }
 
     CgiTask &task = readIt->second;
+    int clientFd = task.clientFd; // 提前提取，应对清理时失效
+
     if (task.inputBody == NULL)
     {
-        int clientFd = task.clientFd;
         this->forceKillAndClean(task);
         return CgiEventResult(CGI_ERROR, clientFd, 500);
     }
@@ -240,7 +238,7 @@ CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
     const std::string &body = *task.inputBody;
     size_t bodySize = body.size();
 
-    // 如果 Body 已经发完，关闭写端抛出 EOF
+    // 如果 Body 已经发完，关闭写端抛出 EOF（通知 CGI 脚本输入结束）
     if (task.bodyBytesSent >= bodySize)
     {
         ::close(cgiWriteFd);
@@ -254,14 +252,16 @@ CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
     size_t writeSize = remaining < maxWritePerTick ? remaining : maxWritePerTick;
     const char *dataPtr = body.data() + task.bodyBytesSent;
 
+    // 🚀 核心改动：严格区分 >0, ==0, <0
     ssize_t bytesWritten = ::write(cgiWriteFd, dataPtr, writeSize);
 
     if (bytesWritten > 0)
     {
-        // 只有真正写入 CGI stdin 才算有进展，刷新超时计时
+        // 正常写入，刷新活跃时间并累加进度
         task.lastActivity = std::time(NULL);
         task.bodyBytesSent += static_cast<size_t>(bytesWritten);
 
+        // 如果刚好发完，在此处顺手关闭管道写端
         if (task.bodyBytesSent >= bodySize)
         {
             ::close(cgiWriteFd);
@@ -270,12 +270,25 @@ CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
         }
         return CgiEventResult(CGI_CONTINUE);
     }
-
-    // 🚀 【不看 errno 的核心】：
-    // 当 bytesWritten <= 0 时（无论是暂态 EAGAIN/EWOULDBLOCK 还是管道满），
-    // 统统返回 CGI_CONTINUE，让主循环下一轮继续尝试。
-    // 如果管道确实破裂（如子进程中途退出导致 EPIPE），主 Loop 会检测到 EPOLLERR / EPOLLHUP 并触发清理。
-    return CgiEventResult(CGI_CONTINUE);
+    else if (bytesWritten == 0)
+    {
+        // 异常故障：企图写入 >0 字节数据，系统却返回 0。
+        // 在 write/send 中，这往往意味着对端已断开或管道发生无法恢复的异常。
+        // 必须按致命错误处理，停止 CGI 任务。
+        std::cerr << "[CgiManager] Error: write to CGI pipe returned 0." << std::endl;
+        this->forceKillAndClean(task);
+        return CgiEventResult(CGI_ERROR, clientFd, 500);
+    }
+    else 
+    {
+        // bytesWritten < 0
+        // 在不能读取 errno 的前提下，将其视为非阻塞缓冲区满 (EAGAIN/EWOULDBLOCK)
+        // 暂时放弃写入，让主循环下一轮继续尝试。
+        // 注：若发生 EPIPE（如 CGI 脚本中途崩溃），
+        // 1. 系统可能触发 SIGPIPE，需确保主程序开头已 signal(SIGPIPE, SIG_IGN)
+        // 2. 主循环的 select/poll 会通过异常位报告，或由 TimeoutManager 清理。
+        return CgiEventResult(CGI_CONTINUE);
+    }
 }
 
 /*
@@ -324,7 +337,7 @@ void CgiManager::forceKillAndClean(CgiTask &task)
             int retry = 0;
             while (retry < 10)
             {
-                waited = ::waitpid(pid, &status, 0);
+                waited = ::waitpid(pid, &status, WNOHANG);
                 if (waited == pid)
                 {
                     break; // 成功回收，直接退出
