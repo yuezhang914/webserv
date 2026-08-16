@@ -63,9 +63,12 @@ void ServerManager::init()
     std::cout << "[ServerManager] Initializing network sockets..." << std::endl;
     this->setupSockets();
 
-    ::signal(SIGCHLD, SIG_IGN);
-}
+    // ❌ 删掉这行，把子进程的所有权交还给 CgiManager
+    // ::signal(SIGCHLD, SIG_IGN); 
 
+    // ✅ 必须保留这行：防止客户端暴力断开连接时，write/send 触发 SIGPIPE 杀死主进程
+    ::signal(SIGPIPE, SIG_IGN);
+}
 /*
 函数用途：全量解析服务器配置名册，物理孵化各端口的非阻塞监听套接字（ListenFD），并作为元老级哨兵首批编入多路复用大循环。
 参数与变量：
@@ -162,15 +165,16 @@ void ServerManager::acceptNewConnection(int listenFd)
     {
         return;
     }
+    
     ClientSocket *p_socket = NULL;
     Connection *conn = NULL;
 
     try
     {
-
         p_socket = new ClientSocket(clientFd);
-
         conn = new Connection();
+        
+        // 明确所有权转移：此时 conn 接管了 p_socket
         conn->socket = p_socket;
 
         std::map<int, ServerConfig>::iterator config_it = this->_listen_socket_map.find(listenFd);
@@ -179,9 +183,12 @@ void ServerManager::acceptNewConnection(int listenFd)
             conn->config = config_it->second;
         }
 
+        // 1. 插入 map（此操作可能抛出 std::bad_alloc）
         this->_connections[clientFd] = conn;
 
+        // 2. 注册 poll（若内部使用 vector，可能因扩容抛出 std::bad_alloc）
         this->registerFdToPoll(clientFd, POLLIN);
+
         std::cout << "[ServerManager] Accepted new connection -> Allocated Client FD: "
                   << clientFd << " (SUCCESSFULLY SET O_NONBLOCK!)" << std::endl;
     }
@@ -189,12 +196,29 @@ void ServerManager::acceptNewConnection(int listenFd)
     {
         std::cerr << "[Acceptor] Critical allocation error: " << e.what() << std::endl;
 
-        if (p_socket != NULL)
-            delete p_socket;
-        else
-            ::close(clientFd);
+        // 修复 Bug 2 (Dangling Pointer): 
+        // 无论异常抛出时 conn 是否已经成功进入 map，强制擦除。
+        // 如果 clientFd 不在 map 中，erase() 安全无副作用。
+        this->_connections.erase(clientFd);
+
+        // 🚀 修复 Bug 1 (Double Delete): 
+        // 严格按照构造进度的反向进行清理，互斥分支保证不发生多次 delete
         if (conn != NULL)
+        {
+            // 如果 conn 创建成功，说明所有权已转移，
+            // 直接 delete conn，由 ~Connection() 负责 delete p_socket。
             delete conn;
+        }
+        else if (p_socket != NULL)
+        {
+            // 如果 conn 构造失败抛出异常，此时 p_socket 存在但未被接管，手动释放
+            delete p_socket;
+        }
+        else
+        {
+            // 如果连 ClientSocket 构造都失败了，此时只剩一个刚 accept 的裸 FD
+            ::close(clientFd);
+        }
     }
 }
 
@@ -911,113 +935,144 @@ void ServerManager::handleCgiWrite(int cgiWriteFd)
 */
 void ServerManager::dispatchEvents()
 {
-
+    // 💡 倒序遍历非常优秀，防止 eraseFdFromPoll 导致索引越界
     for (size_t i = this->_poll_fds.size(); i > 0; --i)
     {
         size_t idx = i - 1;
 
         if (idx >= this->_poll_fds.size() || this->_poll_fds[idx].fd == -1 || this->_poll_fds[idx].revents == 0)
             continue;
+            
         int activeFd = this->_poll_fds[idx].fd;
         short revents = this->_poll_fds[idx].revents;
 
         if (revents == 0)
             continue;
 
+        // ==========================================
+        // 1. CGI 读端事件处理
+        // ==========================================
         if (this->isCgiReadFd(activeFd))
         {
+            // 🚀 防御一：静默吃掉 POLLNVAL
+            if (revents & POLLNVAL)
+            {
+                // 说明此 FD 已经被其他逻辑（如 Timeout）关闭。只清空废弃注册，绝不覆盖 HTTP 状态码。
+                this->_cgi_read_fd_to_client_map.erase(activeFd);
+                this->eraseFdFromPoll(activeFd);
+                continue;
+            }
 
             if (revents & (POLLIN | POLLHUP))
             {
-
                 this->handleCgiRead(activeFd);
             }
-            else if (revents & (POLLERR | POLLNVAL))
+            else if (revents & POLLERR) // 剔除了 POLLNVAL
             {
-
-                int clientFd = this->_cgi_read_fd_to_client_map[activeFd];
-                this->_cgi_read_fd_to_client_map.erase(activeFd);
-                this->_cgiManager.removeTaskByClientFd(clientFd);
-                this->eraseFdFromPoll(activeFd);
-                Connection *conn = this->_connections[clientFd];
-                if (conn)
+                // 🚀 防御二：使用 find 替代 [] 防止 Map 隐式插入
+                std::map<int, int>::iterator it = this->_cgi_read_fd_to_client_map.find(activeFd);
+                if (it != this->_cgi_read_fd_to_client_map.end())
                 {
-                    conn->response.createResponse(500, "CGI Read Pipe Error", conn->config.error_pages);
-                    conn->write_buffer = conn->response.responseToString();
-                    conn->close_after_write = true;
-                    this->setClientEvents(clientFd, POLLOUT);
+                    int clientFd = it->second;
+                    this->_cgi_read_fd_to_client_map.erase(it);
+                    this->_cgiManager.removeTaskByClientFd(clientFd);
+                    
+                    Connection *conn = this->_connections[clientFd]; // 假设 client_map 里的一定合法，如果怕也可以继续 find
+                    if (conn)
+                    {
+                        conn->response.createResponse(500, "CGI Read Pipe Error", conn->config.error_pages);
+                        conn->write_buffer = conn->response.responseToString();
+                        conn->close_after_write = true;
+                        this->setClientEvents(clientFd, POLLOUT);
+                    }
                 }
+                this->eraseFdFromPoll(activeFd);
             }
             continue;
         }
 
+        // ==========================================
+        // 2. CGI 写端事件处理
+        // ==========================================
         if (this->isCgiWriteFd(activeFd))
         {
+            // 🚀 防御一：静默吃掉 POLLNVAL
+            if (revents & POLLNVAL)
+            {
+                this->_cgi_write_fd_to_client_map.erase(activeFd);
+                this->eraseFdFromPoll(activeFd);
+                continue;
+            }
+
             if (revents & POLLOUT)
             {
-
                 this->handleCgiWrite(activeFd);
             }
-            else if (revents & (POLLERR | POLLHUP | POLLNVAL))
+            else if (revents & (POLLERR | POLLHUP)) // 剔除了 POLLNVAL，保留 POLLHUP（子进程拒收 Body 退出）
             {
-
-                int clientFd = this->_cgi_write_fd_to_client_map[activeFd];
-                this->_cgi_write_fd_to_client_map.erase(activeFd);
-                this->_cgiManager.removeTaskByClientFd(clientFd);
-                this->eraseFdFromPoll(activeFd);
-                Connection *conn = this->_connections[clientFd];
-                if (conn)
+                std::map<int, int>::iterator it = this->_cgi_write_fd_to_client_map.find(activeFd);
+                if (it != this->_cgi_write_fd_to_client_map.end())
                 {
-                    conn->response.createResponse(500, "CGI Write Pipe Error", conn->config.error_pages);
-                    conn->write_buffer = conn->response.responseToString();
-                    conn->close_after_write = true;
-                    this->setClientEvents(clientFd, POLLOUT);
+                    int clientFd = it->second;
+                    this->_cgi_write_fd_to_client_map.erase(it);
+                    this->_cgiManager.removeTaskByClientFd(clientFd);
+                    
+                    Connection *conn = this->_connections[clientFd];
+                    if (conn)
+                    {
+                        conn->response.createResponse(500, "CGI Write Pipe Error", conn->config.error_pages);
+                        conn->write_buffer = conn->response.responseToString();
+                        conn->close_after_write = true;
+                        this->setClientEvents(clientFd, POLLOUT);
+                    }
                 }
+                this->eraseFdFromPoll(activeFd);
             }
             continue;
         }
 
-        if (revents & (POLLERR | POLLHUP | POLLNVAL))
+        // ==========================================
+        // 3. Server / Client 基础事件处理
+        // ==========================================
+        
+        // 同样单独过滤客户端/监听 Socket 的 POLLNVAL
+        if (revents & POLLNVAL)
+        {
+            this->eraseFdFromPoll(activeFd);
+            continue; 
+        }
+
+        if (revents & (POLLERR | POLLHUP))
         {
             if (this->isListenFd(activeFd))
             {
                 std::cerr << "[ServerManager] CRITICAL: Fatal event (" << revents
                           << ") on Listen FD " << activeFd << "!" << std::endl;
-                this->_poll_fds[idx].fd = -1;
+                this->_poll_fds[idx].fd = -1; // 不要轻易 close 监听，或者交由上层重启
             }
             else
             {
-
                 this->closeConnection(activeFd, idx);
             }
             continue;
         }
 
+        // 原本的 Client 读写部分保持不变
         if (revents & POLLIN)
         {
             if (this->isListenFd(activeFd))
-            {
-
                 this->acceptNewConnection(activeFd);
-            }
             else
-            {
-
                 this->handleClientRead(activeFd, idx);
-            }
         }
 
         if (revents & POLLOUT)
         {
-            if (idx >= this->_poll_fds.size() || this->_poll_fds[idx].fd != activeFd)
+            if (idx < this->_poll_fds.size() && this->_poll_fds[idx].fd == activeFd)
             {
-
-                continue;
+                this->handleClientWrite(activeFd, idx);
             }
-
-            this->handleClientWrite(activeFd, idx);
         }
-
     }
 }
 
@@ -1025,13 +1080,37 @@ void ServerManager::stop()
 {
     std::cout << "\n[Server] Shutting down gracefully..." << std::endl;
 
+    // 1. 停止并清理所有活动的 CGI 进程及管道
     this->_cgiManager.stopAllTasks();
 
-    for (size_t i = 0; i < _poll_fds.size(); ++i)
+    // 2. 释放所有客户端连接
+    // 遍历 map，释放 Connection 内存。
+    // ~Connection() 内部应该去 delete socket;
+    // ~ClientSocket() 内部应该去 close(fd);
+    for (std::map<int, Connection*>::iterator it = _connections.begin(); 
+         it != _connections.end(); ++it)
     {
-        if (_poll_fds[i].fd >= 0)
-            close(_poll_fds[i].fd);
+        if (it->second != NULL)
+        {
+            delete it->second; 
+        }
     }
+    _connections.clear();
+
+    // 3. 释放所有服务器监听套接字
+    // ~ServerSocket() 内部应该去 close(fd);
+    for (size_t i = 0; i < _listen_sockets.size(); ++i)
+    {
+        if (_listen_sockets[i] != NULL)
+        {
+            delete _listen_sockets[i];
+        }
+    }
+    _listen_sockets.clear();
+    _listen_socket_map.clear(); // 顺手清理映射表
+
+    // 4. 清理 poll 观察者数组
+    // 仅仅清空容器，绝不触碰任何 FD！
     _poll_fds.clear();
 
     std::cout << "[Server] Cleaned up all sockets and CGI processes. Bye!" << std::endl;

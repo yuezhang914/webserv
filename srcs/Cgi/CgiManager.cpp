@@ -158,7 +158,7 @@ CgiEventResult CgiManager::handlePipeRead(int cgiReadFd)
     {
         // 读到数据，更新活跃时间并存入 buffer
         task.lastActivity = std::time(NULL);
-        
+
         if (task.outputBuffer.size() + static_cast<size_t>(bytesRead) > CGI_MAX_OUTPUT_SIZE)
         {
             std::cerr << "[CgiManager] Error: CGI output size exceeded max limit! 502." << std::endl;
@@ -167,7 +167,7 @@ CgiEventResult CgiManager::handlePipeRead(int cgiReadFd)
         }
 
         task.outputBuffer.append(buffer, static_cast<size_t>(bytesRead));
-        
+
         // 把控制权交还给主事件循环。如果管道里还有数据，下一次 select 依然会触发这个 fd 的 POLLIN
         return CgiEventResult(CGI_CONTINUE);
     }
@@ -176,11 +176,11 @@ CgiEventResult CgiManager::handlePipeRead(int cgiReadFd)
         // CGI 子进程输出结束，关闭了管道
         CgiEventResult result(CGI_FINISHED, clientFd, 200);
         result.rawOutput.swap(task.outputBuffer);
-        
+
         this->forceKillAndClean(task);
         return result;
     }
-    else 
+    else
     {
         // bytesRead < 0
         // 在不查 errno 且仅读一次的架构下，-1 可能是偶发的虚假唤醒(Spurious Wakeup)或系统中断。
@@ -279,7 +279,7 @@ CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
         this->forceKillAndClean(task);
         return CgiEventResult(CGI_ERROR, clientFd, 500);
     }
-    else 
+    else
     {
         // bytesWritten < 0
         // 在不能读取 errno 的前提下，将其视为非阻塞缓冲区满 (EAGAIN/EWOULDBLOCK)
@@ -293,63 +293,61 @@ CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
 
 /*
 函数：CgiManager::forceKillAndClean
-用途：强制销毁指定 CgiTask 的物理与逻辑资源（强杀 PID、关闭读写管道、清除 Map 账本）。
+用途：强制销毁指定 CgiTask 的物理与逻辑资源（安全强杀 PID、关闭读写管道、清除 Map 账本）。
 参数：
-    - CgiTask &task: 待销毁的 CGI 任务引用。
+    - CgiTask &task: 待销毁的 CGI 任务引用（通常是 _read_fd_to_task_map 中的 Value 引用）。
 返回值：
     - void（无返回值）。
 实现逻辑或说明：
-    1. 先复制 readFd、writeFd、pid；task 是主表元素引用，主表 erase 后绝不能继续访问。
-    2. 关闭写端并删除轻量反查，再关闭读端。
-    3. 先用 waitpid(WNOHANG) 尝试回收；仍运行才 SIGKILL，并处理 EINTR 后完成收尸。
-    4. 所有标量都已复制且资源已处理后，最后擦除 readFd 对应的唯一任务主表元素。
+    1. 进程生命周期终结：先使用 waitpid(WNOHANG) 探测子进程是否已自然退出。若仍在运行 (waited == 0)，则发射 SIGKILL 强杀，并补一次 waitpid(WNOHANG) 瞬时收尸。随后将 task.pid 置为 -1，彻底阻断重复清理和误杀的风险。
+    2. 写端清理：关闭通向 CGI 的 stdin 管道 (writeFd)，并安全擦除 _write_fd_to_read_fd_map 中的轻量反查记录。
+    3. 读端与内存清理（核心防踩坑）：关闭来自 CGI 的 stdout 管道 (readFd)。严禁使用局部常数提前拷贝属性，直接操作 task 本体。
+    4. 引用安全界限：将主表 _read_fd_to_task_map.erase(task.readFd) 严格置于函数的最后一行。由于传入的 task 是 Map 元素的引用，erase 一旦执行，该内存立即被析构释放。绝不能在此之后继续访问 task 上的任何属性。
 */
 void CgiManager::forceKillAndClean(CgiTask &task)
 {
-    const int readFd = task.readFd;
-    const int writeFd = task.writeFd;
-    const pid_t pid = task.pid;
-
-    if (writeFd >= 0)
-    {
-        ::close(writeFd);
-        this->_write_fd_to_read_fd_map.erase(writeFd);
-    }
-    if (readFd >= 0)
-    {
-        ::close(readFd);
-    }
-
-    if (pid > 0)
+    // ==========================================
+    // 1. 处理子进程的生命周期（强杀与收尸）
+    // ==========================================
+    if (task.pid > 0)
     {
         int status = 0;
-        // 先检查子进程是否已经自然退出
-        pid_t waited = ::waitpid(pid, &status, WNOHANG);
+        // 先检查子进程是否刚好已经自然退出
+        pid_t waited = ::waitpid(task.pid, &status, WNOHANG);
 
         if (waited == 0)
         {
-            // 子进程仍在运行，直接发送 SIGKILL
-            ::kill(pid, SIGKILL);
+            // waited == 0 说明进程还在运行，直接发射 SIGKILL 强杀
+            ::kill(task.pid, SIGKILL);
 
-            // 🚀 【不看 errno 的同步等待】：
-            // SIGKILL 是强制杀进程，内核会立刻清理它。
-            // 使用最多 10 次的有限循环等待，只要 waited == pid (即 > 0) 就成功退出。
-            int retry = 0;
-            while (retry < 10)
-            {
-                waited = ::waitpid(pid, &status, WNOHANG);
-                if (waited == pid)
-                {
-                    break; // 成功回收，直接退出
-                }
-                retry++;
-            }
+            // 补一枪 waitpid 收尸。
+            // SIGKILL 是内核级信号，立刻生效。这一个 WNOHANG 足够抹除僵尸进程，无需 while(10)
+            ::waitpid(task.pid, &status, WNOHANG);
         }
+        
+        // 彻底切断联系，防止被外层的 reapChildren 或下一次清理重复杀
+        task.pid = -1;
     }
 
-    if (readFd >= 0)
+    // ==========================================
+    // 2. 清理写端（通向 CGI 的 stdin）
+    // ==========================================
+    if (task.writeFd >= 0)
     {
-        this->_read_fd_to_task_map.erase(readFd);
+        ::close(task.writeFd);
+        this->_write_fd_to_read_fd_map.erase(task.writeFd);
+        task.writeFd = -1;
+    }
+
+    // ==========================================
+    // 3. 清理读端（来自 CGI 的 stdout）并彻底销毁 Task
+    // ==========================================
+    if (task.readFd >= 0)
+    {
+        ::close(task.readFd);
+        // 这是 Task 在内存里的真正载体，erase 执行后，传入的 task 引用就会失效（被析构）
+        this->_read_fd_to_task_map.erase(task.readFd);
+        // 绝对不要在 erase 后再尝试访问 task.readFd 等属性！
     }
 }
 
@@ -370,27 +368,29 @@ void CgiManager::reapChildren()
 {
     int status;
     pid_t pid;
-    // 💡 关键防御：如果没有活跃的 CGI 任务，直接返回！
-    // 彻底避免在主循环空闲时无脑调用 wait4(-1, ..., WNOHANG) 导致 CPU 狂飙到 50%+
+
+    // 💡 优化保留：如果没有活跃的 CGI 任务，直接返回
     if (this->_read_fd_to_task_map.empty())
     {
         return;
     }
 
+    // 循环非阻塞回收所有已结束的子进程
     while ((pid = ::waitpid(-1, &status, WNOHANG)) > 0)
     {
         std::map<int, CgiTask>::iterator it = this->_read_fd_to_task_map.begin();
         while (it != this->_read_fd_to_task_map.end())
         {
-            std::map<int, CgiTask>::iterator current = it++;
-            CgiTask &task = current->second;
-
-            if (task.pid == pid)
+            if (it->second.pid == pid)
             {
-                task.pid = -1;
-                this->forceKillAndClean(task);
+                // 核心改正：只做标记，绝不调用 forceKillAndClean！
+                // 将 pid 设为 -1，防止 Timeout 机制后续误杀别的复用 PID
+                it->second.pid = -1;
+
+                // 任务的真正清理，必须交给 handlePipeRead 读到 bytesRead == 0 时去处理
                 break;
             }
+            ++it;
         }
     }
 }
