@@ -13,12 +13,10 @@ SRC_DIRS = \
 	srcs/Session \
 	srcs/Signals
 
-
 OBJ_DIR = obj
 
 SRCS = $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.cpp))
 
-# 将 srcs/xxx.cpp -> obj/srcs/xxx.o
 OBJS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(SRCS))
 
 INCLUDES = -I includes $(patsubst %, -I %, $(SRC_DIRS))
@@ -28,7 +26,6 @@ all: $(NAME)
 $(NAME): $(OBJS)
 	$(CXX) $(CXXFLAGS) $(OBJS) -o $(NAME)
 
-# 编译规则
 $(OBJ_DIR)/%.o: %.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@

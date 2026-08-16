@@ -1,23 +1,17 @@
 #include "Webserv.hpp"
 
-/**
- * @brief 默认构造函数：初始化一个空客户端套接字安全哨兵
- */
-ClientSocket::ClientSocket() : _fd(-1) {}
+// Creates a new ClientSocket object.
+ClientSocket::ClientSocket() : _fd(-1)
+{
+}
 
-/**
- * @brief 有参构造函数：接管已被 accept 成功捕获的客户端连接描述符
- *
- * @param fd 客户端连接套接字的文件描述符 (File Descriptor)
- */
+// Creates a new ClientSocket object.
 ClientSocket::ClientSocket(int fd) : _fd(fd)
 {
     setNonBlocking();
 }
 
-/**
- * @brief 析构函数：践行 RAII 哲学，确保对象销毁时连接 100% 被物理关闭
- */
+// Cleans up this object and its owned resources.
 ClientSocket::~ClientSocket()
 {
     if (this->_fd >= 0)
@@ -27,14 +21,7 @@ ClientSocket::~ClientSocket()
     }
 }
 
-/**
- * @brief 物理关闭套接字并重置描述符，防止重复关闭与 FD 泄露
- *
- * @details
- * - 检查物理文件描述符 `_fd` 是否处于活跃状态 (>= 0)。
- * - 打印安全释放日志，调用 close() 系统函数物理释放资源。
- * - 强制将 `_fd` 重置为哨兵值 -1，彻底断绝二次关闭导致的内核并发漏洞 (Double Close Bug)。
- */
+// Closes fd.
 void ClientSocket::closeFd()
 {
     if (this->_fd >= 0)
@@ -45,13 +32,7 @@ void ClientSocket::closeFd()
     }
 }
 
-/**
- * @brief 将客户端连接套接字设置为 O_NONBLOCK 非阻塞模式
- *
- * @note
- * 强制将客户端 FD 改为非阻塞态，是保证大管家在 recv/send 数据时
- * 哪怕遇到客户端网速极慢或发送中断，也绝对不会发生线程挂起、卡死的唯一保障。
- */
+// Sets non blocking.
 void ClientSocket::setNonBlocking()
 {
     if (this->_fd < 0)
@@ -63,41 +44,21 @@ void ClientSocket::setNonBlocking()
     }
 }
 
-/**
- * @brief 从客户端套接字读取一次当前 POLLIN 事件允许的数据。
- *
- * @param buf 存放接收数据的缓冲区。
- * @param size 本次最多读取的字节数。
- * @return ssize_t 正数表示实际读取字节数；0 表示对端 EOF；-1 表示 recv 失败。
- *
- * @note 本函数只执行一次 recv()，不检查 errno，也不构造 -2 等额外返回码。
- *       上层必须只在 poll() 报告该客户端可读后调用，并对 0 与 -1 都执行连接清理。
- */
+// Reads available data from the client socket.
 ssize_t ClientSocket::read(char *buf, size_t size) const
 {
-    return ::recv(this->_fd, buf, size, 0);
+    return::recv(this->_fd, buf, size, 0);
 }
 
-/**
- * @brief 向客户端套接字执行一次非阻塞 HTTP 响应发送。
- *
- * @param data 当前仍待发送的响应数据。
- * @return ssize_t 正数表示本次实际发送字节数；0 表示没有取得发送进展；-1 表示 send 失败。
- *
- * @note 本函数只执行一次 send(),不检查 errno，也不构造 -2 等额外返回码。部分发送由 ServerManager 保留剩余数据并等待下一次 POLLOUT。
- */
+// Sends response data to the client socket.
 ssize_t ClientSocket::write(const std::string &data) const
 {
     if (data.empty())
         return 0;
-    return ::send(this->_fd, data.data(), data.size(), 0);
+    return::send(this->_fd, data.data(), data.size(), 0);
 }
 
-/**
- * @brief 获取当前客户端连接的物理文件描述符
- *
- * @return int 文件描述符 fd。
- */
+// Returns fd.
 int ClientSocket::getFd() const
 {
     return this->_fd;

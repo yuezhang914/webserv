@@ -1,4 +1,4 @@
-*This project has been created as part of the 42 curriculum by yzhang2 and weiyang.*
+*This project has been created as part of the 42 curriculum by yzhang2, weiyang.*
  
  
 ## Description

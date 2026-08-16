@@ -1,92 +1,80 @@
 #ifndef REQUEST_PARSER_HPP
 #define REQUEST_PARSER_HPP
-
 #include "Request.hpp"
 #include <sstream>
-
-/*
-类：RequestParser
-用途：把调用方已经读入内存的 raw HTTP buffer 严格解析成 Request。
-设计：无对象状态，所有函数均为 static；外部只有一个公开入口 parseBuffer()。
-边界：不执行 recv/send、不生成 Response、不选择 ServerConfig，也不管理 keep-alive。
-*/
 class RequestParser
 {
 private:
-    /* 禁止创建没有状态的 RequestParser 对象。 */
+    // Creates a new RequestParser object.
     RequestParser();
-
+    // Checks whether the character is valid in an HTTP token.
     static bool is_token_char(char c);
+    // Checks whether valid token.
     static bool is_valid_token(const std::string &token);
+    // Removes extra spaces from ows.
     static std::string trim_ows(const std::string &value);
-    static bool has_invalid_line_endings(const std::string &text,
-        size_t start, size_t end, bool allow_trailing_cr);
+    // Checks whether invalid line endings.
+    static bool has_invalid_line_endings(const std::string &text, size_t start, size_t end, bool allow_trailing_cr);
+    // Changes one hexadecimal character into its number value.
     static int hex_value(char c);
+    // Checks whether bad uri char.
     static bool has_bad_uri_char(const std::string &uri);
+    // Checks whether invalid percent encoding.
     static bool has_invalid_percent_encoding(const std::string &uri);
+    // Decodes path.
     static int decode_path(const std::string &encoded, std::string &decoded);
-    static int normalize_path(const std::string &decoded,
-        std::string &normalized);
-    static int split_and_normalize_uri(const std::string &uri,
-        std::string &path, std::string &query);
+    // Makes a standard form of path.
+    static int normalize_path(const std::string &decoded, std::string &normalized);
+    // Splits and normalize uri.
+    static int split_and_normalize_uri(const std::string &uri, std::string &path, std::string &query);
+    // Checks whether valid http version syntax.
     static bool is_valid_http_version_syntax(const std::string &version);
+    // Checks whether valid decimal port.
     static bool is_valid_decimal_port(const std::string &port);
+    // Checks whether valid reg name.
     static bool is_valid_reg_name(const std::string &host);
+    // Checks whether the text is a valid IPv4 address.
     static bool is_valid_ipv4_address(const std::string &address);
-    static bool count_ipv6_side_groups(const std::string &side,
-        bool allow_ipv4, size_t &group_count);
+    // Counts IPv6 groups on one side of the address.
+    static bool count_ipv6_side_groups(const std::string &side, bool allow_ipv4, size_t &group_count);
+    // Checks whether valid ip literal.
     static bool is_valid_ip_literal(const std::string &literal);
-    static int parse_request_line(const std::string &request_line,
-        Request &req);
+    // Parses request line.
+    static int parse_request_line(const std::string &request_line, Request &req);
+    // Checks whether invalid header value char.
     static bool has_invalid_header_value_char(const std::string &value);
+    // Checks whether valid host value.
     static bool is_valid_host_value(const std::string &value);
+    // Parses headers.
     static int parse_headers(std::istringstream &iss, Request &req);
-    static int parse_content_length(const std::string &value,
-        unsigned long body_limit, size_t &content_length);
-    static int is_chunked_transfer_encoding(const Request &req,
-        bool &has_te, bool &is_chunked);
+    // Parses content length.
+    static int parse_content_length(const std::string &value, unsigned long body_limit, size_t &content_length);
+    // Checks whether the request uses chunked transfer encoding.
+    static int is_chunked_transfer_encoding(const Request &req, bool &has_te, bool &is_chunked);
+    // Skips optional spaces in one chunk-size line.
     static void skip_chunk_ows(const std::string &line, size_t &pos);
-    static bool read_chunk_extension_token(const std::string &line,
-        size_t &pos);
-    static bool read_chunk_extension_quoted_string(const std::string &line,
-        size_t &pos);
-    static bool is_valid_chunk_extensions(const std::string &line,
-        size_t extension_start);
-    static int read_chunk_size_for_buffer(const std::string &line,
-        size_t current_body_size, unsigned long body_limit, size_t &size);
+    // Reads chunk extension token.
+    static bool read_chunk_extension_token(const std::string &line, size_t &pos);
+    // Reads chunk extension quoted string.
+    static bool read_chunk_extension_quoted_string(const std::string &line, size_t &pos);
+    // Checks whether valid chunk extensions.
+    static bool is_valid_chunk_extensions(const std::string &line, size_t extension_start);
+    // Reads chunk size for buffer.
+    static int read_chunk_size_for_buffer(const std::string &line, size_t current_body_size, unsigned long body_limit, size_t &size);
+    // Checks whether a trailer header name is not allowed.
     static bool is_forbidden_trailer_name(const std::string &lower_key);
+    // Checks trailer line.
     static int validate_trailer_line(const std::string &line);
-    static int find_chunked_trailer_end(const std::string &buffer,
-        size_t pos, size_t &consumed);
-    
-    static int decode_complete_chunked_body(const std::string &buffer,
-        size_t body_start, size_t decoded_size, Request &req);
-    static int parse_chunked_buffer(const std::string &buffer,
-        size_t body_start, unsigned long body_limit,
-        Request &req, size_t &consumed);
-
+    // Finds chunked trailer end.
+    static int find_chunked_trailer_end(const std::string &buffer, size_t pos, size_t &consumed);
+    // Decodes complete chunked body.
+    static int decode_complete_chunked_body(const std::string &buffer, size_t body_start, size_t decoded_size, Request &req);
+    // Parses chunked buffer.
+    static int parse_chunked_buffer(const std::string &buffer, size_t body_start, unsigned long body_limit, Request &req, size_t &consumed);
 public:
-    /*
-    函数：RequestParser::advanceChunkedScan
-    用途：从 scan_pos 开始只扫描新到达的 chunk 边界，并把进度保留给下一次 socket 读事件。
-    说明：不构造 body；完整后仍由 parseBuffer 做一次最终严格解析和解码。
-    */
-    static int advanceChunkedScan(const std::string &buffer,
-        size_t &scan_pos, unsigned long body_limit,
-        size_t &decoded_size, size_t &consumed);
-
-    /*
-    函数：RequestParser::parseBuffer
-    用途：解析 buffer 前部的第一个 HTTP/1.1 request。
-    参数：
-        - buffer：当前已累计的原始字节，本函数不修改它。
-        - req：接收解析结果；每次调用开始会清空旧数据。
-        - server：调用方确定的非 NULL ServerConfig，Request 只借用该指针。
-        - consumed：成功时返回第一个完整 request 占用的字节数。
-    返回：RequestStatus 中定义的五种状态。
-    */
-    static int parseBuffer(const std::string &buffer, Request &req,
-        const ServerConfig *server, size_t &consumed);
+    // Scans more chunked body data without blocking.
+    static int advanceChunkedScan(const std::string &buffer, size_t &scan_pos, unsigned long body_limit, size_t &decoded_size, size_t &consumed);
+    // Parses buffer.
+    static int parseBuffer(const std::string &buffer, Request &req, const ServerConfig *server, size_t &consumed);
 };
-
 #endif

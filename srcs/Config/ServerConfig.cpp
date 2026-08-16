@@ -1,30 +1,7 @@
-/*
-文件：srcs/Config/ServerConfig.cpp
-server 块解析和 ServerConfig 生命周期实现。这个文件把 listen/root/index/error_page 等 server 级别指令写入 ServerConfig。
-*/
 #include "ServerConfig.hpp"
 #include "Webserv.hpp"
 
-/*
-函数：is_valid_ipv4
-用途：检查 listen 指令中的 IP 是否是合法 IPv4。
-参数来源：parseServerDirective 解析 listen 127.0.0.1:3435 时传入 IP 部分。
-变量解释：
-    - ip：listen 指令解析出的 IP C 字符串。
-    - text：把 ip 转成 std::string 后的文本。
-    - stream：按 . 拆分 text 的 stringstream。
-    - part：当前 IP 段，例如 127、0、1。
-    - count：已经读取到的段数，最终必须是 4。
-    - index：遍历 part 内字符的下标。
-    - value：part 转成整数后的值，必须在 0 到 255。
-实现逻辑：
-    1. 如果 ip 是 NULL，返回 ERROR。
-    2. 用点号 . 把字符串拆成四段。
-    3. 每一段必须非空，长度不能超过 3。
-    4. 每一段的字符都必须是数字。
-    5. atoi 后的值必须在 0 到 255 之间。
-    6. 最终必须刚好有四段，否则不是 IPv4。
-*/
+// Checks whether the text is a valid IPv4 address.
 static int is_valid_ipv4(const char *ip)
 {
     if (ip == NULL)
@@ -49,7 +26,6 @@ static int is_valid_ipv4(const char *ip)
         int value = std::atoi(part.c_str());
         if (value < 0 || value > 255)
             return ERROR;
-        // 如果长度大于 1 且第一个数字是 '0'，说明存在恶意前导零（如 "010"），直接扼杀
         if (part.size() > 1 && part[0] == '0')
             return ERROR;
         count++;
@@ -59,35 +35,7 @@ static int is_valid_ipv4(const char *ip)
     return SUCCESS;
 }
 
-/*
-函数：Config::parseServerDirective
-用途：解析 server { ... } 里面的一条指令，并写入当前 ServerConfig。
-参数来源：parseDirective 在 current_server 不为空时调用；directive 是指令名，values 是参数列表，srv 是当前 server 对象。
-变量解释：
-    - directive：当前 server 指令名，例如 listen、root、error_page。
-    - values：当前指令的参数数组，来自 parseDirectiveTokens。
-    - srv：当前正在填充的 ServerConfig 指针。
-    - value：listen 分支中 values[0] 的副本，可能是 port、ip 或 ip:port。
-    - ip：listen 分支解析出的监听 IP。
-    - port_str：listen 分支解析出的端口字符串。
-    - colon_pos：value 中 : 的位置，用来区分 ip:port 和其他写法。
-    - parts：当 listen 没有 : 时，用 . 拆分 value 后得到的片段，用来判断它像不像 IP。
-    - endptr：strtol 输出参数，用来检查端口、状态码等字符串是否完全是数字。
-    - code：error_page 分支解析出的 HTTP 状态码。
-    - size：max_body_size 分支 parseSize 返回的字节数。
-实现逻辑：
-    1. allow_methods：把 GET/POST/DELETE 等方法加入 srv->allow_methods。
-    2. upload_path：检查参数数量并拒绝同一 server 重复配置。
-    3. autoindex：检查参数只能是 on/off，并拒绝旧别名和重复配置。
-    4. listen：解析 IP 和端口，支持 port、ip、ip:port 三种形式；检查 IP 和端口合法；写入 srv->host/srv->port；限制同一个 server 只出现一次 listen。
-    5. server_name：把所有名字 push 到 srv->server_names。
-    6. root：检查只能有一个参数且不能重复，然后写入 srv->root 并设置 has_root=true。
-    7. error_page：把状态码和文件路径写入 srv->error_pages[code]。
-    8. max_body_size：调用 parseSize，把 1M/512K 转成字节数，写入 srv->max_body_size。
-    9. index：写入 srv->index。
-    10. 任何未知指令都会报错并返回 ERROR。
-产出：ServerConfig 从“默认空对象”变成“可用于 socket/route/response 的规则对象”。
-*/
+// Parses one server setting and saves its value.
 bool Config::parseServerDirective(const std::string &directive, const std::vector<std::string> &values, ServerConfig *srv)
 {
     if (directive == "allow_methods")
@@ -104,7 +52,6 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
                 std::string method = values[i];
                 for (size_t j = 0; j < method.size(); ++j)
                     method[j] = std::toupper(method[j]);
-
                 if (method != "GET" && method != "POST" && method != "DELETE")
                 {
                     std::cerr << "Error: Unsupported HTTP method: " << values[i] << std::endl;
@@ -115,8 +62,6 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
         }
         else
         {
-            /* 🛠️ 【修改点：allow_methods 空参数直接报错】
-               意义：不能塞入伪方法 NONE；配置缺参数应在 Config 阶段失败。 */
             std::cerr << "Error: allow_methods requires at least one method" << std::endl;
             return ERROR;
         }
@@ -142,8 +87,6 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
             std::cerr << "Invalid " << directive << " directive" << std::endl;
             return ERROR;
         }
-        /* 🛠️ 【修改点：server autoindex 保留真实值，同时用 has_autoindex 防重复】
-           意义：server 是默认值来源，必须保存 autoindex=true/false；has_autoindex 只用于校验重复配置。 */
         if (srv->has_autoindex)
         {
             std::cerr << "Error: Duplicate " << directive << " directive in server" << std::endl;
@@ -162,143 +105,79 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
     }
     else if (directive == "listen")
     {
-        // 检查 listen 是否刚好只有一个参数。
-        // 合法：listen 8080;
-        // 非法：listen; 或 listen 127.0.0.1 8080;
         if (values.size() != 1)
         {
             std::cerr << "Invalid listen directive" << std::endl;
             return ERROR;
         }
-
-        // 检查当前 server 是否已经出现过 listen 指令。
-        // 本项目规定一个 server 只能配置一次 listen，
-        // countport 大于等于 1 表示之前已经成功解析过 listen。
         if (srv->countport >= 1)
         {
             std::cerr << "Error: Duplicate listen directive in server" << std::endl;
             return ERROR;
         }
-
-        // 取出 listen 的唯一参数，并准备分别保存 IP 和端口。
-        // value 可能是：
-        // 8080
-        // 127.0.0.1
-        // 127.0.0.1:8080   
         std::string value = values[0];
         std::string ip;
         std::string port_str;
-
-        // 查找冒号的位置，用来判断参数是否同时包含 IP 和端口。
         size_t colon_pos = value.find(':');
-
-        // 参数中没有冒号时，它可能是“只写 IP”或“只写端口”。
         if (colon_pos == std::string::npos)
         {
-            // 暂时按点号拆分参数。
-            // IPv4 通常由四段组成，例如 127.0.0.1。
             std::vector<std::string> parts = split(value, '.');
-
-            // 如果按点号能拆成四段，先把它当作 IPv4，
-            // 后面再由 is_valid_ipv4() 严格检查；
-            // 没有显式端口时使用 DEFAULT_PORT。
             if (parts.size() == 4)
             {
                 ip = value;
                 port_str = DEFAULT_PORT;
             }
-            // 如果不是四段，则把整个参数当作端口。
-            // IP 留空，后面会转换成监听所有本机 IPv4 接口。
             else
             {
                 port_str = value;
                 ip = "";
             }
         }
-        // 参数中存在冒号时，按照“IP:端口”的格式拆分。
         else
         {
             ip = value.substr(0, colon_pos);
             port_str = value.substr(colon_pos + 1);
         }
-
-        // 用户显式填写了 IP 时，先检查 IPv4 格式是否合法。
         if (!ip.empty())
         {
-            // 拒绝段数错误、非数字、超过 255、前导零、
-            // 开头或结尾带点号等非法 IPv4。
             if (is_valid_ipv4(ip.c_str()) == ERROR)
             {
-                std::cerr << "Invalid IP in listen directive: "
-                          << ip << std::endl;
+                std::cerr << "Invalid IP in listen directive: " << ip << std::endl;
                 return ERROR;
             }
-
-            // IP 校验成功后，保存到当前 ServerConfig。
             srv->host = ip;
         }
-        // 用户没有填写 IP 时，用标准 IPv4 通配地址字符串保存。
-        // ServerSocket 再把 0.0.0.0 转换为 socket 层的 INADDR_ANY。
         else
         {
             srv->host = "0.0.0.0";
         }
-
-        // 检查端口字符串是否为空。
-        // 例如 listen 127.0.0.1:; 会得到空端口，必须拒绝。
         if (port_str.empty())
         {
-            std::cerr << "Invalid empty port in listen directive"
-                      << std::endl;
+            std::cerr << "Invalid empty port in listen directive" << std::endl;
             return ERROR;
         }
-
         size_t port_index = 0;
-
-        // 逐个检查端口字符串中的字符，确保端口只由数字组成。
-        // 这样会拒绝 +80、-80、80abc、80.5 等格式。
         while (port_index < port_str.size())
         {
-            // 当前字符不是数字时，说明端口格式非法。
             if (!std::isdigit(static_cast<unsigned char>(port_str[port_index])))
             {
-                std::cerr << "Invalid port in listen directive: "
-                          << port_str << std::endl;
+                std::cerr << "Invalid port in listen directive: " << port_str << std::endl;
                 return ERROR;
             }
-
             port_index++;
         }
-
         char *endptr;
-
-        // 把已经通过字符检查的端口字符串转换成长整数。
         long parsed_port = strtol(port_str.c_str(), &endptr, 10);
-
-        // 检查字符串是否被完整转换，并检查端口范围必须是 1 到 65535。
-        // *endptr != '\0'：说明转换过程中遇到了未处理字符。
-        // parsed_port <= 0：拒绝端口 0 和负数。
-        // parsed_port > 65535：超过 IPv4/IPv6 端口最大值。
         if (*endptr != '\0' || parsed_port <= 0 || parsed_port > 65535)
         {
-            std::cerr << "Invalid port in listen directive: "
-                      << port_str << std::endl;
+            std::cerr << "Invalid port in listen directive: " << port_str << std::endl;
             return ERROR;
         }
-
-        // 端口格式和值域都合法后，保存到当前 ServerConfig。
         srv->port = static_cast<int>(parsed_port);
-
-        // 只有整个 listen 指令全部解析成功后才增加计数。
-        // 这样非法 listen 不会错误地把 countport 改成 1，
-        // 也不会影响后续配置状态。
         srv->countport++;
     }
-
     else if (directive == "server_name")
     {
-        /* 🛠️ 【修改点：server_name 不再静默覆盖】
-           意义：同一个 server 多次写 server_name 容易隐藏配置错误；多个名字请写在同一条指令里。 */
         if (values.empty())
         {
             std::cerr << "Error: server_name requires at least one name" << std::endl;
@@ -341,9 +220,6 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
             std::cerr << "Invalid error_page directive" << std::endl;
             return ERROR;
         }
-        /* 【修改点 3：锁定尾部路径，完美兼容多错误码多对一映射】 */
-        /* 解释：彻底推翻了“状态码与路径必然单对单成对出现”的旧版误区。物理锁定 values[values.size() - 1] 必然是页面路径，
-                再通过循环把前面由于多码聚合（如 error_page 404 403 /error.html）切出来的全部错误码安全地灌入状态机，封杀了路径错位乱码隐患 */
         std::string error_path = values[values.size() - 1];
         if (error_path.empty())
         {
@@ -352,11 +228,6 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
         }
         for (size_t i = 0; i < values.size() - 1; ++i)
         {
-    // String to Long（将字符串转换为长整型）有三个核心参数：
-    // values[i].c_str()（原材料）：把宿主的 std::string 字符串转换成传统的 C 风格字符串（const char*），喂给函数。
-    // &endptr（安检员）：注意这里加了 & 取地址符，意思是把我们刚才准备好的“侦察兵”的对讲机地址交给函数。
-    //                  函数在转换结束时，会往 endptr 里写入不合法字符的位置。
-    // 10（进制数）：明确告诉编译器：“我是按十进制来算数字的（0-9）”。
             char *endptr;
             int code = strtol(values[i].c_str(), &endptr, 10);
             if (*endptr != '\0' || code < 300 || code > 599)
@@ -369,26 +240,17 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
     }
     else if (directive == "max_body_size")
     {
-        /* 🛠️ 【修改点：只删除 client_max_body_size 兼容入口】
-           意义：server 级仍支持 max_body_size 作为默认 body 限制；location 级也支持同名 max_body_size 覆盖。
-           不再支持 Nginx 指令名 client_max_body_size，避免配置规格混乱。 */
         if (srv->has_body_size == true)
         {
             std::cerr << "Error: \"max_body_size\" directive is duplicate in this server block" << std::endl;
             return ERROR;
         }
-
         if (values.size() != 1)
             return ERROR;
-
         unsigned long converted_size = this->parseSize(values[0]);
         if (converted_size == static_cast<unsigned long>(ERROR_PARSE_SIZE))
             return ERROR;
-
-        // 🎯存入数据
         srv->max_body_size = converted_size;
-
-        // 标记已经配过一次了
         srv->has_body_size = true;
     }
     else if (directive == "index")
@@ -398,8 +260,6 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
             std::cerr << "Error: Invalid index directive" << std::endl;
             return ERROR;
         }
-        /* 🛠️ 【修改点：支持多 index，但禁止重复 index 指令】
-           意义：index index.html index.htm; 表示目录请求时按顺序 fallback；重复写 index 指令容易出现覆盖歧义。 */
         if (!srv->index.empty())
         {
             std::cerr << "Error: Duplicate index directive in server" << std::endl;
@@ -420,98 +280,27 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
         std::cerr << "Error: Unknown server directive: " << directive << std::endl;
         return ERROR;
     }
-    /* 🎯 【修改点 5：宏定义状态重塑，消除裸数字隐式穿透】 */
-    /* 解释：废除了原本随手裸写的 return 0; 彻底向主干框架约定的宏定义或枚举值 SUCCESS 进行强约束呼应，保障返回值体系的高度纯净 */
     return SUCCESS;
 }
 
-/*
-函数：ServerConfig::ServerConfig
-用途：创建一个带默认值的 server 配置对象。
-变量解释：
-    - port：默认端口，构造时设为 8080。
-    - countport：listen 指令计数，构造时设为 0。
-    - host/root/index/upload_path：字符串配置，构造时为空。
-    - max_body_size：请求体大小限制，构造时使用 MAX_BODY_SIZE。
-    - socketFd：监听 socket fd，构造时为 0 表示尚未创建。
-    - has_root：是否显式配置 root，构造时为 false。
-    - autoindex：目录列表开关，构造时为 false。
-    - server_names/error_pages/locations/allow_methods：容器配置，构造时清空。
-实现逻辑：
-    1. 默认端口设为 8080。
-    2. countport=0，表示还没解析到 listen。
-    3. root/host/index 为空，has_root=false。
-    4. max_body_size 使用 MAX_BODY_SIZE 默认值。
-    5. socketFd=-1，表示还没有创建监听 socket。
-    6. autoindex=false，默认不生成目录列表。
-    7. 清空 server_names/error_pages/locations/allow_methods 等容器。
-*/
-ServerConfig::ServerConfig() : port(80),
-                               countport(0),
-                               host("127.0.0.1"),
-                               server_names(), // std::vector 默认构造，可以不写或留空
-                               root(""),
-                               error_pages(), // std::map 默认构造
-                               max_body_size(MAX_BODY_SIZE),
-                               has_body_size(false), // 默认没有配置 max_body_size
-                               locations(),          // std::vector 默认构造
-                               index(),              // 多首页 vector 默认纯净初始化
-                               upload_path(""),
-                               allow_methods(), // std::set 默认构造
-                               socketFd(-1),    // 必须是 -1 锁死
-                               has_root(false),
-                               has_autoindex(false),
-                               autoindex(false) // 🛠️ 修改点：显式初始化 server 默认 autoindex，避免随机值。
-{
-    // 🎯 如果你采用了方案 A 的状态锁，并且把它加在头文件最后，请确保它在列表里也老老实实呆在最后
-}
-
-/*
-函数：ServerConfig 拷贝构造
-用途：复制一个 ServerConfig 的配置字段。
-变量解释：
-    - src：被复制的 ServerConfig。
-    - socketFd：不会复制 src.socketFd，而是设为 -1，避免 fd 所有权重复。
-    - 其他字段：port、host、root、locations、error_pages 等普通配置会复制。
-实现逻辑：
-    1. 复制端口、host、server_names、root、error_pages、max_body_size、locations、index、allow_methods 等规则数据。
-    2. socketFd 不复制，而是设为 -1。
-原因：socket fd 是系统资源，不能让两个 ServerConfig 对象同时认为自己拥有同一个 fd，否则析构时可能重复 close。
-*/
-ServerConfig::ServerConfig(const ServerConfig &src)
-    : port(src.port), countport(src.countport), host(src.host), server_names(src.server_names), root(src.root), error_pages(src.error_pages), max_body_size(src.max_body_size), has_body_size(src.has_body_size), locations(src.locations), index(src.index), upload_path(src.upload_path), allow_methods(src.allow_methods), socketFd(-1), has_root(src.has_root), has_autoindex(src.has_autoindex), autoindex(src.autoindex)
+// Creates a new ServerConfig object.
+ServerConfig::ServerConfig() : port(80), countport(0), host("127.0.0.1"), server_names(), root(""), error_pages(), max_body_size(MAX_BODY_SIZE), has_body_size(false), locations(), index(), upload_path(""), allow_methods(), socketFd(-1), has_root(false), has_autoindex(false), autoindex(false)
 {
 }
 
-/*
-函数：ServerConfig::~ServerConfig
-用途：销毁 ServerConfig 时关闭它拥有的监听 socket。
-变量解释：
-    - socketFd：当前对象拥有的监听 socket；大于 0 时需要 close。
-实现逻辑：
-    1. 如果 socketFd > 0，说明 setupSockets 成功创建过 socket。
-    2. 调用 close(socketFd) 释放系统资源。
-注意：拷贝构造和赋值时 socketFd 会置 0，就是为了避免重复关闭同一个 fd。
-*/
+// Creates a new ServerConfig object.
+ServerConfig::ServerConfig(const ServerConfig &src) : port(src.port), countport(src.countport), host(src.host), server_names(src.server_names), root(src.root), error_pages(src.error_pages), max_body_size(src.max_body_size), has_body_size(src.has_body_size), locations(src.locations), index(src.index), upload_path(src.upload_path), allow_methods(src.allow_methods), socketFd(-1), has_root(src.has_root), has_autoindex(src.has_autoindex), autoindex(src.autoindex)
+{
+}
+
+// Cleans up this object and its owned resources.
 ServerConfig::~ServerConfig()
 {
     if (socketFd > 0)
         close(socketFd);
 }
 
-/*
-函数：ServerConfig::operator=
-用途：把 rhs 的配置内容赋值给当前对象。
-变量解释：
-    - rhs：赋值来源对象。
-    - this：当前被赋值对象；如果 this == &rhs，说明是自我赋值，直接返回。
-    - socketFd：赋值后重置为 -1，不接管 rhs.socketFd。
-实现逻辑：
-    1. 先检查 self-assignment，避免自己赋值给自己。
-    2. 复制所有普通配置字段。
-    3. socketFd 设为 -1，不复制 rhs.socketFd。
-    4. 返回 *this，支持链式赋值。
-*/
+// Copies data from another object.
 ServerConfig &ServerConfig::operator=(const ServerConfig &rhs)
 {
     if (this != &rhs)
@@ -523,7 +312,7 @@ ServerConfig &ServerConfig::operator=(const ServerConfig &rhs)
         root = rhs.root;
         error_pages = rhs.error_pages;
         max_body_size = rhs.max_body_size;
-        has_body_size = rhs.has_body_size; // 🛠️ 修改点：新增字段必须在赋值时同步复制。
+        has_body_size = rhs.has_body_size;
         locations = rhs.locations;
         index = rhs.index;
         upload_path = rhs.upload_path;
@@ -531,7 +320,7 @@ ServerConfig &ServerConfig::operator=(const ServerConfig &rhs)
         socketFd = -1;
         has_root = rhs.has_root;
         has_autoindex = rhs.has_autoindex;
-        autoindex = rhs.autoindex; // 🛠️ 修改点：server 默认 autoindex 真值必须跟随普通配置复制。
+        autoindex = rhs.autoindex;
     }
     return *this;
 }

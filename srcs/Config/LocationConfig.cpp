@@ -1,35 +1,7 @@
-/*
-文件：srcs/Config/LocationConfig.cpp
-location 块解析和 LocationConfig 生命周期实现。它把 location 内的 root/alias/index/cgi_extension/upload_path/return 等指令写入 LocationConfig。
-*/
 #include "LocationConfig.hpp"
 #include "Webserv.hpp"
 
-/*
-函数：Config::parseLocationDirective
-用途：解析 location { ... } 里面的一条指令，并写入当前 LocationConfig。
-参数来源：parseDirective 在 current_location 不为空时调用。
-变量解释：
-    - directive：当前 location 指令名，例如 allow_methods、cgi_extension、return、max_body_size。
-    - values：当前指令参数数组，来自 parseDirectiveTokens。
-    - loc：当前正在填充的 LocationConfig 指针。
-    - i：遍历 values 的下标，用于 allow_methods/index 分支。
-    - converted_size：max_body_size 分支解析出的字节数。
-    - status：return 分支解析出的 3xx 重定向状态码。
-    - endptr：strtol 输出参数，用来判断 return 状态码是否是纯数字。
-实现逻辑：
-    1. allow_methods：把方法加入 loc->allow_methods。
-    2. root：检查参数数量，检查不能重复，也不能和 alias 同时使用，然后写入 loc->root 并设置 has_root。
-    3. autoindex：检查 on/off，然后设置 loc->autoindex 和 loc->has_autoindex；旧别名不再接受。
-    4. max_body_size：只接受一个 size 参数，写入 loc->max_body_size 并设置 has_body_size。
-    5. index：设置该 location 的默认首页文件。
-    6. cgi_extension：要求两个参数，后缀和解释器路径，并拒绝同一后缀重复配置。
-    7. upload_path：设置 POST 上传目录，并拒绝同一 location 重复配置。
-    8. return：要求状态码和 URL；状态码必须是 300-399；写入 redirect_status/redirect_url。
-    9. alias：要求一个参数，并检查不能和 root 同时使用；写入 loc->alias，并设置 has_alias=true。
-    10. 未知指令返回 ERROR。
-产出：LocationConfig 成为某个 URI 前缀的特殊规则，后续最长前缀匹配会用它。
-*/
+// Parses one location setting and saves its value.
 bool Config::parseLocationDirective(const std::string &directive, const std::vector<std::string> &values, LocationConfig *loc)
 {
     if (directive == "allow_methods")
@@ -38,7 +10,6 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
         {
             for (size_t i = 0; i < values.size(); ++i)
             {
-                /* 🎯 【修改点 1：空值过滤与格式规整】 */
                 if (values[i].empty())
                 {
                     std::cerr << "Error: Empty method token in allow_methods" << std::endl;
@@ -46,9 +17,7 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
                 }
                 std::string method = values[i];
                 for (size_t j = 0; j < method.size(); ++j)
-                    method[j] = std::toupper(method[j]); // 💡 强行强制转大写
-
-                /* 🎯 【修改点 2：严格谓词白名单硬卡点】 */
+                    method[j] = std::toupper(method[j]);
                 if (method != "GET" && method != "POST" && method != "DELETE")
                 {
                     std::cerr << "Error: Unsupported HTTP method: " << values[i] << std::endl;
@@ -59,8 +28,6 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
         }
         else
         {
-            /* 🛠️ 【修改点：allow_methods 空参数直接报错】
-               意义：不能塞入伪方法 NONE；配置缺参数应在 Config 阶段失败。 */
             std::cerr << "Error: allow_methods requires at least one method" << std::endl;
             return ERROR;
         }
@@ -92,8 +59,6 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
             std::cerr << "Invalid " << directive << " directive" << std::endl;
             return ERROR;
         }
-        /* 🛠️ 【修改点：location autoindex 防重复】
-           意义：has_autoindex 既区分“没写/写了 off”，也用于拒绝重复 autoindex 指令。 */
         if (loc->has_autoindex)
         {
             std::cerr << "Error: Duplicate " << directive << " directive in location " << loc->path << std::endl;
@@ -117,8 +82,6 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
     }
     else if (directive == "max_body_size")
     {
-        /* 🛠️ 【修改点：支持 location 级 max_body_size】
-           意义：Config 保存 location 自己的 body 限制；RequestParser 通过 ConfigRouteUtils 在读取 body 前计算 effective limit，避免只解析不生效的半支持。 */
         if (loc->has_body_size == true)
         {
             std::cerr << "Error: \"max_body_size\" directive is duplicate in this location block" << std::endl;
@@ -142,8 +105,6 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
             std::cerr << "Error: Invalid index directive" << std::endl;
             return ERROR;
         }
-        /* 🛠️ 【修改点：支持多 index，但禁止重复 index 指令】
-           意义：index index.html index.htm; 表示按顺序 fallback；重复写 index 指令会产生覆盖歧义。 */
         if (!loc->index.empty())
         {
             std::cerr << "Error: Duplicate index directive in location " << loc->path << std::endl;
@@ -163,47 +124,33 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
     {
         if (values.size() != 2)
         {
-            std::cerr << "Error: Invalid cgi_extension directive"
-                      << std::endl;
+            std::cerr << "Error: Invalid cgi_extension directive" << std::endl;
             return ERROR;
         }
-
         if (values[0].empty() || values[0][0] != '.' || values[1].empty())
         {
-            std::cerr << "Error: Invalid cgi_extension format"
-                      << std::endl;
+            std::cerr << "Error: Invalid cgi_extension format" << std::endl;
             return ERROR;
         }
-
         if (loc->cgi_extensions.find(values[0]) != loc->cgi_extensions.end())
         {
-            std::cerr << "Error: Duplicate cgi_extension for "
-                      << values[0]
-                      << " in location "
-                      << loc->path
-                      << std::endl;
+            std::cerr << "Error: Duplicate cgi_extension for " << values[0] << " in location " << loc->path << std::endl;
             return ERROR;
         }
-
         loc->cgi_extensions[values[0]] = values[1];
     }
     else if (directive == "cgi_require_target")
     {
         if (values.size() != 1)
         {
-            std::cerr << "Error: Invalid cgi_require_target directive"
-                      << std::endl;
+            std::cerr << "Error: Invalid cgi_require_target directive" << std::endl;
             return ERROR;
         }
-
         if (loc->has_cgi_require_target)
         {
-            std::cerr << "Error: Duplicate cgi_require_target directive in location "
-                      << loc->path
-                      << std::endl;
+            std::cerr << "Error: Duplicate cgi_require_target directive in location " << loc->path << std::endl;
             return ERROR;
         }
-
         if (values[0] == "on")
         {
             loc->cgi_require_target = true;
@@ -216,9 +163,7 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
         }
         else
         {
-            std::cerr << "Error: Invalid cgi_require_target value: "
-                      << values[0]
-                      << std::endl;
+            std::cerr << "Error: Invalid cgi_require_target value: " << values[0] << std::endl;
             return ERROR;
         }
     }
@@ -231,8 +176,7 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
         }
         if (!loc->upload_path.empty())
         {
-            std::cerr << "Error: Duplicate upload_path directive in location "
-                      << loc->path << std::endl;
+            std::cerr << "Error: Duplicate upload_path directive in location " << loc->path << std::endl;
             return ERROR;
         }
         loc->upload_path = values[0];
@@ -266,8 +210,6 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
             std::cerr << "Error: Cannot use root and alias together in location " << loc->path << std::endl;
             return ERROR;
         }
-
-        /* 🎯 【修改点 7：为 alias 并线防重单体锁，拦截配置覆盖】 */
         if (!loc->alias.empty())
         {
             std::cerr << "Error: Duplicate alias directive in location " << loc->path << std::endl;
@@ -281,64 +223,20 @@ bool Config::parseLocationDirective(const std::string &directive, const std::vec
         std::cerr << "Error: Unknown location directive: " << directive << std::endl;
         return ERROR;
     }
-    /* 🎯 【修改点 8：统一状态标志，由裸数字 0 升级为 SUCCESS 语义互锁】 */
     return SUCCESS;
 }
 
-/*
-函数：LocationConfig::LocationConfig
-用途：创建一个带默认值的 location 配置对象。
-变量解释：
-    - allow_methods/cgi_extensions：容器字段，默认空。
-    - root/index/upload_path/path/redirect_url/alias：字符串字段，默认空。
-    - autoindex：目录列表开关，默认 false。
-    - has_autoindex：是否显式写过 autoindex，默认 false。
-    - max_body_size：location 自己的 body 限制，默认 MAX_BODY_SIZE。
-    - has_body_size：是否显式写过 max_body_size，默认 false。
-    - redirect_status：重定向状态码，默认 0 表示无重定向。
-    - has_root/has_alias：是否显式写过 root/alias，默认 false。
-实现逻辑：
-    1. 字符串字段设置为空。
-    2. autoindex=false，has_autoindex=false，max_body_size=MAX_BODY_SIZE，has_body_size=false，redirect_status=0。
-    3. allow_methods/cgi_extensions 等容器默认空。
-    4. has_root/has_alias=false，表示还没有显式配置 root 或 alias。
-*/
-LocationConfig::LocationConfig()
-    : allow_methods() // 1. 如果你在头文件里最先声明了 set
-      ,
-      root("") // 2. 接着声明了 root
-      ,
-      autoindex(false), has_autoindex(false), index(), cgi_extensions(), upload_path(""), path(""), redirect_status(0), redirect_url(""), alias(""), has_root(false), has_alias(false), max_body_size(MAX_BODY_SIZE), has_body_size(false), cgi_require_target(true), has_cgi_require_target(false)
-{
-    // 大括号内纯净空荡，零摩擦！
-}
-/*
-函数：LocationConfig 拷贝构造
-用途：复制一个 location 配置对象。
-变量解释：
-    - src：被复制的 LocationConfig。
-    - allow_methods/root/autoindex/has_autoindex/index/cgi_extensions/upload_path/path/redirect_status/redirect_url/alias/has_root/has_alias/max_body_size/has_body_size：都从 src 对应字段复制。
-实现逻辑：逐个复制 allow_methods、root、autoindex、has_autoindex、index、cgi_extensions、upload_path、path、redirect、alias、has_root、has_alias、max_body_size、has_body_size。
-使用场景：vector<LocationConfig> 扩容或复制 ServerConfig 时会用到。
-*/
-LocationConfig::LocationConfig(const LocationConfig &src)
-    : allow_methods(src.allow_methods), root(src.root), autoindex(src.autoindex), has_autoindex(src.has_autoindex), index(src.index), cgi_extensions(src.cgi_extensions), upload_path(src.upload_path), path(src.path), redirect_status(src.redirect_status), redirect_url(src.redirect_url), alias(src.alias), has_root(src.has_root), has_alias(src.has_alias), max_body_size(src.max_body_size), has_body_size(src.has_body_size),cgi_require_target(src.cgi_require_target), has_cgi_require_target(src.has_cgi_require_target)
-    // 大括号内纯净空荡，零摩擦！ 
+// Creates a new LocationConfig object.
+LocationConfig::LocationConfig() : allow_methods(), root(""), autoindex(false), has_autoindex(false), index(), cgi_extensions(), upload_path(""), path(""), redirect_status(0), redirect_url(""), alias(""), has_root(false), has_alias(false), max_body_size(MAX_BODY_SIZE), has_body_size(false), cgi_require_target(true), has_cgi_require_target(false)
 {
 }
 
-/*
-函数：LocationConfig::operator=
-用途：把 rhs 的 location 规则赋值给当前对象。
-变量解释：
-    - rhs：赋值来源对象。
-    - this：当前被赋值对象；如果 this == &rhs，说明是自我赋值。
-    - 各成员字段：在非自我赋值时逐一复制 rhs 的配置。
-实现逻辑：
-    1. 检查是否 self-assignment。
-    2. 复制所有配置字段和标志位。
-    3. 返回 *this。
-*/
+// Creates a new LocationConfig object.
+LocationConfig::LocationConfig(const LocationConfig &src) : allow_methods(src.allow_methods), root(src.root), autoindex(src.autoindex), has_autoindex(src.has_autoindex), index(src.index), cgi_extensions(src.cgi_extensions), upload_path(src.upload_path), path(src.path), redirect_status(src.redirect_status), redirect_url(src.redirect_url), alias(src.alias), has_root(src.has_root), has_alias(src.has_alias), max_body_size(src.max_body_size), has_body_size(src.has_body_size), cgi_require_target(src.cgi_require_target), has_cgi_require_target(src.has_cgi_require_target)
+{
+}
+
+// Copies data from another object.
 LocationConfig &LocationConfig::operator=(const LocationConfig &rhs)
 {
     if (this != &rhs)
@@ -364,12 +262,7 @@ LocationConfig &LocationConfig::operator=(const LocationConfig &rhs)
     return *this;
 }
 
-/*
-函数：LocationConfig::~LocationConfig
-用途：销毁 LocationConfig。
-变量解释：
-    - allow_methods/cgi_extensions 等容器：由标准库自动释放。
-    - 字符串和 bool/int/unsigned long 字段：无需手动处理。
-实现逻辑：没有手动管理的 fd 或堆内存，string/map/set 自动析构即可。
-*/
-LocationConfig::~LocationConfig() {}
+// Cleans up this object and its owned resources.
+LocationConfig::~LocationConfig()
+{
+}

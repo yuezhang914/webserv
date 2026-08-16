@@ -1,85 +1,85 @@
 #ifndef SERVER_MANAGER_HPP
 #define SERVER_MANAGER_HPP
-
 #include "ServerConfig.hpp"
 #include "Connection.hpp"
 #include "RequestParser.hpp"
 #include "ServerSocket.hpp"
 #include "CgiManager.hpp"
-
-
 class ServerManager
 {
 private:
-    // 1. 核心网络资产
-    std::vector<ServerConfig> _server_configs;   // 配置账本备份
-    std::vector<struct pollfd> _poll_fds;        // poll 监听大阵列
-    std::vector<ServerSocket *> _listen_sockets; // 统一管理套接字指针
-
-    // 2. 运行时网络映射表
-    std::map<int, ServerConfig> _listen_socket_map; // listenFd -> ServerConfig
-    std::map<int, Connection *> _connections;       // clientFd -> Connection
-
-    // 3. CGI 模块 integration
-    CgiManager _cgiManager;                         // 长期持有的 CGI 引擎管家
-    std::map<int, int> _cgi_read_fd_to_client_map;  // readFd  -> clientFd
-    std::map<int, int> _cgi_write_fd_to_client_map; // writeFd -> clientFd
-    std::vector<struct pollfd> _fds_to_add;         // 延迟追加队列（防 vector 扩容野指针）
-
-    // 4. 大型 CGI 内存准入：限制完整 100MB request/response 同时驻留的数量。
+    std::vector<ServerConfig> _server_configs;
+    std::vector<struct pollfd> _poll_fds;
+    std::vector<ServerSocket *> _listen_sockets;
+    std::map<int, ServerConfig> _listen_socket_map;
+    std::map<int, Connection *> _connections;
+    CgiManager _cgiManager;
+    std::map<int, int> _cgi_read_fd_to_client_map;
+    std::map<int, int> _cgi_write_fd_to_client_map;
+    std::vector<struct pollfd> _fds_to_add;
     size_t _active_buffered_large_cgi;
     std::deque<int> _waiting_buffered_large_cgi_clients;
-
-    // 大 CGI 准入与等待队列维护。
+    // Reserves a safe slot for one large CGI request.
     bool ensureLargeCgiSlot(Connection *conn, int clientFd);
+    // Releases the large CGI slot used by one client.
     void releaseLargeCgiSlot(int clientFd);
+    // Restarts large CGI clients that were waiting for a slot.
     void resumeWaitingLargeCgiClients();
-
-    // 5. 物理管道 FD 身份识别
+    // Checks whether the file descriptor is a CGI read pipe.
     bool isCgiReadFd(int fd) const;
+    // Checks whether the file descriptor is a CGI write pipe.
     bool isCgiWriteFd(int fd) const;
-
-    // 5. 内部 Reactor 调度函数
-    void setupSockets();                    // 砸开所有配置端口
-    bool isListenFd(int fd);                // 判别监听套接字 vs 客户连接
-    void acceptNewConnection(int listenFd); // 建立新 Client 连接
+    // Creates and prepares the server listening sockets.
+    void setupSockets();
+    // Checks whether the file descriptor is a listening socket.
+    bool isListenFd(int fd);
+    // Accepts a new client connection.
+    void acceptNewConnection(int listenFd);
+    // Reads socket data to buffer.
     bool readSocketDataToBuffer(Connection *conn, int clientFd, size_t pollIndex);
+    // Starts the CGI task for one parsed request.
     void dispatchCgiTask(Connection *conn, int clientFd, const Response &res);
+    // Processes parsed request.
     void processParsedRequest(Connection *conn, int clientFd);
-
-    void handleClientRead(int clientFd, size_t pollIndex);  // 读取客户端 HTTP 请求
-    void handleClientWrite(int clientFd, size_t pollIndex); // 发送 HTTP Response 给客户端
-    void closeConnection(int clientFd, size_t pollIndex);   // 断开连接（无 poll_index 传参更安全）
+    // Handles client read.
+    void handleClientRead(int clientFd, size_t pollIndex);
+    // Handles client write.
+    void handleClientWrite(int clientFd, size_t pollIndex);
+    // Closes connection.
+    void closeConnection(int clientFd, size_t pollIndex);
+    // Removes closed file descriptors before the next poll call.
     void prePollCleanup();
+    // Runs poll.
     int executePoll(int &retries);
+    // Handles all file descriptor events returned by poll.
     void dispatchEvents();
-
-    // 6. CGI 管道事件派发
+    // Handles cgi read.
     void handleCgiRead(int cgiReadFd);
+    // Handles cgi write.
     void handleCgiWrite(int cgiWriteFd);
-
+    // Removes the CGI write pipe for one client.
     void cleanupClientWritePipe(int clientFd);
-
+    // Stops the server and cleans its open resources.
     void stop();
-
 public:
-    // 对外/组件间辅助接口
+    // Sets client events.
     void setClientEvents(int clientFd, short events);
+    // Adds one file descriptor to the poll list.
     void registerFdToPoll(int fd, short events);
+    // Removes fd from poll.
     void eraseFdFromPoll(int targetFd);
-
-    // 构造与析构
+    // Creates a new ServerManager object.
     ServerManager(const std::vector<ServerConfig> &configs);
+    // Cleans up this object and its owned resources.
     ~ServerManager();
-
-    // 4. 对外核心接口
-    void init(); // 砸端口、建映射
-    void run();  // 主事件轮询大循环
-
+    // Creates the listening sockets and prepares the server manager.
+    void init();
+    // Runs the main server event loop.
+    void run();
 private:
-    // 封杀 C++98 默认拷贝与赋值
+    // Creates a new ServerManager object.
     ServerManager(const ServerManager &src);
+    // Copies data from another object.
     ServerManager &operator=(const ServerManager &rhs);
 };
-
 #endif

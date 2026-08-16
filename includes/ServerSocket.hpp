@@ -1,29 +1,31 @@
 #ifndef SERVERSOCKET_HPP
 #define SERVERSOCKET_HPP
-
 class ServerSocket
 {
 private:
     int _fd;
     std::string _host;
     int _port;
-
-    // 阻止 C++98 的默认拷贝，防止套接字被误关闭
+    // Creates a new ServerSocket object.
     ServerSocket(const ServerSocket &);
+    // Copies data from another object.
     ServerSocket &operator=(const ServerSocket &);
-
+    // Sets non blocking.
     void setNonBlocking();
-
 public:
+    // Creates a new ServerSocket object.
     ServerSocket(const std::string &host, int port);
-    ~ServerSocket(); // RAII 释放：析构时自动 close fd
-
-    // 核心动作：一键拉起监听物理大网
+    // Cleans up this object and its owned resources.
+    ~ServerSocket();
+    // Creates, binds, and starts the listening socket.
     void setup();
-    void closeFd(); // 👈 新增：安全关闭 FD 并重置为 -1
+    // Closes fd.
+    void closeFd();
+    // Returns fd.
     int getFd() const;
+    // Returns host.
     const std::string &getHost() const;
+    // Returns port.
     int getPort() const;
 };
-
 #endif

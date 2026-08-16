@@ -1,40 +1,29 @@
 #ifndef CLIENTSOCKET_HPP
 #define CLIENTSOCKET_HPP
-
-
 class ClientSocket
 {
 private:
     int _fd;
-
-   
-    // 禁用拷贝，防止 FD 遭遇多重析构 close
+    // Creates a new ClientSocket object.
     ClientSocket(const ClientSocket &);
+    // Copies data from another object.
     ClientSocket &operator=(const ClientSocket &);
-
 public:
-    // 默认构造，用来放入 std::map 等容器
+    // Creates a new ClientSocket object.
     ClientSocket();
+    // Creates a new ClientSocket object.
     explicit ClientSocket(int fd);
-    ~ClientSocket(); // RAII：生命周期结束自动物理 close
-
-        // 核心动作 2：底层无 errno 依赖物理读取
-    // 如果读取成功，返回字节数；
-    // 如果 EOF 触发返回 0；
-    // 如果遇到阻碍（EAGAIN/EWOULDBLOCK）返回 -1；
-    // 如果发生物理崩溃（ECONNRESET 等）返回 -2。
+    // Cleans up this object and its owned resources.
+    ~ClientSocket();
+    // Reads available data from the client socket.
     ssize_t read(char *buf, size_t size) const;
-
-    // 核心动作 3：底层无 errno 依赖物理喷吐
+    // Sends response data to the client socket.
     ssize_t write(const std::string &data) const;
-
-     // 自洗非阻塞（剥夺阻塞特权）
+    // Sets non blocking.
     void setNonBlocking();
-
-    // 核心动作 4：主动断开
+    // Closes fd.
     void closeFd();
-
+    // Returns fd.
     int getFd() const;
 };
-
 #endif

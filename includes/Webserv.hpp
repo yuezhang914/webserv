@@ -1,15 +1,11 @@
 #ifndef WEBSERV_HPP
 #define WEBSERV_HPP
-
 #define DEBUG_MODE 1
-
 #ifdef DEBUG_MODE
-    #define DEBUG_LOG(msg) std::cout << "[DEBUG] " << msg << std::endl
+#define DEBUG_LOG(msg) std::cout << "[DEBUG] " << msg << std::endl
 #else
-    #define DEBUG_LOG(msg) // 宏替换为空，编译器会把这里的打印代码直接删掉
+#define DEBUG_LOG(msg)
 #endif
-
-// 2. 网络底层必用的系统内核头文件（网络核心底座，总控统一引入）
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -27,42 +23,29 @@
 #include <fstream>
 #include <sstream>
 #include <sys/types.h>
-#include <unistd.h>   // 物理引入 fork, pipe, dup2, close 等系统调用
-#include <sys/wait.h> // 物理引入 waitpid
+#include <unistd.h>
+#include <sys/wait.h>
 #include <ctime>
-#include <csignal> // 物理引入 signal, sigaction 等信号处理相关系统调用
+#include <csignal>
 #include <deque>
 #include <netdb.h>
 #include <utility>
-
-// 3. 业务平坦化组装
 #include "Config.hpp"
 #include "ServerConfig.hpp"
 #include "LocationConfig.hpp"
-
 #include "ServerManager.hpp"
-
 #include "Signal.hpp"
-
 #include "Connection.hpp"
 #include "ServerSocket.hpp"
 #include "ClientSocket.hpp"
-
 #include "CgiHandler.hpp"
 #include "CgiManager.hpp"
-
 #include "SessionCookie.hpp"
-
 #include "Request.hpp"
 #include "RequestParser.hpp"
 #include "Response.hpp"
-
 #include "Signal.hpp"
-
 #include <limits.h>
 #include <sstream>
-
-// 全局/静态原子标志位
 extern volatile sig_atomic_t g_loop_running;
-
 #endif
