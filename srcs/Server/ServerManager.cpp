@@ -751,7 +751,8 @@ void ServerManager::handleCgiRead(int cgiReadFd)
     2. 错误处理分支（res.status == CGI_ERROR）：
        - 说明管道写入发生物理破裂（如 EPIPE 或子进程挂掉）；
        - 从 _cgi_write_fd_to_client_map 账本与 poll 监听列表中抹除该 cgiWriteFd；
-       - 通过 res.clientFd 匹配对应的 Connection，构建 500 状态码的错误 Response 并挂载客户端 Socket 的 POLLOUT 事件，准备回复错误页面。
+       - 同步清理该客户端残留的 CGI read FD 映射与 poll 项，避免 CgiManager 已关闭 FD 后 ServerManager 仍保留失效条目；
+       - 通过 res.clientFd 匹配对应的 Connection，构建错误 Response 并挂载客户端 Socket 的 POLLOUT 事件，准备回复错误页面。
     3. 正常传输与完工分支（res.status == CGI_CONTINUE）：
        - 完工判定：调用 _cgiManager.hasWriteTask(cgiWriteFd) 检查该写管道是否已被 CgiManager 在内部关闭并注销；
        - 若 hasWriteTask 返回 false（ Body 已完整发完并发送 EOF）：从 Server 侧映射表擦除并调用 eraseFdFromPoll 从 poll 监听队列中注销该写 FD；
@@ -765,6 +766,20 @@ void ServerManager::handleCgiWrite(int cgiWriteFd)
     {
         this->_cgi_write_fd_to_client_map.erase(cgiWriteFd);
         this->eraseFdFromPoll(cgiWriteFd);
+
+        // 修改：CgiManager 在写失败时会同时关闭 CGI read/write FD，这里同步清理 ServerManager 的 read 侧账本和 poll 项。
+        std::map<int, int>::iterator readIt = this->_cgi_read_fd_to_client_map.begin();
+        while (readIt != this->_cgi_read_fd_to_client_map.end())
+        {
+            if (readIt->second == res.clientFd)
+            {
+                this->eraseFdFromPoll(readIt->first);
+                this->_cgi_read_fd_to_client_map.erase(readIt++);
+            }
+            else
+                ++readIt;
+        }
+
         std::map<int, Connection *>::iterator it = this->_connections.find(res.clientFd);
         if (it != this->_connections.end() && it->second != NULL)
         {
@@ -846,9 +861,11 @@ void ServerManager::dispatchEvents()
                     this->_cgi_read_fd_to_client_map.erase(it);
                     this->_cgiManager.removeTaskByClientFd(clientFd);
 
-                    Connection *conn = this->_connections[clientFd]; // 假设 client_map 里的一定合法，如果怕也可以继续 find
-                    if (conn)
+                    // 修改：错误路径只用 find() 查询连接，避免 operator[] 在 clientFd 不存在时插入空条目。
+                    std::map<int, Connection *>::iterator connIt = this->_connections.find(clientFd);
+                    if (connIt != this->_connections.end() && connIt->second != NULL)
                     {
+                        Connection *conn = connIt->second;
                         conn->response.createResponse(500, "CGI Read Pipe Error", conn->config.error_pages);
                         conn->write_buffer = conn->response.responseToString();
                         conn->close_after_write = true;
@@ -879,9 +896,11 @@ void ServerManager::dispatchEvents()
                     int clientFd = it->second;
                     this->_cgi_write_fd_to_client_map.erase(it);
                     this->_cgiManager.removeTaskByClientFd(clientFd);
-                    Connection *conn = this->_connections[clientFd];
-                    if (conn)
+                    // 修改：错误路径只用 find() 查询连接，避免 operator[] 意外创建新的 map 元素。
+                    std::map<int, Connection *>::iterator connIt = this->_connections.find(clientFd);
+                    if (connIt != this->_connections.end() && connIt->second != NULL)
                     {
+                        Connection *conn = connIt->second;
                         conn->response.createResponse(500, "CGI Write Pipe Error", conn->config.error_pages);
                         conn->write_buffer = conn->response.responseToString();
                         conn->close_after_write = true;
@@ -1014,9 +1033,15 @@ void ServerManager::run()
                 else
                     ++it;
             }
-            Connection *conn = this->_connections[clientFd];
-            if (conn)
+
+            // 修改：checkTimeout() 已关闭 CgiManager 内部的两端 pipe，这里同步清理 ServerManager 的 write 侧映射和 poll 项。
+            this->cleanupClientWritePipe(clientFd);
+
+            // 修改：超时错误路径使用 find()，避免 operator[] 因失效 clientFd 插入空连接。
+            std::map<int, Connection *>::iterator connIt = this->_connections.find(clientFd);
+            if (connIt != this->_connections.end() && connIt->second != NULL)
             {
+                Connection *conn = connIt->second;
                 conn->response.createResponse(statusCode, "Gateway Timeout", conn->config.error_pages);
                 conn->write_buffer = conn->response.responseToString();
                 conn->close_after_write = true;

@@ -569,6 +569,13 @@ print()
 print("SLOW_CGI_FINISHED")
 PY
 
+    # 新增测试：该 CGI 立即退出且不读取 stdin，用于验证 CGI 写管道失败后的清理路径。
+    cat > "$SITE_ROOT/cgi/exit_early.py" <<'PY'
+#!/usr/bin/env python3
+import os
+os._exit(1)
+PY
+
     cat > "$SITE_ROOT/cgi/echo.sh" <<'SHCGI'
 #!/bin/sh
 BODY=$(cat)
@@ -584,6 +591,7 @@ SHCGI
         "$SITE_ROOT/cgi/no_length.py" \
         "$SITE_ROOT/cgi/bad.py" \
         "$SITE_ROOT/cgi/slow.py" \
+        "$SITE_ROOT/cgi/exit_early.py" \
         "$SITE_ROOT/cgi/echo.sh"
 
     PYTHON_BIN="$(command -v python3)"
@@ -660,6 +668,8 @@ server {
         # so point the root directly at the directory that contains the CGI files.
         root $SITE_ROOT/cgi;
         allow_methods GET POST;
+        # 新增测试：允许发送足够大的 POST body，稳定覆盖 CGI 提前关闭 stdin 的写管道错误清理路径。
+        max_body_size 1M;
         cgi_extension .py $PYTHON_BIN;
         cgi_extension .sh $SH_BIN;
     }
@@ -1347,6 +1357,22 @@ run_cgi_tests()
         fail "Server terminated after the failing CGI"
     fi
 
+    # 新增测试：让 CGI 在读取 POST body 前退出，验证写管道错误不会遗留 CGI FD，也不会杀死主服务器。
+    python3 - "$TMP_ROOT/cgi_write_failure_body" <<'PY'
+from pathlib import Path
+import sys
+Path(sys.argv[1]).write_bytes(b"W" * (256 * 1024))
+PY
+    cgi_write_fd_before="$(fd_count "$SERVER_PID")"
+    status="$(http_request POST "$BASE/cgi/exit_early.py" "$headers" "$body" -H 'Content-Type: application/octet-stream' --data-binary "@$TMP_ROOT/cgi_write_failure_body")"
+    assert_status_one_of "$status" "500 502" "CGI early-exit POST"
+    if server_alive; then
+        pass "Server survived CGI stdin pipe failure"
+    else
+        fail "Server terminated after CGI stdin pipe failure"
+    fi
+    assert_fd_near_baseline "$cgi_write_fd_before" "CGI write-error FD cleanup"
+
     if [ "$MODE" = "quick" ]; then
         skip "Slow CGI timeout and concurrency test in quick mode."
         return
@@ -1356,6 +1382,7 @@ run_cgi_tests()
     slow_headers="$TMP_ROOT/slow_headers"
     slow_body="$TMP_ROOT/slow_body"
     slow_status_file="$TMP_ROOT/slow_status"
+    cgi_timeout_fd_before="$(fd_count "$SERVER_PID")"
 
     (
         curl -sS --max-time 20 \
@@ -1398,6 +1425,8 @@ PY
     wait "$slow_pid" 2>/dev/null || true
     slow_status="$(cat "$slow_status_file" 2>/dev/null || true)"
     assert_status "$slow_status" 504 "Slow CGI timeout"
+    # 新增测试：timeout 会同时关闭 CgiManager 两端 pipe，并要求 ServerManager 清除对应 poll/map 记录。
+    assert_fd_near_baseline "$cgi_timeout_fd_before" "CGI timeout FD cleanup"
 
     zombie_count="$(ps -eo stat=,command= 2>/dev/null \
         | grep -E '[s]low.py|[e]cho.py|[b]ad.py|[e]cho.sh' \
@@ -1631,6 +1660,22 @@ fd_count()
         return
     fi
     echo "-1"
+}
+
+# 新增测试辅助：等待异步清理完成后检查服务器 FD 数是否回到测试前附近，专门捕获 CGI pipe 泄露。
+assert_fd_near_baseline()
+{
+    before="$1"
+    name="$2"
+    sleep 1
+    after="$(fd_count "$SERVER_PID")"
+    if [ "$before" = "-1" ] || [ "$after" = "-1" ]; then
+        skip "$name: FD count is unavailable on this system."
+    elif [ "$after" -le $((before + 2)) ]; then
+        pass "$name ($before -> $after)"
+    else
+        fail "$name: FD count stayed elevated ($before -> $after)"
+    fi
 }
 
 rss_kb()
