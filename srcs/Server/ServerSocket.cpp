@@ -52,32 +52,19 @@ ServerSocket::~ServerSocket()
 void ServerSocket::setNonBlocking()
 {
     // 1. 注入 O_NONBLOCK（非阻塞流）
-    int flags = fcntl(this->_fd, F_GETFL, 0);
-    if (flags < 0)
-    {
-        std::cerr << "Error: fcntl F_GETFL failed for fd " << this->_fd << std::endl;
-        exit(1);
-    }
-    if (fcntl(this->_fd, F_SETFL, flags | O_NONBLOCK) < 0)
+    // 🚀 唯一合规的写法：抛弃 F_GETFL，直接暴力覆写。
+    // 因为这是刚刚 socket() 出来的监听 FD，干净得很，覆写绝对安全。
+    if (fcntl(this->_fd, F_SETFL, O_NONBLOCK) < 0)
     {
         std::cerr << "Error: fcntl F_SETFL O_NONBLOCK failed for fd " << this->_fd << std::endl;
-        exit(1);
+        exit(1); // 监听 Socket 初始化失败，直接退出进程是合理的
     }
 
-    // 2. 注入 FD_CLOEXEC（物理过河拆桥锁，彻底掐灭子进程偷渡 FD 的隐患）
-    // 先通过 F_GETFD 捞出当前的描述符标志位
-    int fd_flags = fcntl(this->_fd, F_GETFD, 0);
-    if (fd_flags < 0)
-    {
-        std::cerr << "Error: fcntl F_GETFD failed for fd " << this->_fd << std::endl;
-        exit(1);
-    }
-    // 使用 | 运算符，安全地把 FD_CLOEXEC 特权标志叠加进去，再用 F_SETFD 写回
-    if (fcntl(this->_fd, F_SETFD, fd_flags | FD_CLOEXEC) < 0)
-    {
-        std::cerr << "Error: fcntl F_SETFD FD_CLOEXEC failed for fd " << this->_fd << std::endl;
-        exit(1);
-    }
+    // 2. ⛔️ 彻底删除 FD_CLOEXEC 相关的 F_GETFD 和 F_SETFD
+    // 你注释里提到的“物理过河拆桥锁”和“防止子进程偷渡”，
+    // 现在全部交接给 CGI fork() 后的那个盲关循环：
+    // for (long i = 3; i < max_fd; ++i) ::close(i);
+    // 这种做法在 42 的规则框架下，才是唯一的合法护城河。
 }
 
 /**

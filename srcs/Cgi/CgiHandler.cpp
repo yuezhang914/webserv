@@ -268,19 +268,16 @@ static std::string baseName(const std::string &path)
 */
 static bool configureParentPipeFd(int fd)
 {
-    int statusFlags = fcntl(fd, F_GETFL, 0);
-    if (statusFlags < 0)
+    // 🚀 唯一合规的写法：直接覆写标志位为 O_NONBLOCK
+    // 不用担心覆盖原状态，因为刚创建的 pipe fd 没有任何你需要保留的特殊状态
+    if (fcntl(fd, F_SETFL, O_NONBLOCK) < 0)
+    {
         return false;
+    }
 
-    if (fcntl(fd, F_SETFL, statusFlags | O_NONBLOCK) < 0)
-        return false;
-
-    int descriptorFlags = fcntl(fd, F_GETFD, 0);
-    if (descriptorFlags < 0)
-        return false;
-
-    if (fcntl(fd, F_SETFD, descriptorFlags | FD_CLOEXEC) < 0)
-        return false;
+    // ⛔️ 彻底删除 F_GETFD, F_SETFD 和 FD_CLOEXEC 的逻辑！
+    // 防止管道 FD 被 CGI 子进程继承的兜底工作，
+    // 交给 CGI fork() 之后的 for (int i = 3; i < max_fd; ++i) { close(i); } 去完成。
 
     return true;
 }
@@ -359,7 +356,6 @@ bool CgiHandler::_setupPipes(int pipe_to_parent[2], int pipe_to_child[2])
 */
 void CgiHandler::_executeChildProcess(int childReadFd, int parentWriteFd)
 {
-    //dprintf(2, "========== MY CGI CODE ==========\n");
     if (childReadFd != STDIN_FILENO)
     {
         if (dup2(childReadFd, STDIN_FILENO) < 0)
@@ -374,11 +370,11 @@ void CgiHandler::_executeChildProcess(int childReadFd, int parentWriteFd)
     {
         if (dup2(parentWriteFd, STDOUT_FILENO) < 0)
         {
-            close(parentWriteFd);
             ::exit(127);
         }
         close(parentWriteFd);
     }
+
     std::string scriptDirectory = directoryName(_script_path);
     std::string scriptName = baseName(_script_path);
     if (chdir(scriptDirectory.c_str()) != 0)
@@ -386,11 +382,17 @@ void CgiHandler::_executeChildProcess(int childReadFd, int parentWriteFd)
         ::exit(127);
     }
     char **env = _buildEnvironment();
-
     if (env == NULL)
     {
         ::exit(127);
     }
+
+    // 终极白名单合规写法：使用 FD_SETSIZE 进行暴力清理
+    for (int i = 3; i < FD_SETSIZE; ++i)
+    {
+        ::close(i);
+    }
+
     char *args[3];
     if (!_interpreter_path.empty())
     {
@@ -406,7 +408,9 @@ void CgiHandler::_executeChildProcess(int childReadFd, int parentWriteFd)
         args[1] = NULL;
         ::execve(args[0], args, env);
     }
-    perror("execve failed");
+
+    // strerror 和 errno 都在白名单内！
+    std::cerr << "[CGI] execve failed: " << strerror(errno) << std::endl;
     _freeEnvironment(env);
     ::exit(127);
 }

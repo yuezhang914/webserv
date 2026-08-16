@@ -45,7 +45,7 @@ int main(int argc, char **argv)
         return 1; 
     }
 
-    config.printConfig(); 
+    //config.printConfig(); 
 
     ServerManager srvmng(config.getServers());
     
