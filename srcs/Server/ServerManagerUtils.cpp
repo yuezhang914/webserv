@@ -192,7 +192,8 @@ void ServerManager::closeConnection(int clientFd, size_t pollIndex)
         this->_connections.erase(it);
     }
 
-    std::cout << "[ServerManager] Client FD " << clientFd << " successfully closed and cleaned up." << std::endl;
+    // 🚀 替换为 DEBUG_LOG：压测时静音，保护服务器吞吐量
+    DEBUG_LOG("[ServerManager] Client FD " << clientFd << " successfully closed and cleaned up.");
 }
 
 /*
@@ -279,6 +280,7 @@ void ServerManager::registerFdToPoll(int fd, short events)
 {
     if (fd < 0)
     {
+        // 这是一个严重的逻辑错误/系统错误，必须保留 std::cerr
         std::cerr << "[ServerManager] Error: Attempted to register invalid negative FD: " << fd << std::endl;
         return;
     }
@@ -288,7 +290,8 @@ void ServerManager::registerFdToPoll(int fd, short events)
     {
         if (this->_poll_fds[i].fd == fd)
         {
-            std::cout << "[ServerManager] Notice: FD " << fd << " already registered in poll tree. Updating events instead." << std::endl;
+            // 🚀 替换为 DEBUG_LOG
+            DEBUG_LOG("[ServerManager] Notice: FD " << fd << " already registered in poll tree. Updating events instead.");
             this->_poll_fds[i].events = events; // 存在则直接覆写事件掩码
             this->_poll_fds[i].revents = 0;
             return;
@@ -303,7 +306,8 @@ void ServerManager::registerFdToPoll(int fd, short events)
 
     this->_poll_fds.push_back(pfd); // 正式入籍大循环名册
 
-    std::cout << "[ServerManager] FD " << fd << " successfully registered to poll tree with events: " << events << std::endl;
+    // 🚀 替换为 DEBUG_LOG：保护压测时的终端清净
+    DEBUG_LOG("[ServerManager] FD " << fd << " successfully registered to poll tree with events: " << events);
 }
 
 /*

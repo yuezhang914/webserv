@@ -64,7 +64,7 @@ void ServerManager::init()
     this->setupSockets();
 
     // ❌ 删掉这行，把子进程的所有权交还给 CgiManager
-    // ::signal(SIGCHLD, SIG_IGN); 
+    // ::signal(SIGCHLD, SIG_IGN);
 
     // ✅ 必须保留这行：防止客户端暴力断开连接时，write/send 触发 SIGPIPE 杀死主进程
     ::signal(SIGPIPE, SIG_IGN);
@@ -89,7 +89,7 @@ void ServerManager::init()
 void ServerManager::setupSockets()
 {
     // 将去重容器改为 std::pair，记录 (host, port)
-    std::vector< std::pair<std::string, int> > handled_endpoints;
+    std::vector<std::pair<std::string, int> > handled_endpoints;
 
     for (size_t i = 0; i < _server_configs.size(); ++i)
     {
@@ -109,7 +109,7 @@ void ServerManager::setupSockets()
 
         if (is_duplicate)
         {
-            std::cout << "[ServerManager] Multi-server configuration detected for " 
+            std::cout << "[ServerManager] Multi-server configuration detected for "
                       << host << ":" << port << " (Skipping duplicate bind)" << std::endl;
             continue;
         }
@@ -117,14 +117,14 @@ void ServerManager::setupSockets()
         ServerSocket *srv_sock = new ServerSocket(host, port);
         srv_sock->setup();
         int listenFd = srv_sock->getFd();
-        std::cout << "[ServerManager] Successfully listening on " 
+        std::cout << "[ServerManager] Successfully listening on "
                   << host << ":" << port << " (FD: " << listenFd << ")" << std::endl;
 
         this->_listen_sockets.push_back(srv_sock);
-        
+
         // 🚀 将新的 (host, port) 组合推入已处理列表
         handled_endpoints.push_back(std::make_pair(host, port));
-        
+
         _listen_socket_map[listenFd] = _server_configs[i];
 
         struct pollfd pfd;
@@ -165,7 +165,7 @@ void ServerManager::acceptNewConnection(int listenFd)
     {
         return;
     }
-    
+
     ClientSocket *p_socket = NULL;
     Connection *conn = NULL;
 
@@ -173,7 +173,7 @@ void ServerManager::acceptNewConnection(int listenFd)
     {
         p_socket = new ClientSocket(clientFd);
         conn = new Connection();
-        
+
         // 明确所有权转移：此时 conn 接管了 p_socket
         conn->socket = p_socket;
 
@@ -196,12 +196,12 @@ void ServerManager::acceptNewConnection(int listenFd)
     {
         std::cerr << "[Acceptor] Critical allocation error: " << e.what() << std::endl;
 
-        // 修复 Bug 2 (Dangling Pointer): 
+        // 修复 Bug 2 (Dangling Pointer):
         // 无论异常抛出时 conn 是否已经成功进入 map，强制擦除。
         // 如果 clientFd 不在 map 中，erase() 安全无副作用。
         this->_connections.erase(clientFd);
 
-        // 🚀 修复 Bug 1 (Double Delete): 
+        // 🚀 修复 Bug 1 (Double Delete):
         // 严格按照构造进度的反向进行清理，互斥分支保证不发生多次 delete
         if (conn != NULL)
         {
@@ -236,6 +236,7 @@ void ServerManager::acceptNewConnection(int listenFd)
 bool ServerManager::readSocketDataToBuffer(Connection *conn, int clientFd, size_t pollIndex)
 {
     char buffer[BUFFER_SIZE];
+    // 读取数据
     ssize_t bytes_read = conn->socket->read(buffer, BUFFER_SIZE - 1);
 
     if (bytes_read > 0)
@@ -243,16 +244,19 @@ bool ServerManager::readSocketDataToBuffer(Connection *conn, int clientFd, size_
         conn->read_buffer.append(buffer, static_cast<size_t>(bytes_read));
         return true;
     }
+
     if (bytes_read == 0)
     {
-        std::cout << "[ServerManager] Client FD " << clientFd
-                  << " closed connection (EOF)." << std::endl;
+        // 🚀 修改点 1：客户端正常断开，属于最高频的事件，使用 DEBUG_LOG
+        DEBUG_LOG("[ServerManager] Client FD " << clientFd << " closed connection (EOF).");
     }
     else
     {
-        std::cerr << "[ServerManager] recv failed on ready Client FD "
-                  << clientFd << ". Closing connection." << std::endl;
+        // 🚀 修改点 2：单客户端的读写失败（如被 Siege 暴力掐断）极其常见，
+        // 绝不可当做系统级崩溃来用 std::cerr 打印，同样使用 DEBUG_LOG 包裹。
+        DEBUG_LOG("[ServerManager] recv failed on ready Client FD " << clientFd << ". Closing connection.");
     }
+
     this->closeConnection(clientFd, pollIndex);
     return false;
 }
@@ -299,7 +303,12 @@ void ServerManager::dispatchCgiTask(Connection *conn, int clientFd, const Respon
     }
     else
     {
-        std::cerr << "[CGI] Missing document root\n";
+        // 🚀 修复 1：使用 DEBUG_LOG 替换，并生成 500 错误安全返回客户端，防止死锁
+        DEBUG_LOG("[CGI] Error: Missing document root for client " << clientFd);
+        conn->response.createResponse(500, "CGI Missing Document Root", conn->config.error_pages);
+        conn->write_buffer = conn->response.responseToString();
+        conn->close_after_write = true;
+        this->setClientEvents(clientFd, POLLOUT);
         return;
     }
 
@@ -346,7 +355,8 @@ void ServerManager::dispatchCgiTask(Connection *conn, int clientFd, const Respon
 
     if (!launched)
     {
-        std::cerr << "[CGI] Error: Failed to spawn CGI process for client " << clientFd << std::endl;
+        // 🚀 修复 2：系统资源耗尽或 fork 失败极其常见（尤其压测时），换用 DEBUG_LOG
+        DEBUG_LOG("[CGI] Error: Failed to spawn CGI process for client " << clientFd);
         conn->response.createResponse(500, "CGI Spawn Failed", conn->config.error_pages);
         conn->write_buffer = conn->response.responseToString();
         conn->close_after_write = true;
@@ -366,8 +376,10 @@ void ServerManager::dispatchCgiTask(Connection *conn, int clientFd, const Respon
         this->registerFdToPoll(outWriteFd, POLLOUT);
     }
 
-    this->setClientEvents(clientFd, 0);
-    std::cout << "[⚡ WebServ Core] Client " << clientFd << " successfully split into CGI pipeline, client read paused." << std::endl;
+    this->setClientEvents(clientFd, 0); // 暂停客户端 poll 监听，等待 CGI 完成
+
+    // 🚀 修复 3：将压测性能杀手替换为 DEBUG_LOG 宏
+    DEBUG_LOG("[⚡ WebServ Core] Client " << clientFd << " successfully split into CGI pipeline, client read paused.");
 }
 
 /*
@@ -386,42 +398,56 @@ void ServerManager::dispatchCgiTask(Connection *conn, int clientFd, const Respon
 */
 void ServerManager::processParsedRequest(Connection *conn, int clientFd)
 {
+    // 💡 保持 static 不变，这在单线程 poll 模型中是完美且安全的
     static SessionStore sessionStore;
 
-    std::cout << "\n================ [DEBUG REQUEST] ================" << std::endl;
-    std::cout << "[REQ] Method: " << conn->request.getMethod()
-              << " | URI: " << conn->request.getPath()
-              << " | Body Size in Request: " << conn->request.getBody().size() << " bytes" << std::endl;
+    // 🚀 将大段的请求分析日志包裹进 DEBUG_LOG
+    DEBUG_LOG("\n================ [DEBUG REQUEST] ================");
+    DEBUG_LOG("[REQ] Method: " << conn->request.getMethod()
+                               << " | URI: " << conn->request.getPath()
+                               << " | Body Size in Request: " << conn->request.getBody().size() << " bytes");
 
     Response res = buildResponse(conn->request, sessionStore);
 
     std::string contentLength;
     res.getHeader("Content-Length", contentLength);
 
-    std::cout << "[RES] Status: " << res.getStatusCode()
-              << " | Header Content-Length: " << contentLength << std::endl;
+    DEBUG_LOG("[RES] Status: " << res.getStatusCode()
+                               << " | Header Content-Length: " << contentLength);
 
     std::string script_path;
     if (res.getHeader("X-Internal-CGI-Path", script_path))
     {
-        std::cout << "[DEBUG CGI Task] Dispatching CGI -> scriptPath = " << script_path << std::endl;
-        std::cout << "=================================================\n" << std::endl;
+        DEBUG_LOG("[DEBUG CGI Task] Dispatching CGI -> scriptPath = " << script_path);
+        DEBUG_LOG("=================================================\n");
+
         this->dispatchCgiTask(conn, clientFd, res);
     }
     else
     {
-        std::cout << "[DEBUG Normal Task] No CGI header, sending direct response." << std::endl;
-        std::cout << "=================================================\n" << std::endl;
+        DEBUG_LOG("[DEBUG Normal Task] No CGI header, sending direct response.");
+        DEBUG_LOG("=================================================\n");
 
         conn->write_buffer = res.responseToString();
 
         std::string connHeader;
-        if (res.getHeader("Connection", connHeader) &&
-            (connHeader == "close" || connHeader == "Close"))
+        if (res.getHeader("Connection", connHeader))
         {
-            conn->close_after_write = true;
+            // 防御性编程：由于 HTTP 头可能大小写混杂，比如 "CLOSE" 或 "Close"
+            // 为了简单稳妥，可以统一转小写，或者直接用 find
+            std::string temp = connHeader;
+            for (size_t i = 0; i < temp.length(); ++i)
+            {
+                temp[i] = std::tolower(temp[i]);
+            }
+
+            if (temp == "close")
+            {
+                conn->close_after_write = true;
+            }
         }
 
+        // 把读完并处理完毕的 Client 挂载上 POLLOUT 事件，等待事件循环下一次派发给 ClientSocket::write
         this->setClientEvents(clientFd, POLLOUT);
     }
 }
@@ -438,12 +464,10 @@ static bool requestUsesChunkedBody(const Request &request)
     if (!request.getHeader("transfer-encoding", value))
         return false;
     size_t start = 0;
-    while (start < value.size()
-        && (value[start] == ' ' || value[start] == '\t'))
+    while (start < value.size() && (value[start] == ' ' || value[start] == '\t'))
         ++start;
     size_t end = value.size();
-    while (end > start
-        && (value[end - 1] == ' ' || value[end - 1] == '\t'))
+    while (end > start && (value[end - 1] == ' ' || value[end - 1] == '\t'))
         --end;
     std::string normalized = value.substr(start, end - start);
     size_t i = 0;
@@ -476,8 +500,8 @@ static int advanceConnectionChunkScan(Connection *conn, size_t &consumed)
             &conn->config, conn->request.getPath());
     }
     return RequestParser::advanceChunkedScan(conn->read_buffer,
-        conn->chunk_scan_pos, conn->chunk_body_limit,
-        conn->chunk_decoded_size, consumed);
+                                             conn->chunk_scan_pos, conn->chunk_body_limit,
+                                             conn->chunk_decoded_size, consumed);
 }
 
 /*
@@ -499,9 +523,7 @@ static bool requestTargetsConfiguredCgi(const Connection *conn)
     {
         const std::string &extension = it->first;
         const std::string &path = conn->request.getPath();
-        if (!extension.empty() && path.size() >= extension.size()
-            && path.compare(path.size() - extension.size(),
-                extension.size(), extension) == 0)
+        if (!extension.empty() && path.size() >= extension.size() && path.compare(path.size() - extension.size(), extension.size(), extension) == 0)
             return true;
         ++it;
     }
@@ -530,8 +552,8 @@ bool ServerManager::ensureLargeCgiSlot(Connection *conn, int clientFd)
     conn->large_cgi_waiting = true;
     this->_waiting_buffered_large_cgi_clients.push_back(clientFd);
     this->setClientEvents(clientFd, 0);
-    std::cout << "[ServerManager] Large CGI client " << clientFd
-              << " paused by memory admission control." << std::endl;
+    DEBUG_LOG("[ServerManager] Large CGI client " << clientFd
+                                                  << " paused by memory admission control.");
     return false;
 }
 
@@ -542,22 +564,20 @@ bool ServerManager::ensureLargeCgiSlot(Connection *conn, int clientFd)
 */
 void ServerManager::resumeWaitingLargeCgiClients()
 {
-    while (this->_active_buffered_large_cgi < MAX_BUFFERED_LARGE_CGI_TASKS
-        && !this->_waiting_buffered_large_cgi_clients.empty())
+    while (this->_active_buffered_large_cgi < MAX_BUFFERED_LARGE_CGI_TASKS && !this->_waiting_buffered_large_cgi_clients.empty())
     {
         int clientFd = this->_waiting_buffered_large_cgi_clients.front();
         this->_waiting_buffered_large_cgi_clients.pop_front();
         std::map<int, Connection *>::iterator it = this->_connections.find(clientFd);
-        if (it == this->_connections.end() || it->second == NULL
-            || !it->second->large_cgi_waiting)
+        if (it == this->_connections.end() || it->second == NULL || !it->second->large_cgi_waiting)
             continue;
         Connection *conn = it->second;
         conn->large_cgi_waiting = false;
         conn->large_cgi_slot_acquired = true;
         ++this->_active_buffered_large_cgi;
         this->setClientEvents(clientFd, POLLIN);
-        std::cout << "[ServerManager] Large CGI client " << clientFd
-                  << " resumed." << std::endl;
+        DEBUG_LOG("[ServerManager] Large CGI client " << clientFd
+                                                      << " resumed.");
     }
 }
 
@@ -631,9 +651,7 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
 
     if (conn->chunk_scan_active)
     {
-        if (requestTargetsConfiguredCgi(conn)
-            && conn->read_buffer.size() >= LARGE_CGI_BUFFER_THRESHOLD
-            && !this->ensureLargeCgiSlot(conn, clientFd))
+        if (requestTargetsConfiguredCgi(conn) && conn->read_buffer.size() >= LARGE_CGI_BUFFER_THRESHOLD && !this->ensureLargeCgiSlot(conn, clientFd))
             return;
 
         status = advanceConnectionChunkScan(conn, consumed);
@@ -641,34 +659,30 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
         {
             conn->chunk_scan_active = false;
             status = RequestParser::parseBuffer(conn->read_buffer,
-                conn->request, &conn->config, consumed);
+                                                conn->request, &conn->config, consumed);
         }
     }
     else
     {
         status = RequestParser::parseBuffer(conn->read_buffer,
-            conn->request, &conn->config, consumed);
-        if (status == REQUEST_INCOMPLETE
-            && requestUsesChunkedBody(conn->request))
+                                            conn->request, &conn->config, consumed);
+        if (status == REQUEST_INCOMPLETE && requestUsesChunkedBody(conn->request))
         {
-            if (requestTargetsConfiguredCgi(conn)
-                && conn->read_buffer.size() >= LARGE_CGI_BUFFER_THRESHOLD
-                && !this->ensureLargeCgiSlot(conn, clientFd))
+            if (requestTargetsConfiguredCgi(conn) && conn->read_buffer.size() >= LARGE_CGI_BUFFER_THRESHOLD && !this->ensureLargeCgiSlot(conn, clientFd))
                 return;
             status = advanceConnectionChunkScan(conn, consumed);
             if (status == REQUEST_OK)
             {
                 conn->chunk_scan_active = false;
                 status = RequestParser::parseBuffer(conn->read_buffer,
-                    conn->request, &conn->config, consumed);
+                                                    conn->request, &conn->config, consumed);
             }
         }
     }
 
     if (status == REQUEST_OK)
     {
-        std::cout << "[ServerManager] Request parsed successfully for FD "
-                  << clientFd << std::endl;
+        DEBUG_LOG("[ServerManager] Request parsed successfully for FD " << clientFd);
         conn->chunk_scan_active = false;
         conn->chunk_scan_pos = 0;
         conn->chunk_decoded_size = 0;
@@ -699,7 +713,7 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
         conn->chunk_body_limit = 0;
         std::string().swap(conn->read_buffer);
         conn->write_buffer = "HTTP/1.1 413 Payload Too Large\r\n"
-            "Content-Length: 0\r\nConnection: close\r\n\r\n";
+                             "Content-Length: 0\r\nConnection: close\r\n\r\n";
         this->setClientEvents(clientFd, POLLOUT);
     }
     else
@@ -709,7 +723,7 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
                   << ". Pre-writing 400 response." << std::endl;
         conn->close_after_write = true;
         conn->write_buffer = "HTTP/1.1 400 Bad Request\r\n"
-            "Content-Length: 0\r\nConnection: close\r\n\r\n";
+                             "Content-Length: 0\r\nConnection: close\r\n\r\n";
         this->setClientEvents(clientFd, POLLOUT);
     }
 }
@@ -727,7 +741,6 @@ void ServerManager::handleClientRead(int clientFd, size_t pollIndex)
  */
 void ServerManager::handleClientWrite(int clientFd, size_t pollIndex)
 {
-
     std::map<int, Connection *>::iterator it = this->_connections.find(clientFd);
     if (it == this->_connections.end() || it->second == NULL)
         return;
@@ -741,12 +754,10 @@ void ServerManager::handleClientWrite(int clientFd, size_t pollIndex)
         }
         else if (conn->drain_input_before_close)
         {
-
             this->setClientEvents(clientFd, POLLIN);
         }
         else
         {
-
             this->releaseLargeCgiSlot(clientFd);
             conn->clear();
             this->setClientEvents(clientFd, POLLIN);
@@ -758,50 +769,48 @@ void ServerManager::handleClientWrite(int clientFd, size_t pollIndex)
 
     if (bytes_sent > 0)
     {
-
         conn->write_buffer.erase(0, bytes_sent);
 
         if (conn->write_buffer.empty())
         {
             if (conn->close_after_write)
             {
-                std::cout << "[ServerManager] Sent response completely to FD " << clientFd << ". Closing connection per policy." << std::endl;
+                // 🚀 替换为 DEBUG_LOG
+                DEBUG_LOG("[ServerManager] Sent response completely to FD " << clientFd << ". Closing connection per policy.");
                 this->closeConnection(clientFd, pollIndex);
             }
             else if (conn->drain_input_before_close)
             {
-                std::cout << "[ServerManager] Sent 413 completely to FD "
-                          << clientFd
-                          << ". Draining remaining request input before close."
-                          << std::endl;
+                // 🚀 替换为 DEBUG_LOG
+                DEBUG_LOG("[ServerManager] Sent 413 completely to FD " << clientFd << ". Draining remaining request input before close.");
                 this->setClientEvents(clientFd, POLLIN);
             }
             else
             {
-                std::cout << "[ServerManager] Sent response completely to FD " << clientFd << ". Resetting event to POLLIN." << std::endl;
+                // 🚀 替换为 DEBUG_LOG
+                DEBUG_LOG("[ServerManager] Sent response completely to FD " << clientFd << ". Resetting event to POLLIN.");
 
                 this->releaseLargeCgiSlot(clientFd);
-                conn->clear();
+                conn->clear(); // 清空旧的请求/响应对象，准备迎接该 FD 上的下一个 HTTP 请求
                 this->setClientEvents(clientFd, POLLIN);
             }
         }
     }
     else
     {
+        // 🚀 这里的发送失败，通常是因为压测时客户端暴力断开（EPIPE / ECONNRESET），
+        // 属于常规网络波动，绝对不能用 std::cerr 卡死主线程，统统换成 DEBUG_LOG。
         if (bytes_sent == 0)
         {
-            std::cerr << "[ServerManager] send made no progress on ready Client FD "
-                      << clientFd << ". Closing connection." << std::endl;
+            DEBUG_LOG("[ServerManager] send made no progress on ready Client FD " << clientFd << ". Closing connection.");
         }
         else
         {
-            std::cerr << "[ServerManager] send failed on ready Client FD "
-                      << clientFd << ". Closing connection." << std::endl;
+            DEBUG_LOG("[ServerManager] send failed on ready Client FD " << clientFd << ". Closing connection.");
         }
         this->closeConnection(clientFd, pollIndex);
     }
 }
-
 /*
 函数：ServerManager::handleCgiRead
 用途：Reactor 事件回调函数。当 CGI 输出管道（pipe_from_child[0]）触发可读事件（POLLIN/POLLHUP）时，负责调度 CGI stdout 数据的非阻塞读取与客户端响应装配。
@@ -826,41 +835,43 @@ void ServerManager::handleCgiRead(int cgiReadFd)
 {
     CgiEventResult res = this->_cgiManager.handlePipeRead(cgiReadFd);
 
-    if (res.status == CGI_FINISHED)
+    // 只有在完成或错误时，我们才需要进行后续处理
+    if (res.status == CGI_FINISHED || res.status == CGI_ERROR)
     {
+        // ==========================================
+        // 1. 公共清理逻辑（合并重复代码）
+        // ==========================================
         this->_cgi_read_fd_to_client_map.erase(cgiReadFd);
         this->eraseFdFromPoll(cgiReadFd);
         this->cleanupClientWritePipe(res.clientFd);
 
         // 🚀 使用 find() 进行安全的只读查询
-        std::map<int, Connection*>::iterator it = this->_connections.find(res.clientFd);
+        std::map<int, Connection *>::iterator it = this->_connections.find(res.clientFd);
         if (it != this->_connections.end() && it->second != NULL)
         {
             Connection *conn = it->second;
-            Response cgiResponse = buildCgiResponse(conn->request, res.rawOutput);
-            conn->response = cgiResponse;
-            conn->write_buffer = cgiResponse.responseToString();
 
-            this->setClientEvents(res.clientFd, POLLOUT);
-        }
-    }
-    else if (res.status == CGI_ERROR)
-    {
-        this->_cgi_read_fd_to_client_map.erase(cgiReadFd);
-        this->eraseFdFromPoll(cgiReadFd);
-        this->cleanupClientWritePipe(res.clientFd);
+            // ==========================================
+            // 2. 分支处理：成功 vs 失败
+            // ==========================================
+            if (res.status == CGI_FINISHED)
+            {
+                Response cgiResponse = buildCgiResponse(conn->request, res.rawOutput);
+                conn->response = cgiResponse;
+            }
+            else // res.status == CGI_ERROR
+            {
+                conn->response.createResponse(res.statusCode, "CGI Output Error", conn->config.error_pages);
+            }
 
-        // 🚀 使用 find() 进行安全的只读查询
-        std::map<int, Connection*>::iterator it = this->_connections.find(res.clientFd);
-        if (it != this->_connections.end() && it->second != NULL)
-        {
-            Connection *conn = it->second;
-            conn->response.createResponse(res.statusCode, "CGI Output Error", conn->config.error_pages);
+            // ==========================================
+            // 3. 公共收尾逻辑
+            // ==========================================
             conn->write_buffer = conn->response.responseToString();
-
             this->setClientEvents(res.clientFd, POLLOUT);
         }
     }
+    // 注意：如果 res.status 是 CGI_CONTINUE（仍在读取中），什么都不做，等待下一次 epoll/poll
 }
 
 /*
@@ -890,7 +901,7 @@ void ServerManager::handleCgiWrite(int cgiWriteFd)
         this->_cgi_write_fd_to_client_map.erase(cgiWriteFd);
         this->eraseFdFromPoll(cgiWriteFd);
 
-        std::map<int, Connection*>::iterator it = this->_connections.find(res.clientFd);
+        std::map<int, Connection *>::iterator it = this->_connections.find(res.clientFd);
         if (it != this->_connections.end() && it->second != NULL)
         {
             Connection *conn = it->second;
@@ -946,7 +957,7 @@ void ServerManager::dispatchEvents()
 
         if (idx >= this->_poll_fds.size() || this->_poll_fds[idx].fd == -1 || this->_poll_fds[idx].revents == 0)
             continue;
-            
+
         int activeFd = this->_poll_fds[idx].fd;
         short revents = this->_poll_fds[idx].revents;
 
@@ -980,7 +991,7 @@ void ServerManager::dispatchEvents()
                     int clientFd = it->second;
                     this->_cgi_read_fd_to_client_map.erase(it);
                     this->_cgiManager.removeTaskByClientFd(clientFd);
-                    
+
                     Connection *conn = this->_connections[clientFd]; // 假设 client_map 里的一定合法，如果怕也可以继续 find
                     if (conn)
                     {
@@ -1020,7 +1031,7 @@ void ServerManager::dispatchEvents()
                     int clientFd = it->second;
                     this->_cgi_write_fd_to_client_map.erase(it);
                     this->_cgiManager.removeTaskByClientFd(clientFd);
-                    
+
                     Connection *conn = this->_connections[clientFd];
                     if (conn)
                     {
@@ -1038,12 +1049,12 @@ void ServerManager::dispatchEvents()
         // ==========================================
         // 3. Server / Client 基础事件处理
         // ==========================================
-        
+
         // 同样单独过滤客户端/监听 Socket 的 POLLNVAL
         if (revents & POLLNVAL)
         {
             this->eraseFdFromPoll(activeFd);
-            continue; 
+            continue;
         }
 
         if (revents & (POLLERR | POLLHUP))
@@ -1091,12 +1102,12 @@ void ServerManager::stop()
     // 遍历 map，释放 Connection 内存。
     // ~Connection() 内部应该去 delete socket;
     // ~ClientSocket() 内部应该去 close(fd);
-    for (std::map<int, Connection*>::iterator it = _connections.begin(); 
+    for (std::map<int, Connection *>::iterator it = _connections.begin();
          it != _connections.end(); ++it)
     {
         if (it->second != NULL)
         {
-            delete it->second; 
+            delete it->second;
         }
     }
     _connections.clear();
