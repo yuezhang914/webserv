@@ -95,6 +95,7 @@ void ServerSocket::setNonBlocking()
  * 任何步骤失败都会直接向标准错误输出错误日志，物理调用 exit(1) 熔断自杀，
  * 绝不允许大管家带着损坏的套接字带病运行。
  */
+
 void ServerSocket::setup()
 {
     // 1. 创建 socket
@@ -104,6 +105,7 @@ void ServerSocket::setup()
         std::cerr << "Error: Cannot create socket for port " << this->_port << std::endl;
         exit(1);
     }
+
     // 2. 开启 SO_REUSEADDR 地址复用
     int reuse = 1;
     if (setsockopt(this->_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0)
@@ -112,32 +114,57 @@ void ServerSocket::setup()
         close(this->_fd);
         exit(1);
     }
+
     // 3. 强制设置为 O_NONBLOCK 非阻塞
     this->setNonBlocking();
+
     // 4. 绑定物理地址（精确对齐 Host，拒绝 INADDR_ANY 通配冲突）
     struct sockaddr_in addr;
     std::memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(this->_port);
-    if (this->_host == "localhost" || this->_host == "127.0.0.1")
+
+    if (this->_host == "0.0.0.0")
     {
-        addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-    }
-    else if (this->_host == "0.0.0.0")
-    {
+        // 通配符直接使用 INADDR_ANY
         addr.sin_addr.s_addr = htonl(INADDR_ANY);
     }
     else
     {
-        addr.sin_addr.s_addr = inet_addr(this->_host.c_str());
+        // 其他情况（如 "127.0.0.1", "localhost", "example.com"）均交给 getaddrinfo 处理
+        struct addrinfo hints;
+        struct addrinfo *res;
+
+        std::memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_INET;       // 强制要求 IPv4 (因为 socket 是 AF_INET)
+        hints.ai_socktype = SOCK_STREAM; // TCP 协议
+
+        int status = getaddrinfo(this->_host.c_str(), NULL, &hints, &res);
+        if (status != 0)
+        {
+            std::cerr << "Error: getaddrinfo failed for host '" << this->_host 
+                      << "' (" << gai_strerror(status) << ")" << std::endl;
+            close(this->_fd);
+            exit(1);
+        }
+
+        // 提取解析成功的 IPv4 地址
+        struct sockaddr_in *ipv4 = reinterpret_cast<struct sockaddr_in *>(res->ai_addr);
+        addr.sin_addr.s_addr = ipv4->sin_addr.s_addr;
+
+        // 释放动态分配的链表内存（极度重要，防内存泄漏）
+        freeaddrinfo(res); 
     }
+
     if (bind(this->_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
     {
         std::cerr << "Error: Cannot bind to " << this->_host << ":" << this->_port << std::endl;
         close(this->_fd);
         exit(1);
     }
+
     // 5. 开始监听
+    // 注意：SOMAXCONN_BACKLOG 如果是你的宏，请确保已定义；如果是系统宏，通常叫 SOMAXCONN
     if (listen(this->_fd, SOMAXCONN_BACKLOG) < 0)
     {
         std::cerr << "Error: Listen failed on port " << this->_port << std::endl;

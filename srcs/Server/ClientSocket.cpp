@@ -20,7 +20,11 @@ ClientSocket::ClientSocket(int fd) : _fd(fd)
  */
 ClientSocket::~ClientSocket()
 {
-    this->closeFd();
+    if (this->_fd >= 0)
+    {
+        ::close(this->_fd);
+        this->_fd = -1; // 严防悬空 / Double-close
+    }
 }
 
 /**
