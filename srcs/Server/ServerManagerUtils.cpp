@@ -1,30 +1,20 @@
 #include "Webserv.hpp"
 #include "SessionStore.hpp"
 #include "CgiHandler.hpp"
-/**
- * 函数：ServerManager::isListenFd
- * 用乎：在 poll() 监听到事件响了之后，用来判定当前被唤醒的文件描述符（fd）究竟是大厅的主监听端口，还是已经建立的普通客户端连接。
- * 参数来源：来自 run() 主生命周期大循环中正在被遍历的当前活跃节点：_poll_fds[i].fd。
- * 变量解释：
- *     - fd：需要进行身份鉴别的高危目标文件描述符。
- *     - _listen_socket_map：关联数组映射表，里面只保存了在冷启动 setupSockets() 阶段绑定的合法 listenFd。
- * 实现逻辑：
- *     1. 拿着传入的 fd 作为 key，去专属的 _listen_socket_map 映射表中执行 count() 查找。
- *     2. 如果 count 返回大于 0（即非零），说明该 fd 存在于监听大户籍中，代表它是大厅的主监听端口，返回 true。
- *     3. 反之，如果找不到，说明它是一个普通的、由 accept 新生出来的客户端会话，返回 false。
- * 后续影响：主大循环依据该函数的布尔裁决结果流向不同的处理车间：
- *           - 若为 true：立刻分流去调用 acceptNewConnection() 去诞生成立新的新客户；
- *           - 若为 false：立刻分流去调用 handleClientRead() 或 handleClientWrite() 来处理真实的 HTTP 业务数据。
- */
+
+/*
+函数用途：判定当前文件描述符（fd）是否为主监听套接字。
+参数与变量：
+- fd：待鉴别的目标文件描述符。
+- _listen_socket_map：保存所有合法监听套接字的映射表。
+实现逻辑：
+1. 以 fd 为键检索 _listen_socket_map。
+2. 若存在则返回 true（代表主监听端口），否则返回 false（代表普通客户端连接）。
+*/
 bool ServerManager::isListenFd(int fd)
 {
-    // 1. 拿着传入的 fd 作为 key，去专属的 _listen_socket_map 映射表中执行 count() 查找
     if (this->_listen_socket_map.count(fd) > 0)
-    {
-        // 2. 如果存在于监听大户籍中，代表它是大厅的主监听端口，返回 true
         return true;
-    }
-    // 3. 反之，如果找不到，说明它是一个普通的客户端会话，返回 false
     return false;
 }
 
@@ -64,19 +54,14 @@ bool ServerManager::isCgiWriteFd(int fd) const
 
 /*
 函数：ServerManager::setClientEvents
-用途：在 Reactor 事件循环中精准重置指定客户端 Socket FD 的 poll 监听事件标记（以覆盖 '=' 方式重新赋值，而非位或 '|=' 追加）。
+用途：在多路复用循环中重置指定客户端 Socket 的 poll 监听事件（直接覆盖赋值，而非位或追加）。
 参数：
-    - int clientFd  : 需要更新监听事件的目标客户端 Socket 文件描述符。
-    - short events  : 新的 poll 事件掩码组合（如 POLLIN、POLLOUT 或 0）。
-返回值：
-    - void（无返回值）。
-实现逻辑或说明：
-    1. 顺序遍历 Reactor 的事件监听队列 _poll_fds。
-    2. 匹配与重置：当匹配到 _poll_fds[i].fd == clientFd 时，将其 events 成员直接覆盖更新为传入的 events 值。
-    3. 状态切换核心作用：
-       - 当 HTTP 请求读取完毕转入响应发送阶段时，用于将监听事件从 POLLIN 直接重写切换为 POLLOUT；
-       - 采用直接赋值 '=' 而非位或 '|=' 追加，能严格防止 FD 同时监听 POLLIN 和 POLLOUT 导致事件误触发与无效 CPU 轮询。
-    4. 找到匹配项后立刻 return 结束遍历，确保 $O(N)$ 遍历下的最快响应性能。
+    - int clientFd : 目标客户端 Socket 文件描述符。
+    - short events : 新的 poll 事件掩码（如 POLLIN、POLLOUT 或 0）。
+实现逻辑：
+1. 遍历 _poll_fds 监视队列。
+2. 匹配到目标 clientFd 后，将其 events 直接覆盖为新的事件值。
+3. 使用直接赋值（=）而非位或（|=），可防止同时监听 POLLIN 和 POLLOUT 导致事件误触发；找到后立即返回。
 */
 void ServerManager::setClientEvents(int clientFd, short events)
 {
@@ -89,7 +74,6 @@ void ServerManager::setClientEvents(int clientFd, short events)
         }
     }
 }
-
 
 /*
 函数用途：作为多路复用雷达网的防卫外科车间，在 _poll_fds 阵列中纵向检索指定 FD，找到后将其物理抹除并缩容 vector 舱位，严防悬空 FD 污染 poll 监听。
@@ -106,12 +90,10 @@ void ServerManager::eraseFdFromPoll(int targetFd)
 {
     if (targetFd == -1)
         return;
-
     for (size_t i = 0; i < this->_poll_fds.size(); ++i)
     {
         if (this->_poll_fds[i].fd == targetFd)
         {
-            // 💡 软标记为 -1！poll() 会自动跳过，绝不引发 Vector 迭代器/索引物理抖动！
             this->_poll_fds[i].fd = -1;
             this->_poll_fds[i].events = 0;
             this->_poll_fds[i].revents = 0;
@@ -122,31 +104,20 @@ void ServerManager::eraseFdFromPoll(int targetFd)
 
 /*
 函数：ServerManager::closeConnection
-用途：当客户端 Socket 中途断开、发生网络异常或发送完毕需要关连时，安全回收该 Connection 关联的所有物理资源与雷达映射。
+用途：当客户端断开连接、发生异常或传输完毕时，安全回收该 Connection 关联的所有物理资源与映射。
 参数：
     - int clientFd    : 待断开清理的客户端 Socket 文件描述符。
     - size_t pollIndex: 该 clientFd 在 _poll_fds 监听队列中的当前索引下标。
-返回值：
-    - void（无返回值）。
-实现逻辑或说明：
-    1. 物理强杀 CGI 任务：调用 _cgiManager.removeTaskByClientFd(clientFd)，由 CgiManager 内部强杀 (SIGKILL) 对应的子进程、非阻塞回收 (waitpid) 并在私有账本中注销。
-    2. 反向清理 CGI 管道雷达：
-       - 遍历 _cgi_read_fd_to_client_map，匹配该 clientFd 关联的读管道 FD，调用 eraseFdFromPoll 将其从 poll_fds 移除，并擦除映射记录；
-       - 遍历 _cgi_write_fd_to_client_map，匹配该 clientFd 关联的写管道 FD，同步调用 eraseFdFromPoll 移除并擦除映射记录。
-    3. 销毁 Connection 实体：在 _connections 堆对象账本中查找对应的 Connection* 指针，调用 delete 执行 RAII 析构（在析构函数中自动物理 close(clientFd)），并擦除指针映射。
-    4. 抹去 poll 雷达网槽位（索引抖动防御）：
-       - 若 pollIndex 有效且精准匹配 _poll_fds[pollIndex].fd == clientFd，将其 fd 软置为 -1 并重置 events/revents，防止在 dispatchEvents 倒序遍历中引发索引错位；
-       - 若索引失效，回退调用 eraseFdFromPoll(clientFd) 进行全局扫描擦除。
+实现逻辑：
+1. 释放 CGI 资源：归还大文件/CGI 准入槽位，并调用 _cgiManager.removeTaskByClientFd 强行终止并回收对应的 CGI 子进程。
+2. 清理管道映射：遍历并清理所有关联该 clientFd 的 CGI 读写管道 FD，将其从 poll 监听队列和映射表中移除。
+3. 清理客户端 poll 槽位：将 _poll_fds 中对应位置设为失效（fd = -1），防止遍历时索引错位；必要时回退全局擦除。
+4. 销毁会话实例：从 _connections 中查找并 delete 对应的 Connection 指针（通过 RAII 析构物理关闭 clientFd），最后打印调试日志。
 */
 void ServerManager::closeConnection(int clientFd, size_t pollIndex)
 {
-    // 1. 连接无论处于活动槽还是等待队列，都先归还大型 CGI 准入状态
     this->releaseLargeCgiSlot(clientFd);
-
-    // 2. 清理该 clientFd 对应的 CGI 任务（CgiManager 内部自动 close 管道并 kill 子进程）
     this->_cgiManager.removeTaskByClientFd(clientFd);
-
-    // 3. 从 poll 数组中抹去此 clientFd 的所有相关管道 FD
     std::map<int, int>::iterator readIt = this->_cgi_read_fd_to_client_map.begin();
     while (readIt != this->_cgi_read_fd_to_client_map.end())
     {
@@ -158,7 +129,6 @@ void ServerManager::closeConnection(int clientFd, size_t pollIndex)
         else
             ++readIt;
     }
-
     std::map<int, int>::iterator writeIt = this->_cgi_write_fd_to_client_map.begin();
     while (writeIt != this->_cgi_write_fd_to_client_map.end())
     {
@@ -170,8 +140,6 @@ void ServerManager::closeConnection(int clientFd, size_t pollIndex)
         else
             ++writeIt;
     }
-
-    // 4. 先抹去 poll 阵列中客户端本身的槽位（避免野 FD 遗留在 poll_fds 中）
     if (pollIndex < this->_poll_fds.size() && this->_poll_fds[pollIndex].fd == clientFd)
     {
         this->_poll_fds[pollIndex].fd = -1;
@@ -180,19 +148,15 @@ void ServerManager::closeConnection(int clientFd, size_t pollIndex)
     }
     else
     {
-        this->eraseFdFromPoll(clientFd); // 确保在销毁 Connection 之前从 poll_fds 中擦除
+        this->eraseFdFromPoll(clientFd);
     }
-
-    // 5. 最后销毁 Connection 实体（RAII 析构触发唯一一次安全的 ::close(clientFd) 并置 -1）
     std::map<int, Connection *>::iterator it = this->_connections.find(clientFd);
     if (it != this->_connections.end())
     {
         Connection *connection = it->second;
-        delete connection; // 👈 此时做最后的物理关闭
+        delete connection;
         this->_connections.erase(it);
     }
-
-    // 🚀 替换为 DEBUG_LOG：压测时静音，保护服务器吞吐量
     DEBUG_LOG("[ServerManager] Client FD " << clientFd << " successfully closed and cleaned up.");
 }
 
@@ -217,23 +181,20 @@ void ServerManager::prePollCleanup()
             this->_poll_fds.erase(this->_poll_fds.begin() + i);
         }
         else
-        {
             ++i;
-        }
     }
 }
 
 /*
-函数用途：物理拉起多路复用核心轮询大闸（::poll），并用分级弹性防线死守信号中断带来的系统震荡。
+函数用途：执行 poll 系统调用并处理中断/错误重试逻辑。
 参数与变量：
-- retries (传入引用参数)：外部主循环托付的防御性崩溃计数器，用来记录连续发生系统中断的次数。
-- _poll_fds (类内部常驻容器)：std::vector<struct pollfd>，大管家赖以生存的全局多路复用核心轮询监视名册。
-- ret (局部变量)：Linux 内核本次弹回的就绪事件总数，或代表负面危机的系统级错误代码。
+- retries : 连续失败计数器，用于防范系统信号中断（EINTR）带来的震荡。
+- _poll_fds : 全局多路复用监视名册。
+- ret : poll 的返回值（就绪事件数或错误码）。
 实现逻辑：
-1. 传入 -1 物理阻塞参数，强行命令主线程让出 CPU，陷入非阻塞全天候休眠，直到雷达名册中任意 FD 触发就绪。
-2. 熔断危机拦截：若 poll 返回负数报错，启动分级弹性防线。在 3 次以内视作常规信号（如 EINTR）引发的轻微震荡，
-   计数器自增并安全返回 0，迫使主循环无感刷新；一旦跨过 3 次红线则触发彻底熔断，断开危机大闸返回 -1。
-3. 黄金复位并网：若成功捕捉到哪怕一字节的有效网络事件，立刻将崩溃计数器强行物理复位归零，重新开启帝国防御！
+1. 监听调用：调用 ::poll 监视所有注册的 FD，超时时间设为 1000ms。
+2. 错误与重试处理：若返回值小于 0（发生错误），递增计数器；若连续失败次数达到 5 次则触发熔断返回 -1，否则返回 0 尝试恢复。
+3. 状态复位：若成功捕获事件（ret > 0），将连续失败计数器归零并返回就绪数。
 */
 int ServerManager::executePoll(int &retries)
 {
@@ -241,26 +202,18 @@ int ServerManager::executePoll(int &retries)
 
     if (ret < 0)
     {
-        // 🚀 出现负数时（可能是信号中断），打印日志并递增重试
         retries++;
-        std::cerr << "[executePoll] Warning: poll() returned " << ret 
+        std::cerr << "[executePoll] Warning: poll() returned " << ret
                   << ", retrying (" << retries << "/5)..." << std::endl;
-
         if (retries >= 5)
         {
             std::cerr << "[executePoll] Fatal: poll() failed consecutively over limit! Terminating main loop." << std::endl;
-            return -1; // 真正失败熔断
+            return -1;
         }
-        return 0; // 暂时忽略该轮次
+        return 0;
     }
-
-    // 只有当 ret > 0 (真的有事件发生) 时才复位 retries
-    // 如果 ret == 0 (超时空闲)，不要频繁复位，避免信号交错时的重试计数失效
     if (ret > 0)
-    {
         retries = 0;
-    }
-
     return ret;
 }
 
@@ -280,33 +233,24 @@ void ServerManager::registerFdToPoll(int fd, short events)
 {
     if (fd < 0)
     {
-        // 这是一个严重的逻辑错误/系统错误，必须保留 std::cerr
         std::cerr << "[ServerManager] Error: Attempted to register invalid negative FD: " << fd << std::endl;
         return;
     }
-
-    // 1. 防重复注册防线：检查该 FD 是否已经在 _poll_fds 名册中
     for (size_t i = 0; i < this->_poll_fds.size(); ++i)
     {
         if (this->_poll_fds[i].fd == fd)
         {
-            // 🚀 替换为 DEBUG_LOG
             DEBUG_LOG("[ServerManager] Notice: FD " << fd << " already registered in poll tree. Updating events instead.");
-            this->_poll_fds[i].events = events; // 存在则直接覆写事件掩码
+            this->_poll_fds[i].events = events;
             this->_poll_fds[i].revents = 0;
             return;
         }
     }
-
-    // 2. 正常入籍
     struct pollfd pfd;
     pfd.fd = fd;
-    pfd.events = events; // 传入 POLLIN / POLLOUT
-    pfd.revents = 0;     // 清空内核回执，彻底杜绝幽灵触发
-
-    this->_poll_fds.push_back(pfd); // 正式入籍大循环名册
-
-    // 🚀 替换为 DEBUG_LOG：保护压测时的终端清净
+    pfd.events = events;
+    pfd.revents = 0;
+    this->_poll_fds.push_back(pfd);
     DEBUG_LOG("[ServerManager] FD " << fd << " successfully registered to poll tree with events: " << events);
 }
 
@@ -328,11 +272,9 @@ void ServerManager::cleanupClientWritePipe(int clientFd)
             int writeFd = it->first;
             this->eraseFdFromPoll(writeFd);
             this->_cgi_write_fd_to_client_map.erase(it++);
-            return; // 一个 clientFd 只关联一个写管道，找到后直接退出
+            return;
         }
         else
-        {
             ++it;
-        }
     }
 }

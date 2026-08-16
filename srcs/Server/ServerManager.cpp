@@ -954,9 +954,7 @@ void ServerManager::stop()
     for (size_t i = 0; i < _listen_sockets.size(); ++i)
     {
         if (_listen_sockets[i] != NULL)
-        {
             delete _listen_sockets[i];
-        }
     }
     _listen_sockets.clear();
     _listen_socket_map.clear();
