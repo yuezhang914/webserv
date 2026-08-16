@@ -29,13 +29,14 @@
     - action：buildResponse() 通过 requestActionFromMethod() 得到的 GET/HEAD/POST/DELETE 动作。
 变量说明：
     - base：最终使用的 root 或 alias 目录。
-    - suffix：需要追加到 base 的 URL path 部分；alias 模式会先移除 location_prefix。
+    - suffix：需要追加到 base 的 URL path 部分；alias 和 location 自己的 root 都会移除 location_prefix。
 实现逻辑：
     1. requestPath 必须非空且以 / 开头，否则返回 400。
     2. alias 模式检查 requestPath 确实属于当前 location，再移除 location 前缀。
-    3. root 模式直接使用完整 normalized path 作为 suffix。
-    4. 调用 joinPaths() 生成 targetPath；空结果返回 500。
-    5. 调用 isValidPath(action)：GET 立即 stat，POST/DELETE 暂留给对应处理函数。
+    3. location 显式配置 root 时同样移除 location 前缀，符合 Subject 的 location root 映射规则。
+    4. 只继承 server root 时保留完整 normalized path，避免改变 server-level root 语义。
+    5. 调用 joinPaths() 生成 targetPath；空结果返回 500。
+    6. 调用 isValidPath(action)：GET/HEAD 立即 stat，POST/DELETE 暂留给对应处理函数。
 */
 int EffectiveRoute::createEffectivePath(const std::string &requestPath,
                                         RequestAction action)
@@ -56,7 +57,15 @@ int EffectiveRoute::createEffectivePath(const std::string &requestPath,
     else
     {
         base = root;
-        suffix = requestPath;
+        if (location != NULL && location->has_root)
+        {
+            if (requestPath.compare(0, location_prefix.size(),
+                location_prefix) != 0)
+                return 404;
+            suffix = requestPath.substr(location_prefix.size());
+        }
+        else
+            suffix = requestPath;
     }
     targetPath = joinPaths(base, suffix);
     if (targetPath.empty())

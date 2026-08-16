@@ -151,18 +151,10 @@ private:
     bool parseLocationDirective(const std::string &directive, const std::vector<std::string> &values, LocationConfig *srv);
 
     /*
-    函数：serversHaveRoot
-    输入：无，检查当前 Config.servers。
-    输出：所有 server 都有 root 返回 SUCCESS；任意 server 缺少 root 返回 ERROR。
-    实现逻辑：遍历 servers，检查每个 ServerConfig.has_root。
-    */
-    bool serversHaveRoot() const;
-
-    /*
     函数：serversHaveUniqueListenPairs
     输入：无，检查当前 Config.servers 中所有监听端点。
     输出：监听端点互不冲突返回 SUCCESS；发现冲突返回 ERROR。
-    实现逻辑：两两比较 ServerConfig；端口不同不冲突；端口相同且 host 相同，或者任一 host 是 INADDR_ANY/0.0.0.0 时判定冲突。
+    实现逻辑：两两比较 ServerConfig；端口不同不冲突；端口相同且 host 相同，或者任一 host 是 0.0.0.0 通配地址时判定冲突。
     为什么需要：本项目没有实现按 Host header 选择虚拟主机，因此不能接受两个 server 共享同一个实际监听端点。
     */
     bool serversHaveUniqueListenPairs() const;
@@ -172,7 +164,7 @@ public:
     构造函数：Config
     输入：配置文件路径，例如 "default.conf"。
     输出：构造出一个可被后续模块使用的 Config 对象。
-    实现逻辑：先把 error 初始化为 false；调用 parseFile(path) 填充 servers；如果解析失败或缺少 root，就设置 error，main 会据此停止启动。
+    实现逻辑：先把 error 初始化为 false；调用 parseFile(path) 填充 servers；解析成功后检查监听端点冲突。server-level root 不再是全局必填项，当前请求缺少可用 root/alias 时由 Response 阶段处理。
     */
     Config(const std::string &path);
 
@@ -199,7 +191,7 @@ public:
     /*
     成员：error
     含义：配置解析是否失败的标志。
-    来源：构造函数中根据 parseFile()、serversHaveRoot() 和 serversHaveUniqueListenPairs() 的结果设置。
+    来源：构造函数中根据 parseFile() 和 serversHaveUniqueListenPairs() 的结果设置。
     用法：main() 检查 config.error；如果有错误就不进入 setupSockets/serverLoop。
     */
     bool error;

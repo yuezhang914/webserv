@@ -656,7 +656,9 @@ server {
     }
 
     location /cgi/ {
-        root $SITE_ROOT;
+        # location-specific root removes the matched /cgi/ prefix,
+        # so point the root directly at the directory that contains the CGI files.
+        root $SITE_ROOT/cgi;
         allow_methods GET POST;
         cgi_extension .py $PYTHON_BIN;
         cgi_extension .sh $SH_BIN;

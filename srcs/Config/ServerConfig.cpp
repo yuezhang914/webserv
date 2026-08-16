@@ -237,10 +237,11 @@ bool Config::parseServerDirective(const std::string &directive, const std::vecto
             // IP 校验成功后，保存到当前 ServerConfig。
             srv->host = ip;
         }
-        // 用户没有填写 IP 时，表示监听本机所有可用 IPv4 接口。
+        // 用户没有填写 IP 时，用标准 IPv4 通配地址字符串保存。
+        // ServerSocket 再把 0.0.0.0 转换为 socket 层的 INADDR_ANY。
         else
         {
-            srv->host = "INADDR_ANY";
+            srv->host = "0.0.0.0";
         }
 
         // 检查端口字符串是否为空。

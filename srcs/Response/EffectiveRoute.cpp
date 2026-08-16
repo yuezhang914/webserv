@@ -39,7 +39,7 @@ EffectiveRoute::EffectiveRoute()
     2. 重置上一次可能留下的 root/alias/method/index/targetPath/isDir。
     3. location 配置 alias 时启用 alias；否则优先 location.root，再继承 server.root。
     4. allow_methods、index、autoindex、upload_path 依次采用 location 显式值、server 默认值或项目安全默认。
-    5. 保存 location path 供 alias 去前缀，保存 redirect 状态和 URL。
+    5. 保存 location path，供 alias 和 location-specific root 在路径映射时去掉 URL 前缀；同时保存 redirect 状态和 URL。
     6. 成功生成完整规则后返回 true。
 */
 bool EffectiveRoute::createEffectiveRoute(const ServerConfig *srv,

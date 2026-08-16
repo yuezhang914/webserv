@@ -60,7 +60,7 @@ struct EffectiveRoute
     std::set<std::string> allow_methods; /* 最终允许方法集合。 */
     std::vector<std::string> index;      /* 最终 index 候选列表。 */
     std::string upload_path;             /* 最终上传目录。 */
-    std::string location_prefix;         /* alias 模式需要移除的 location 前缀。 */
+    std::string location_prefix;         /* alias 或 location-specific root 映射时需要移除的 location 前缀。 */
     int redirect_status;                 /* 3xx 状态；0 表示没有重定向。 */
     std::string redirect_url;            /* 重定向目标。 */
     std::string targetPath;              /* root/alias 与 normalized path 合成的真实路径。 */
