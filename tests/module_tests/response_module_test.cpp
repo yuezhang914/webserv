@@ -11,8 +11,6 @@
 #include "SessionStore.hpp"
 
 #include <fstream>
-#include <limits.h>
-#include <stdlib.h>
 #include <iostream>
 #include <sstream>
 #include <sys/stat.h>
@@ -871,10 +869,7 @@ static void testCgiResponseCompatibility(const ServerConfig &server)
     Request request;
     Response response;
     const std::string expectedScript = ROOT + "/cgi/env.sh";
-    std::string expectedInterpreter = "/bin/sh";
-    char resolvedInterpreter[PATH_MAX];
-    if (realpath(expectedInterpreter.c_str(), resolvedInterpreter) != NULL)
-        expectedInterpreter = resolvedInterpreter;
+    const std::string expectedInterpreter = "/bin/sh";
     std::string cgiOutput;
 
     check(parseRequest("GET", "/cgi/env.sh?name=Tom", "", "",

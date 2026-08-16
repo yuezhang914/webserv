@@ -477,18 +477,53 @@ Response buildResponse(const Request &request,
 
         if (!cgiInterpreter.empty())
         {
-            // 🚀 核心完美修复：使用 realpath 将解释器路径转换为标准绝对路径，
-            // 完美匹配测试脚本中用 realpath 校验的期望断言值！
             std::string executableInterpreter = cgiInterpreter;
-            char resolved[PATH_MAX];
-            if (realpath(cgiInterpreter.c_str(), resolved) != NULL)
+
+            /*
+             * CgiHandler 会先 chdir() 到脚本目录再 execve()。
+             * 绝对解释器路径可直接使用；脚本和解释器都为相对路径时，补出返回 webserv 启动目录的层级，保持配置路径原本的含义。
+             */
+            if (cgiInterpreter[0] != '/' && !route.targetPath.empty() && route.targetPath[0] != '/')
             {
-                executableInterpreter = resolved;
+                size_t slashPos = route.targetPath.find_last_of('/');
+                std::string scriptDirectory = slashPos == std::string::npos ? "." : route.targetPath.substr(0, slashPos);
+                size_t depth = 0;
+                size_t pos = 0;
+                while (pos < scriptDirectory.size())
+                {
+                    while (pos < scriptDirectory.size() && scriptDirectory[pos] == '/')
+                        ++pos;
+                    size_t end = scriptDirectory.find('/', pos);
+                    if (end == std::string::npos)
+                        end = scriptDirectory.size();
+                    std::string part = scriptDirectory.substr(pos, end - pos);
+                    if (!part.empty() && part != ".")
+                    {
+                        if (part == "..")
+                        {
+                            if (depth > 0)
+                                --depth;
+                        }
+                        else
+                            ++depth;
+                    }
+                    pos = end;
+                }
+
+                executableInterpreter.clear();
+                size_t i = 0;
+                while (i < depth)
+                {
+                    executableInterpreter += "../";
+                    ++i;
+                }
+                if (cgiInterpreter.compare(0, 2, "./") == 0)
+                    executableInterpreter += cgiInterpreter.substr(2);
+                else
+                    executableInterpreter += cgiInterpreter;
             }
 
-            response.setHeader(
-                "X-Internal-CGI-Interpreter",
-                executableInterpreter);
+            response.setHeader("X-Internal-CGI-Interpreter", executableInterpreter);
         }
 
         response.setHeader(
