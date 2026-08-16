@@ -126,7 +126,7 @@ bool CgiManager::launchTask(
 2. 单次读取：使用固定缓冲区进行单次非阻塞 read，刷新最后活动时间。
 3. 防爆流熔断：若累积输出大小超过 16MB 阈值，强杀子进程并返回 502 错误。
 4. EOF 完工：若读到 0 字节，通过 swap 零拷贝转移缓冲区数据，回收资源并返回 200 完成状态。
-5. 异常妥协：若读返回负值，暂作中断处理返回 CGI_CONTINUE，由外层超时机制兜底。
+5. 读取失败：若 read 返回负值，不检查 errno，立即清理 CGI 任务并返回 CGI_ERROR，避免把真实管道错误当成可重试状态。
 */
 CgiEventResult CgiManager::handlePipeRead(int cgiReadFd)
 {
@@ -160,7 +160,12 @@ CgiEventResult CgiManager::handlePipeRead(int cgiReadFd)
         return result;
     }
     else
-        return CgiEventResult(CGI_CONTINUE);
+    {
+        // 修改：read() 返回负值时不检查 errno，直接清理任务并向 ServerManager 上报管道读取错误。
+        std::cerr << "[CgiManager] Error: read from CGI pipe failed." << std::endl;
+        this->forceKillAndClean(task);
+        return CgiEventResult(CGI_ERROR, clientFd, 500);
+    }
 }
 
 /*
@@ -176,7 +181,7 @@ CgiEventResult CgiManager::handlePipeRead(int cgiReadFd)
 3. 状态处理：
    - 正常写入 (>0)：刷新活动时间并累加发送偏移量，写完后关闭写端以向 CGI 发送 EOF。
    - 致命异常 (==0)：写入返回 0 视作通道损坏，强杀任务并返回 500 错误。
-   - 管道满 (<0)：暂作临时中断返回 CGI_CONTINUE，由外层兜底清理。
+   - 写入失败 (<0)：不检查 errno，立即清理 CGI 任务并返回 CGI_ERROR。
 */
 CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
 {
@@ -236,7 +241,12 @@ CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
         return CgiEventResult(CGI_ERROR, clientFd, 500);
     }
     else
-        return CgiEventResult(CGI_CONTINUE);
+    {
+        // 修改：write() 返回负值时不检查 errno，直接清理任务并向 ServerManager 上报管道写入错误。
+        std::cerr << "[CgiManager] Error: write to CGI pipe failed." << std::endl;
+        this->forceKillAndClean(task);
+        return CgiEventResult(CGI_ERROR, clientFd, 500);
+    }
 }
 
 /*
