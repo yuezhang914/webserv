@@ -1,6 +1,6 @@
-
-*This project has been created as part of the 42 curriculum by Yzhang2 and  Weiyang.*
-
+*This project has been created as part of the 42 curriculum by yzhang2 and weiyang.*
+ 
+ 
 ## Description
 
 **Webserv** is a 42 School project whose goal is to write a custom, non-blocking HTTP/1.1 web server in **C++98**. The project focuses on understanding low-level network programming, asynchronous event loops using I/O multiplexing (`select`, `poll`, `epoll`, or `kqueue`), HTTP/1.1 protocol parsing, Static File Serving, Autoindex generation, File Uploads, Session & Cookie Management, and CGI (Common Gateway Interface) execution.
@@ -57,10 +57,9 @@ Webserv uses an Nginx-style configuration structure, for example :
 server {
     listen 8080;
     server_name localhost example.com;
-    host 127.0.0.1;
     root /var/www/html;
     index index.html;
-    client_max_body_size 10M;
+    max_body_size 10M;
 
     error_page 404 /errors/404.html;
 
@@ -71,7 +70,7 @@ server {
 
     location /upload/ {
         allow_methods GET POST DELETE;
-        upload_store /var/www/uploads;
+        upload_path /var/www/uploads;
     }
 
     location /cgi/ {
@@ -110,7 +109,7 @@ server {
 | `403 Forbidden` | Access Denied | File permissions restricted or autoindex off for directory |
 | `404 Not Found` | Not Found | Requested file or route does not exist |
 | `405 Method Not Allowed` | Method Blocked | HTTP method not permitted by location rule |
-| `413 Payload Too Large` | Limit Exceeded | Body size exceeds `client_max_body_size` |
+| `413 Payload Too Large` | Limit Exceeded | Body size exceeds `max_body_size` |
 | `500 Internal Error` | Server Error | CGI crash or internal failure |
 | `502 Bad Gateway` | Invalid CGI Response | CGI output missing valid HTTP headers |
 | `504 Gateway Timeout` | Execution Timeout | CGI script timed out without output progress |
@@ -212,7 +211,7 @@ lsof -p $PID | wc -l
 * Success Criteria: Open FD count must return to its initial idle baseline after all requests finish.
 
 #### 5. Edge Cases & Error Testing
-* 413 Payload Too Large: Try uploading a file larger than client_max_body_size configured in default.conf.
+* 413 Payload Too Large: Try uploading a file larger than max_body_size configured in default.conf.
 
 * 405 Method Not Allowed: Send a POST request to a route with allow_methods GET only.
 
@@ -250,4 +249,3 @@ lsof -p $PID | wc -l
 * Refining technical documentation (README formatting and clarity).
 
 All architectural design decisions and code implementation were written, debugged, and validated by the project authors.
-
