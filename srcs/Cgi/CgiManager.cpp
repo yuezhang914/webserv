@@ -27,11 +27,9 @@ CgiManager::~CgiManager()
     std::map<int, CgiTask>::iterator it = this->_read_fd_to_task_map.begin();
     while (it != this->_read_fd_to_task_map.end())
     {
-        // C++98 迭代器安全自增备份
         std::map<int, CgiTask>::iterator current = it++;
         this->forceKillAndClean(current->second);
     }
-
     this->_read_fd_to_task_map.clear();
     this->_write_fd_to_read_fd_map.clear();
 }
@@ -90,12 +88,11 @@ bool CgiManager::launchTask(
         return false;
     }
     CgiTask task;
+
     task.clientFd = clientFd;
     task.readFd = fds.read_fd;
     task.writeFd = fds.write_fd;
     task.pid = fds.pid;
-    // Request 归 Connection 所有，CGI 完成前客户端事件被暂停且 Request 不会被 clear；
-    // 因此这里只保存 const 指针，避免学校 tester 的 100MB body 被任务表重复深拷贝。
     task.inputBody = &reqBody;
     task.bodyBytesSent = 0;
     task.lastActivity = std::time(NULL);
@@ -103,7 +100,6 @@ bool CgiManager::launchTask(
     outReadFd = fds.read_fd;
     if (!reqBody.empty() && fds.write_fd >= 0)
     {
-        // 写端表只保存 readFd 反查键；完整状态始终只存在于读端主表中。
         this->_write_fd_to_read_fd_map[fds.write_fd] = fds.read_fd;
         outWriteFd = fds.write_fd;
     }
@@ -120,23 +116,17 @@ bool CgiManager::launchTask(
 
 /*
 函数：CgiManager::handlePipeRead
-用途：非阻塞地读取 CGI 子进程吐出的 stdout 数据流。每次事件仅进行单次读取以保障 Reactor 主线程并发公平性，并维护缓冲与防爆流控制。
+用途：非阻塞读取 CGI 子进程 stdout 数据流，每次事件仅单次读取以保障 Reactor 并发公平性，并提供防爆流控制。
 参数：
-    - int cgiReadFd: 监听到的就绪 CGI 管道读端文件描述符。
+    - int cgiReadFd : 就绪的 CGI 管道读端文件描述符。
 返回值：
-    - CgiEventResult: 状态结果对象。
-      - CGI_CONTINUE: 成功读取数据块或遇到非阻塞中断，指示 Reactor 将控制权收回并继续监听下一次事件。
-      - CGI_FINISHED: 收到 EOF (0 字节)，CGI 执行完工，返回打包好输出的 200 结果。
-      - CGI_ERROR   : CGI 输出超过 16MB 天花板，触发防爆流熔断，强杀并返回 502 错误。
-实现逻辑或说明：
-    1. 查账与防卫：若在 _read_fd_to_task_map 中未找到任务，安全 ::close(cgiReadFd) 并返回 CGI_CONTINUE 兜底。
-    2. 单次非阻塞读取：剔除 while(true) 循环，契合 Level-Triggered (水平触发) 模型，每次仅用缓冲区调用一次 ::read(cgiReadFd)。避免大文件读取霸占 CPU，拖垮其他连接。
-    3. 防爆流熔断：检测 outputBuffer 尺寸，若超过 CGI_MAX_OUTPUT_SIZE (16MB)，调用 forceKillAndClean 强杀进程并返回 CGI_ERROR (502)。
-    4. 正常 EOF 完工（bytesRead == 0）：
-       - 构建 CGI_FINISHED 状态的 CgiEventResult 对象；
-       - 利用 std::string::swap 进行 O(1) 零拷贝指针转移（result.rawOutput.swap(task.outputBuffer)）；
-       - 调用 forceKillAndClean 回收资源并返回结果。
-    5. 读取异常妥协（bytesRead < 0）：严格遵守 42 sujet 不可使用 errno 的限制，对于 -1 不作区分，直接当作虚假唤醒或中断返回 CGI_CONTINUE。真正的致命故障交由外层 Timeout Manager 通过超时机制兜底清理。
+    - CgiEventResult : 状态结果对象（CGI_CONTINUE、CGI_FINISHED 或 CGI_ERROR）。
+实现逻辑：
+1. 查找任务：若未在映射表中找到任务，则关闭 FD 并返回 CGI_CONTINUE。
+2. 单次读取：使用固定缓冲区进行单次非阻塞 read，刷新最后活动时间。
+3. 防爆流熔断：若累积输出大小超过 16MB 阈值，强杀子进程并返回 502 错误。
+4. EOF 完工：若读到 0 字节，通过 swap 零拷贝转移缓冲区数据，回收资源并返回 200 完成状态。
+5. 异常妥协：若读返回负值，暂作中断处理返回 CGI_CONTINUE，由外层超时机制兜底。
 */
 CgiEventResult CgiManager::handlePipeRead(int cgiReadFd)
 {
@@ -146,66 +136,47 @@ CgiEventResult CgiManager::handlePipeRead(int cgiReadFd)
         ::close(cgiReadFd);
         return CgiEventResult(CGI_CONTINUE);
     }
-
     CgiTask &task = it->second;
     int clientFd = task.clientFd;
     char buffer[4096];
-
-    // 🚀 去掉 while(true)，每次事件只发起一次 read
     ssize_t bytesRead = ::read(cgiReadFd, buffer, sizeof(buffer));
-
     if (bytesRead > 0)
     {
-        // 读到数据，更新活跃时间并存入 buffer
         task.lastActivity = std::time(NULL);
-
         if (task.outputBuffer.size() + static_cast<size_t>(bytesRead) > CGI_MAX_OUTPUT_SIZE)
         {
             std::cerr << "[CgiManager] Error: CGI output size exceeded max limit! 502." << std::endl;
             this->forceKillAndClean(task);
             return CgiEventResult(CGI_ERROR, clientFd, 502);
         }
-
         task.outputBuffer.append(buffer, static_cast<size_t>(bytesRead));
-
-        // 把控制权交还给主事件循环。如果管道里还有数据，下一次 select 依然会触发这个 fd 的 POLLIN
         return CgiEventResult(CGI_CONTINUE);
     }
     else if (bytesRead == 0)
     {
-        // CGI 子进程输出结束，关闭了管道
         CgiEventResult result(CGI_FINISHED, clientFd, 200);
         result.rawOutput.swap(task.outputBuffer);
-
         this->forceKillAndClean(task);
         return result;
     }
     else
-    {
-        // bytesRead < 0
-        // 在不查 errno 且仅读一次的架构下，-1 可能是偶发的虚假唤醒(Spurious Wakeup)或系统中断。
-        // 直接安全返回，什么也不做，让超时管理器(Timeout Manager)兜底即可。
         return CgiEventResult(CGI_CONTINUE);
-    }
 }
 
 /*
 函数：CgiManager::handlePipeWrite
-用途：非阻塞地向 CGI 子进程的 stdin 管道写入 POST Request Body 数据。每次事件仅进行单次限定大小的写入，以保证 Reactor 整体并发的公平性。
+用途：非阻塞向 CGI 子进程的 stdin 管道写入 POST 请求体数据，单次限制写入量以保证 Reactor 并发公平性。
 参数：
-    - int cgiWriteFd: 监听到的可写 CGI 管道文件描述符（pipe_to_child[1]）。
+    - int cgiWriteFd : 可写的 CGI 管道文件描述符。
 返回值：
-    - CgiEventResult: 状态结果对象。
-      - CGI_CONTINUE: 表示 Body 正在正常传输、Body 传输完毕已关闭写端引发 EOF、或写缓冲区暂满（返回值 < 0），指示主事件循环继续。
-      - CGI_ERROR   : 表示遇到致命物理故障（如 write 返回 0 或引用失效），强杀任务并通知 Server 发送 500 错误。
-实现逻辑或说明：
-    1. 查账与防卫：先用轻量写端表找到 readFd，再从唯一任务主表取得 CgiTask，避免状态副本分叉。
-    2. 零拷贝引用：inputBody 只读引用 Connection::Request 的 body，不产生大文件深拷贝。
-    3. 公平性控制：每轮最多写 64KB（单次 write），绝不写死循环，保障主进程不被大文件 IO 阻塞。
-    4. 严格区分返回值（应对 Eval sheet 检查）：
-       - [> 0] 正常写入：刷新活跃时间。Body 发完后关闭写端向 CGI 传入 EOF，仅擦除写端映射，保留读端继续监听 CGI stdout。
-       - [== 0] 致命异常：尝试写入却返回 0，意味着对端异常或通道损坏。作为致命错误立即 forceKillAndClean 并返回 500。
-       - [< 0]  无 errno 妥协：受限于 sujet 禁用 errno，不作 EPIPE/EAGAIN 区分，统一视为管道满（暂态），返回 CGI_CONTINUE。真正的管道破裂交由主 Loop 的 EPOLLERR 异常事件或 Timeout Manager 兜底清理。
+    - CgiEventResult : 状态结果对象（CGI_CONTINUE 或 CGI_ERROR）。
+实现逻辑：
+1. 查找任务：通过映射表定位对应的 CgiTask，若未找到则关闭 FD 并返回。
+2. 写入限制：每次最多写入 64KB，避免大文件 IO 阻塞主进程；若已发送完毕则关闭写端并清除映射。
+3. 状态处理：
+   - 正常写入 (>0)：刷新活动时间并累加发送偏移量，写完后关闭写端以向 CGI 发送 EOF。
+   - 致命异常 (==0)：写入返回 0 视作通道损坏，强杀任务并返回 500 错误。
+   - 管道满 (<0)：暂作临时中断返回 CGI_CONTINUE，由外层兜底清理。
 */
 CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
 {
@@ -216,7 +187,6 @@ CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
         ::close(cgiWriteFd);
         return CgiEventResult(CGI_CONTINUE);
     }
-
     std::map<int, CgiTask>::iterator readIt =
         this->_read_fd_to_task_map.find(writeIt->second);
     if (readIt == this->_read_fd_to_task_map.end())
@@ -225,20 +195,16 @@ CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
         this->_write_fd_to_read_fd_map.erase(writeIt);
         return CgiEventResult(CGI_CONTINUE);
     }
-
     CgiTask &task = readIt->second;
-    int clientFd = task.clientFd; // 提前提取，应对清理时失效
+    int clientFd = task.clientFd;
 
     if (task.inputBody == NULL)
     {
         this->forceKillAndClean(task);
         return CgiEventResult(CGI_ERROR, clientFd, 500);
     }
-
     const std::string &body = *task.inputBody;
     size_t bodySize = body.size();
-
-    // 如果 Body 已经发完，关闭写端抛出 EOF（通知 CGI 脚本输入结束）
     if (task.bodyBytesSent >= bodySize)
     {
         ::close(cgiWriteFd);
@@ -246,22 +212,15 @@ CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
         task.writeFd = -1;
         return CgiEventResult(CGI_CONTINUE);
     }
-
     size_t remaining = bodySize - task.bodyBytesSent;
     const size_t maxWritePerTick = 64 * 1024;
     size_t writeSize = remaining < maxWritePerTick ? remaining : maxWritePerTick;
     const char *dataPtr = body.data() + task.bodyBytesSent;
-
-    // 🚀 核心改动：严格区分 >0, ==0, <0
     ssize_t bytesWritten = ::write(cgiWriteFd, dataPtr, writeSize);
-
     if (bytesWritten > 0)
     {
-        // 正常写入，刷新活跃时间并累加进度
         task.lastActivity = std::time(NULL);
         task.bodyBytesSent += static_cast<size_t>(bytesWritten);
-
-        // 如果刚好发完，在此处顺手关闭管道写端
         if (task.bodyBytesSent >= bodySize)
         {
             ::close(cgiWriteFd);
@@ -272,23 +231,12 @@ CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
     }
     else if (bytesWritten == 0)
     {
-        // 异常故障：企图写入 >0 字节数据，系统却返回 0。
-        // 在 write/send 中，这往往意味着对端已断开或管道发生无法恢复的异常。
-        // 必须按致命错误处理，停止 CGI 任务。
         std::cerr << "[CgiManager] Error: write to CGI pipe returned 0." << std::endl;
         this->forceKillAndClean(task);
         return CgiEventResult(CGI_ERROR, clientFd, 500);
     }
     else
-    {
-        // bytesWritten < 0
-        // 在不能读取 errno 的前提下，将其视为非阻塞缓冲区满 (EAGAIN/EWOULDBLOCK)
-        // 暂时放弃写入，让主循环下一轮继续尝试。
-        // 注：若发生 EPIPE（如 CGI 脚本中途崩溃），
-        // 1. 系统可能触发 SIGPIPE，需确保主程序开头已 signal(SIGPIPE, SIG_IGN)
-        // 2. 主循环的 select/poll 会通过异常位报告，或由 TimeoutManager 清理。
         return CgiEventResult(CGI_CONTINUE);
-    }
 }
 
 /*
@@ -306,58 +254,34 @@ CgiEventResult CgiManager::handlePipeWrite(int cgiWriteFd)
 */
 void CgiManager::forceKillAndClean(CgiTask &task)
 {
-    // ==========================================
-    // 1. 处理子进程的生命周期（强杀与收尸）
-    // ==========================================
     if (task.pid > 0)
     {
         int status = 0;
-        // 先检查子进程是否刚好已经自然退出
-        pid_t waited = ::waitpid(task.pid, &status, WNOHANG);
 
+        pid_t waited = ::waitpid(task.pid, &status, WNOHANG);
         if (waited == 0)
         {
-            // waited == 0 说明进程还在运行，直接发射 SIGKILL 强杀
             ::kill(task.pid, SIGKILL);
-
-            // 补一枪 waitpid 收尸。
-            // SIGKILL 是内核级信号，立刻生效。这一个 WNOHANG 足够抹除僵尸进程，无需 while(10)
             ::waitpid(task.pid, &status, WNOHANG);
         }
-        
-        // 彻底切断联系，防止被外层的 reapChildren 或下一次清理重复杀
         task.pid = -1;
     }
-
-    // ==========================================
-    // 2. 清理写端（通向 CGI 的 stdin）
-    // ==========================================
     if (task.writeFd >= 0)
     {
         ::close(task.writeFd);
         this->_write_fd_to_read_fd_map.erase(task.writeFd);
         task.writeFd = -1;
     }
-
-    // ==========================================
-    // 3. 清理读端（来自 CGI 的 stdout）并彻底销毁 Task
-    // ==========================================
     if (task.readFd >= 0)
     {
         ::close(task.readFd);
-        // 这是 Task 在内存里的真正载体，erase 执行后，传入的 task 引用就会失效（被析构）
         this->_read_fd_to_task_map.erase(task.readFd);
-        // 绝对不要在 erase 后再尝试访问 task.readFd 等属性！
     }
 }
 
 /*
 函数：CgiManager::reapChildren
 用途：巡检并全量回收所有已经退出/死亡的 CGI 子进程（僵尸进程收尸车间）。
-参数：
-    - 无。
-返回值：
-    - void（无返回值）。
 实现逻辑或说明：
     1. 循环非阻塞回收：在 while 条件中使用 ::waitpid(-1, &status, WNOHANG)，循环检索 OS 内核中已死亡的子进程。
     2. 账本匹配：只要返回 pid > 0，遍历 _read_fd_to_task_map 查找匹配 task.pid == pid 的任务。
@@ -369,13 +293,8 @@ void CgiManager::reapChildren()
     int status;
     pid_t pid;
 
-    // 💡 优化保留：如果没有活跃的 CGI 任务，直接返回
     if (this->_read_fd_to_task_map.empty())
-    {
         return;
-    }
-
-    // 循环非阻塞回收所有已结束的子进程
     while ((pid = ::waitpid(-1, &status, WNOHANG)) > 0)
     {
         std::map<int, CgiTask>::iterator it = this->_read_fd_to_task_map.begin();
@@ -383,11 +302,7 @@ void CgiManager::reapChildren()
         {
             if (it->second.pid == pid)
             {
-                // 核心改正：只做标记，绝不调用 forceKillAndClean！
-                // 将 pid 设为 -1，防止 Timeout 机制后续误杀别的复用 PID
                 it->second.pid = -1;
-
-                // 任务的真正清理，必须交给 handlePipeRead 读到 bytesRead == 0 时去处理
                 break;
             }
             ++it;
@@ -398,8 +313,6 @@ void CgiManager::reapChildren()
 /*
 函数：CgiManager::checkTimeout
 用途：看门狗巡检函数。全量检测连续无管道进展的 CGI 进程，物理强杀并向 ServerManager 返回 504 错误指令。
-参数：
-    - 无。
 返回值：
     - std::vector<CgiEventResult>: 所有超时任务打包成的 504 错误事件结果集合。
 实现逻辑或说明：
@@ -439,8 +352,6 @@ std::vector<CgiEventResult> CgiManager::checkTimeout()
 用途：当客户端 Socket 中途断开/掉线时，根据 clientFd 物理熔断并强杀对应的 CGI 任务。
 参数：
     - int clientFd: 断开连接的客户端 Socket 文件描述符。
-返回值：
-    - void（无返回值）。
 实现逻辑或说明：
     1. 入参校验：若 clientFd < 0，直接 return。
     2. 安全遍历：使用 C++98 迭代器安全范式（current = it++）遍历 _read_fd_to_task_map。
@@ -458,15 +369,14 @@ void CgiManager::removeTaskByClientFd(int clientFd)
         CgiTask &task = current->second;
         if (task.clientFd == clientFd)
         {
-            // 🚀 替换为 DEBUG_LOG：压测断开时保持终端清净
-            DEBUG_LOG("[CgiManager] Client FD " << clientFd 
-                      << " disconnected early. Force killing CGI PID " << task.pid);
-            
+            DEBUG_LOG("[CgiManager] Client FD " << clientFd
+                                                << " disconnected early. Force killing CGI PID " << task.pid);
             this->forceKillAndClean(task);
             return;
         }
     }
 }
+
 /*
 函数：CgiManager::hasWriteTask
 用途：查询指定的 CGI 管道写端文件描述符（cgiWriteFd）是否仍处于活跃的 POST Body 写入任务队列中。
@@ -484,12 +394,15 @@ bool CgiManager::hasWriteTask(int cgiWriteFd) const
     return this->_write_fd_to_read_fd_map.find(cgiWriteFd) != this->_write_fd_to_read_fd_map.end();
 }
 
+/*
+函数用途：终止并清理所有正在运行的 CGI 任务及相关资源。
+实现逻辑：
+1. 循环遍历任务映射表，逐个调用 forceKillAndClean 强杀子进程并回收资源，直至清空所有任务。
+2. 清空写管道到读管道的映射账本。
+*/
 void CgiManager::stopAllTasks()
 {
-    // forceKillAndClean 会擦除主表当前元素，因此始终清理 begin()，
-    // 既不会使迭代器失效，也不会复制任务状态或大请求体。
     while (!this->_read_fd_to_task_map.empty())
         this->forceKillAndClean(this->_read_fd_to_task_map.begin()->second);
-
     this->_write_fd_to_read_fd_map.clear();
 }

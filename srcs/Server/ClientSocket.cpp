@@ -23,7 +23,7 @@ ClientSocket::~ClientSocket()
     if (this->_fd >= 0)
     {
         ::close(this->_fd);
-        this->_fd = -1; // 严防悬空 / Double-close
+        this->_fd = -1;
     }
 }
 
@@ -33,7 +33,7 @@ ClientSocket::~ClientSocket()
  * @details
  * - 检查物理文件描述符 `_fd` 是否处于活跃状态 (>= 0)。
  * - 打印安全释放日志，调用 close() 系统函数物理释放资源。
- * - 黄金闭环：强制将 `_fd` 重置为哨兵值 -1，彻底断绝二次关闭导致的内核并发漏洞 (Double Close Bug)。
+ * - 强制将 `_fd` 重置为哨兵值 -1，彻底断绝二次关闭导致的内核并发漏洞 (Double Close Bug)。
  */
 void ClientSocket::closeFd()
 {
@@ -56,18 +56,11 @@ void ClientSocket::setNonBlocking()
 {
     if (this->_fd < 0)
         return;
-
-    // 🚀 唯一合规写法：直接覆写标志位为 O_NONBLOCK，剔除 F_GETFL
     if (fcntl(this->_fd, F_SETFL, O_NONBLOCK) < 0)
     {
         std::cerr << "Error: fcntl F_SETFL O_NONBLOCK failed for client fd " << this->_fd << std::endl;
-        // 视你的架构而定，这里也许需要 throw 异常或 close 掉 FD
         return;
     }
-
-    // ⛔️ 彻底删除 F_GETFD, F_SETFD 和 FD_CLOEXEC
-    // 因为你在执行 CGI (fork) 时，已经写了 for (i = 3; i < max_fd; ++i) close(i); 
-    // 那个盲关循环会自动把这些 Client FD 全部从子进程里清理掉，完全不需要 FD_CLOEXEC！
 }
 
 /**
@@ -91,8 +84,7 @@ ssize_t ClientSocket::read(char *buf, size_t size) const
  * @param data 当前仍待发送的响应数据。
  * @return ssize_t 正数表示本次实际发送字节数；0 表示没有取得发送进展；-1 表示 send 失败。
  *
- * @note 本函数只执行一次 send()，使用 MSG_NOSIGNAL 防止 SIGPIPE 杀死服务器，
- *       不检查 errno，也不构造 -2 等额外返回码。部分发送由 ServerManager 保留剩余数据并等待下一次 POLLOUT。
+ * @note 本函数只执行一次 send(),不检查 errno，也不构造 -2 等额外返回码。部分发送由 ServerManager 保留剩余数据并等待下一次 POLLOUT。
  */
 ssize_t ClientSocket::write(const std::string &data) const
 {
