@@ -1,11 +1,10 @@
 #ifndef WEBSERV_HPP
 #define WEBSERV_HPP
-
 #define DEBUG_MODE 1
 #ifdef DEBUG_MODE
-    #define DEBUG_LOG(msg) std::cout << "[DEBUG] " << msg << std::endl
+#define DEBUG_LOG(msg) std::cout << "[DEBUG] " << msg << std::endl
 #else
-    #define DEBUG_LOG(msg)
+#define DEBUG_LOG(msg)
 #endif
 #include <sys/socket.h>
 #include <netinet/in.h>
