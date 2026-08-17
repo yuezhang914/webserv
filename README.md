@@ -70,7 +70,7 @@ server {
 
     location /upload/ {
         allow_methods GET POST DELETE;
-        upload_path /var/www/uploads;
+        upload_path uploads;
     }
 
     location /cgi/ {
